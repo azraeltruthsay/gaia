@@ -6,36 +6,59 @@ privileged (T1/T0) host actions.
 Deliberately NOT part of gaia-mcp or any GAIA container: this gates actions
 taken by Claude Code (a different actor than GAIA itself), using a dedicated
 Discord bot identity so approval DMs are never confused with GAIA's own
-conversational bot. Mirrors the challenge/reversed-reply UX pattern from
-gaia-mcp/gaia_mcp/approval.py's ApprovalStore, but is an independent
-implementation — GAIA's own ApprovalStore Blast Shield permanently blocks
-sudo/su/doas/pkexec for GAIA's own self-directed tool calls, and that line
-must never be touched by or merged with this system.
+conversational bot. The notification/transport shape (DM the approver, wait
+for a reply, open a time-boxed session) echoes gaia-mcp/gaia_mcp/approval.py's
+ApprovalStore, but is an independent implementation — GAIA's own
+ApprovalStore Blast Shield permanently blocks sudo/su/doas/pkexec for GAIA's
+own self-directed tool calls, and that line must never be touched by or
+merged with this system.
+
+The credential is real TOTP (pyotp, same algorithm as Google
+Authenticator/Authy), not a reversed-string challenge: an early version of
+this broker asked the approver to reply with a server-generated challenge
+spelled backwards, which is zero cryptographic value — anyone who can read
+the Discord DM can also reply correctly, so it collapsed to ONE factor
+(control of the Discord account) dressed up as two. TOTP's secret lives only
+on the approver's phone, seeded once, independent of Discord entirely — a
+compromised Discord account alone grants an attacker nothing.
+
+This gate is not only (or even mainly) about hostile actors. It is a
+deliberate human-in-the-loop friction point on an agent that is otherwise
+trusted to act — the digital equivalent of the plastic cover over a fire
+alarm pull: a second's pause and a second party's attention before a
+privileged, hard-to-reverse action fires, independent of how much the agent
+is trusted to act well. The tier split (T1 allow-listed / T0 unscoped) and
+the session window exist so that pause can be dialed up or down by how
+confident the action's blast radius warrants, not applied uniformly.
 
 Flow:
   1. Claude Code POSTs /request {"command", "tier": "T1"|"T0", "reason"}.
-  2. Broker DMs the approver a 5-letter challenge via its own bot.
-  3. Approver replies with the challenge REVERSED (or "cancel"/"deny").
-  4. On match, broker writes a signed-by-possession session file that only
-     the root-owned wrapper scripts (gaia-ops-exec / gaia-emergency-exec)
-     read, valid for SESSION_TTL_SECONDS.
+  2. Broker DMs the approver via its own bot, describing the action.
+  3. Approver replies with their current 6-digit TOTP code (or "cancel"/"deny").
+  4. On a valid, unused code, broker writes a signed-by-possession session
+     file that only the root-owned wrapper scripts (gaia-ops-exec /
+     gaia-emergency-exec) read, valid for SESSION_TTL_SECONDS.
+
+Run with --enroll once to generate a new TOTP secret and print the
+provisioning URI/manual key for your authenticator app, before starting the
+service for real.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import logging
 import os
-import random
 import signal
-import string
 import sys
 import time
 from pathlib import Path
 from typing import Optional
 
 import discord
+import pyotp
 from aiohttp import web
 
 logging.basicConfig(
@@ -47,10 +70,11 @@ log = logging.getLogger("gaia-ops-broker")
 # ── Configuration (env-overridable for testing) ─────────────────────────────
 BOT_TOKEN_FILE = Path(os.getenv("GAIA_OPS_BOT_TOKEN_FILE", os.path.expanduser("~/.gaia/secrets/claude_ops_bot_token")))
 APPROVER_ID_FILE = Path(os.getenv("GAIA_OPS_APPROVER_ID_FILE", os.path.expanduser("~/.gaia/secrets/ops_approver_id")))
+TOTP_SECRET_FILE = Path(os.getenv("GAIA_OPS_TOTP_SECRET_FILE", os.path.expanduser("~/.gaia/secrets/ops_totp_secret")))
 SESSION_FILE = Path(os.getenv("GAIA_OPS_SESSION_FILE", "/run/gaia-ops-broker/session.json"))
 API_HOST = os.getenv("GAIA_OPS_API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("GAIA_OPS_API_PORT", "8899"))
-CHALLENGE_TTL_SECONDS = int(os.getenv("GAIA_OPS_CHALLENGE_TTL", "300"))  # time to reply
+APPROVAL_TTL_SECONDS = int(os.getenv("GAIA_OPS_APPROVAL_TTL", "300"))  # time to reply
 SESSION_TTL_SECONDS = int(os.getenv("GAIA_OPS_SESSION_TTL", "900"))  # approved window (15 min)
 
 VALID_TIERS = {"T1", "T0"}
@@ -64,11 +88,6 @@ def _read_text(path: Path) -> str:
         sys.exit(1)
 
 
-def _gen_challenge() -> str:
-    """Same shape as gaia-mcp's ApprovalStore._gen_challenge (5 uppercase letters)."""
-    return "".join(random.choice(string.ascii_uppercase) for _ in range(5))
-
-
 class PendingApproval:
     """A single in-flight approval request. Only one at a time by design —
     this gates one operator's own actions, not a multi-tenant queue."""
@@ -77,9 +96,8 @@ class PendingApproval:
         self.command = command
         self.tier = tier
         self.reason = reason
-        self.challenge = _gen_challenge()
         self.created_at = time.time()
-        self.expiry = self.created_at + CHALLENGE_TTL_SECONDS
+        self.expiry = self.created_at + APPROVAL_TTL_SECONDS
         self.event = asyncio.Event()
         self.result: Optional[bool] = None  # True=approved, False=denied/expired
 
@@ -88,9 +106,12 @@ class PendingApproval:
 
 
 class OpsBroker:
-    def __init__(self, bot_token: str, approver_id: int):
+    def __init__(self, bot_token: str, approver_id: int, totp_secret: str):
         self.approver_id = approver_id
         self.pending: Optional[PendingApproval] = None
+        self.totp = pyotp.TOTP(totp_secret)
+        self._last_used_code: Optional[str] = None
+        self._last_used_at: float = 0.0
 
         intents = discord.Intents.default()
         intents.dm_messages = True
@@ -133,13 +154,23 @@ class OpsBroker:
             await message.channel.send("That request already expired. Ask again if you still want it to run.")
             return
 
-        expected = pending.challenge[::-1]
-        if content.upper() != expected:
+        code = "".join(ch for ch in content if ch.isdigit())
+        if not code or not self.totp.verify(code, valid_window=1):
             await message.channel.send(
-                f"That's not right. Challenge is `{pending.challenge}` — reply with it **reversed** "
-                f"(e.g. `{expected}`), or say **cancel**."
+                "That code didn't verify. Reply with your current 6-digit authenticator code, or say **cancel**."
             )
             return
+
+        # Reject immediate reuse of the same code (it stays valid for ~30-60s
+        # total, so without this a captured/observed code could be replayed
+        # for a second request within that window).
+        if code == self._last_used_code and (time.time() - self._last_used_at) < 90:
+            await message.channel.send(
+                "That code was already used for a previous approval. Wait for the next code and try again."
+            )
+            return
+        self._last_used_code = code
+        self._last_used_at = time.time()
 
         pending.result = True
         pending.event.set()
@@ -179,15 +210,15 @@ class OpsBroker:
             f"**{warning_prefix}{tier_banner}**\n\n"
             f"Command: `{command}`\n"
             + (f"Reason: {reason}\n" if reason else "")
-            + f"\n**Challenge:** `{pending.challenge}`\n"
-            f"Reply with it **reversed** to approve, or say **cancel** to deny.\n"
-            f"_Expires in {CHALLENGE_TTL_SECONDS // 60} minutes._"
+            + f"\nReply with your current **6-digit authenticator code** to approve, "
+            f"or say **cancel** to deny.\n"
+            f"_Expires in {APPROVAL_TTL_SECONDS // 60} minutes._"
         )
         await user.send(prompt)
         log.info("Sent approval DM: tier=%s command=%s", tier, command)
 
         try:
-            await asyncio.wait_for(pending.event.wait(), timeout=CHALLENGE_TTL_SECONDS + 5)
+            await asyncio.wait_for(pending.event.wait(), timeout=APPROVAL_TTL_SECONDS + 5)
         except asyncio.TimeoutError:
             return {"approved": False, "error": "timed out waiting for reply"}
 
@@ -235,11 +266,41 @@ async def make_app(broker: OpsBroker) -> web.Application:
     return app
 
 
+def enroll() -> None:
+    """Generate a new TOTP secret and print how to add it to an authenticator
+    app. Run this once before starting the service for real; re-running
+    generates a NEW secret and invalidates the old one everywhere it was
+    enrolled."""
+    secret = pyotp.random_base32()
+    TOTP_SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TOTP_SECRET_FILE.write_text(secret)
+    os.chmod(TOTP_SECRET_FILE, 0o600)
+
+    uri = pyotp.TOTP(secret).provisioning_uri(name="gaia-ops-broker", issuer_name="GAIA Ops Broker")
+    print(f"Secret written to {TOTP_SECRET_FILE} (mode 600).")
+    print()
+    print("Add this to your authenticator app (Google Authenticator, Authy, etc.):")
+    print(f"  Manual entry key: {secret}")
+    print(f"  Provisioning URI: {uri}")
+    print()
+    print("Most apps can generate a scannable QR code from that URI if you paste")
+    print("it into any online QR generator — just don't leave it sitting in your")
+    print("clipboard/browser history any longer than you have to.")
+
+
 async def main():
     bot_token = _read_text(BOT_TOKEN_FILE)
     approver_id = int(_read_text(APPROVER_ID_FILE))
+    try:
+        totp_secret = TOTP_SECRET_FILE.read_text().strip()
+    except FileNotFoundError:
+        print(f"No TOTP secret at {TOTP_SECRET_FILE} — run 'python broker.py --enroll' first.", file=sys.stderr)
+        sys.exit(1)
+    if not totp_secret:
+        print(f"TOTP secret file {TOTP_SECRET_FILE} is empty — run 'python broker.py --enroll' again.", file=sys.stderr)
+        sys.exit(1)
 
-    broker = OpsBroker(bot_token, approver_id)
+    broker = OpsBroker(bot_token, approver_id, totp_secret)
     app = await make_app(broker)
 
     runner = web.AppRunner(app)
@@ -267,4 +328,11 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--enroll", action="store_true", help="Generate a new TOTP secret and exit")
+    args = parser.parse_args()
+
+    if args.enroll:
+        enroll()
+    else:
+        asyncio.run(main())
