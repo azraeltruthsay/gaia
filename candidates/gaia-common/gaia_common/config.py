@@ -283,6 +283,15 @@ class Config:
                 self.MODEL_CONFIGS["prime"]["endpoint"] = prime_endpoint
                 self.MODEL_CONFIGS["prime"]["type"] = "gaia_engine"
 
+        # 2b. MCP endpoint override (both docker-compose.yml and
+        # docker-compose.candidate.yml set MCP_ENDPOINT, not GAIA_MCP_ENDPOINT
+        # or MCP_LITE_ENDPOINT — those names were never wired to any compose
+        # file and silently left every MCP-dependent call pinned to the
+        # hardcoded production hostname on candidate deployments; see arf2)
+        mcp_endpoint = os.getenv("MCP_ENDPOINT")
+        if mcp_endpoint:
+            self.endpoints["mcp"] = mcp_endpoint
+
         # 3. Port/Endpoint overrides
         for svc in self.endpoints:
             env_key = f"GAIA_{svc.upper()}_ENDPOINT"
