@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""CLI: request Discord-approval from gaia-ops-broker before running a gated action.
+
+Usage: gaia-ops-request "<description of the action>" --tier T1|T0 [--reason TEXT]
+Exits 0 if approved, 1 if denied/timeout, 2 on error talking to the broker.
+"""
+import argparse
+import json
+import sys
+import urllib.error
+import urllib.request
+
+API_BASE = "http://127.0.0.1:8899"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", help="Human-readable description of the action being requested")
+    parser.add_argument("--tier", choices=["T1", "T0"], required=True)
+    parser.add_argument("--reason", default="")
+    args = parser.parse_args()
+
+    payload = json.dumps({"command": args.command, "tier": args.tier, "reason": args.reason}).encode()
+    req = urllib.request.Request(
+        f"{API_BASE}/request", data=payload, headers={"Content-Type": "application/json"}, method="POST"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=310) as resp:
+            body = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body = json.loads(e.read())
+    except urllib.error.URLError as e:
+        print(f"Could not reach gaia-ops-broker: {e}", file=sys.stderr)
+        return 2
+
+    if body.get("approved"):
+        print("APPROVED")
+        return 0
+
+    print(f"DENIED: {body.get('error', 'unknown')}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

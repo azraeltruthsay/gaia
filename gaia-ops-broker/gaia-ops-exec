@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""
+gaia-ops-exec — T1 wrapper for a small allow-listed set of GAIA-scoped
+privileged actions. Installed root:root 0755 at /usr/local/bin/gaia-ops-exec;
+invoked via a sudoers NOPASSWD rule for `azrael` only.
+
+The real gate is NOT sudo's own password prompt — it's the session file
+below, written only by gaia-ops-broker after a fresh Discord approval. No
+valid session, no execution, regardless of how this script is invoked.
+
+Stdlib only: must run under the system Python, no venv.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+SESSION_FILE = Path(os.getenv("GAIA_OPS_SESSION_FILE", "/run/gaia-ops-broker/session.json"))
+LOG_FILE = Path(os.getenv("GAIA_OPS_LOG_FILE", "/var/log/gaia-ops.log"))
+GAIA_ROOT = Path(os.getenv("GAIA_OPS_ROOT", "/gaia/GAIA_Project"))
+WARM_POOL = Path(os.getenv("GAIA_OPS_WARM_POOL", "/mnt/gaia_warm_pool"))
+GAIA_ADMIN_USER = os.getenv("GAIA_OPS_ADMIN_USER", "gaia_admin")
+
+TIER = "T1"
+
+
+def log_line(outcome: str, detail: str) -> None:
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_FILE.open("a") as f:
+        f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} tier={TIER} outcome={outcome} {detail}\n")
+
+
+def require_fresh_session() -> None:
+    try:
+        data = json.loads(SESSION_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        log_line("REFUSED", "reason=no_session")
+        print("No approval session found. Run gaia-ops-request first.", file=sys.stderr)
+        sys.exit(3)
+
+    if time.time() > data.get("expires_at", 0):
+        log_line("REFUSED", "reason=session_expired")
+        print("Approval session expired. Run gaia-ops-request again.", file=sys.stderr)
+        sys.exit(3)
+
+
+def resolve_under_gaia_root(path_str: str) -> Path:
+    try:
+        resolved = Path(path_str).resolve(strict=True)
+    except OSError as e:
+        print(f"Cannot resolve path: {e}", file=sys.stderr)
+        sys.exit(2)
+    try:
+        resolved.relative_to(GAIA_ROOT.resolve())
+    except ValueError:
+        print(f"Refused: {resolved} is not under {GAIA_ROOT}", file=sys.stderr)
+        sys.exit(2)
+    return resolved
+
+
+def cmd_warm_pool_mount(_args: list[str]) -> int:
+    WARM_POOL.mkdir(parents=True, exist_ok=True)
+    return subprocess.run(
+        ["mount", "-t", "tmpfs", "-o", "size=30G,mode=755", "tmpfs", str(WARM_POOL)]
+    ).returncode
+
+
+def cmd_warm_pool_unmount(_args: list[str]) -> int:
+    return subprocess.run(["umount", str(WARM_POOL)]).returncode
+
+
+def cmd_warm_pool_seed(args: list[str]) -> int:
+    if not args:
+        print("Usage: warm-pool-seed <source-dir-under-gaia-root>", file=sys.stderr)
+        return 2
+    src = resolve_under_gaia_root(args[0])
+    dest = WARM_POOL / src.name
+    return subprocess.run(["rsync", "-a", "--checksum", f"{src}/", f"{dest}/"]).returncode
+
+
+def cmd_fix_ownership(args: list[str]) -> int:
+    if not args:
+        print("Usage: fix-ownership <path-under-gaia-root>", file=sys.stderr)
+        return 2
+    target = resolve_under_gaia_root(args[0])
+    owner = f"{GAIA_ADMIN_USER}:{GAIA_ADMIN_USER}"
+    return subprocess.run(["chown", "-R", owner, str(target)]).returncode
+
+
+ALLOWED_COMMANDS = {
+    "warm-pool-mount": cmd_warm_pool_mount,
+    "warm-pool-unmount": cmd_warm_pool_unmount,
+    "warm-pool-seed": cmd_warm_pool_seed,
+    "fix-ownership": cmd_fix_ownership,
+}
+
+
+def main() -> int:
+    if len(sys.argv) < 2 or sys.argv[1] not in ALLOWED_COMMANDS:
+        allowed = ", ".join(sorted(ALLOWED_COMMANDS))
+        print(f"Usage: gaia-ops-exec <command> [args...]\nAllowed commands: {allowed}", file=sys.stderr)
+        return 2
+
+    if os.geteuid() != 0:
+        print("gaia-ops-exec must run as root (via sudo).", file=sys.stderr)
+        return 2
+
+    for required in ("rsync", "mount", "umount", "chown"):
+        if shutil.which(required) is None:
+            print(f"Required binary not found on PATH: {required}", file=sys.stderr)
+            return 2
+
+    require_fresh_session()
+
+    subcommand, rest = sys.argv[1], sys.argv[2:]
+    log_line("EXECUTING", f"command={subcommand} args={rest}")
+    rc = ALLOWED_COMMANDS[subcommand](rest)
+    log_line("DONE" if rc == 0 else "FAILED", f"command={subcommand} rc={rc}")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,9 @@
+# gaia-ops-broker — allows azrael to run ONLY these two wrapper scripts as
+# root, passwordless. The real gate is the approval-session file each
+# wrapper checks before doing anything — NOT this sudoers rule, which exists
+# purely so Claude Code (running as azrael) never needs to pass through an
+# interactive password prompt it can't answer. Do not add any other command
+# here. Install via the bootstrap script, which validates with `visudo -cf`
+# before placing this file.
+
+azrael ALL=(root) NOPASSWD: /usr/local/bin/gaia-ops-exec, /usr/local/bin/gaia-emergency-exec

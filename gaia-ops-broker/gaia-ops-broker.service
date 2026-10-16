@@ -1,0 +1,27 @@
+[Unit]
+Description=gaia-ops-broker — Discord DM approval gate for Claude Code's privileged host actions
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=azrael
+Group=azrael
+ExecStart=/gaia/GAIA_Project/gaia-ops-broker/.venv/bin/python /gaia/GAIA_Project/gaia-ops-broker/broker.py
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=gaia-ops-broker
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=no
+
+# Hardening — this process only needs network out to Discord and a loopback
+# listener; it never needs elevated privileges itself (only the wrapper
+# scripts it gates run as root, and they run via sudo, not via this unit).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/gaia-ops-broker
+
+[Install]
+WantedBy=multi-user.target
