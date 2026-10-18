@@ -25,6 +25,7 @@ LOG_FILE = Path(os.getenv("GAIA_OPS_LOG_FILE", "/var/log/gaia-ops.log"))
 GAIA_ROOT = Path(os.getenv("GAIA_OPS_ROOT", "/gaia/GAIA_Project"))
 WARM_POOL = Path(os.getenv("GAIA_OPS_WARM_POOL", "/mnt/gaia_warm_pool"))
 GAIA_ADMIN_USER = os.getenv("GAIA_OPS_ADMIN_USER", "gaia_admin")
+GAIA_ADMIN_GROUP = os.getenv("GAIA_OPS_ADMIN_GROUP", "gaia-ops")
 
 TIER = "T1"
 
@@ -88,7 +89,7 @@ def cmd_fix_ownership(args: list[str]) -> int:
         print("Usage: fix-ownership <path-under-gaia-root>", file=sys.stderr)
         return 2
     target = resolve_under_gaia_root(args[0])
-    owner = f"{GAIA_ADMIN_USER}:{GAIA_ADMIN_USER}"
+    owner = f"{GAIA_ADMIN_USER}:{GAIA_ADMIN_GROUP}"
     return subprocess.run(["chown", "-R", owner, str(target)]).returncode
 
 

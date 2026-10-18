@@ -203,28 +203,35 @@ class OpsBroker:
         pending = PendingApproval(command, tier, reason)
         self.pending = pending
 
-        user = await self.client.fetch_user(self.approver_id)
-        tier_banner = "EMERGENCY ROOT ACCESS REQUESTED" if tier == "T0" else "T1 Ops Approval Requested"
-        warning_prefix = "⚠️ " if tier == "T0" else ""
-        prompt = (
-            f"**{warning_prefix}{tier_banner}**\n\n"
-            f"Command: `{command}`\n"
-            + (f"Reason: {reason}\n" if reason else "")
-            + f"\nReply with your current **6-digit authenticator code** to approve, "
-            f"or say **cancel** to deny.\n"
-            f"_Expires in {APPROVAL_TTL_SECONDS // 60} minutes._"
-        )
-        await user.send(prompt)
-        log.info("Sent approval DM: tier=%s command=%s", tier, command)
-
         try:
-            await asyncio.wait_for(pending.event.wait(), timeout=APPROVAL_TTL_SECONDS + 5)
-        except asyncio.TimeoutError:
-            return {"approved": False, "error": "timed out waiting for reply"}
+            user = await self.client.fetch_user(self.approver_id)
+            tier_banner = "EMERGENCY ROOT ACCESS REQUESTED" if tier == "T0" else "T1 Ops Approval Requested"
+            warning_prefix = "⚠️ " if tier == "T0" else ""
+            prompt = (
+                f"**{warning_prefix}{tier_banner}**\n\n"
+                f"Command: `{command}`\n"
+                + (f"Reason: {reason}\n" if reason else "")
+                + f"\nReply with your current **6-digit authenticator code** to approve, "
+                f"or say **cancel** to deny.\n"
+                f"_Expires in {APPROVAL_TTL_SECONDS // 60} minutes._"
+            )
+            await user.send(prompt)
+            log.info("Sent approval DM: tier=%s command=%s", tier, command)
 
-        if pending.result:
-            return {"approved": True}
-        return {"approved": False, "error": "denied"}
+            try:
+                await asyncio.wait_for(pending.event.wait(), timeout=APPROVAL_TTL_SECONDS + 5)
+            except asyncio.TimeoutError:
+                return {"approved": False, "error": "timed out waiting for reply"}
+
+            if pending.result:
+                return {"approved": True}
+            return {"approved": False, "error": "denied"}
+        except discord.Forbidden:
+            log.error("Could not DM approver %s (no mutual guild, or DMs blocked)", self.approver_id)
+            return {"approved": False, "error": "could not DM approver: no mutual Discord server, or DMs blocked"}
+        finally:
+            if self.pending is pending:
+                self.pending = None
 
     def session_status(self) -> dict:
         try:
