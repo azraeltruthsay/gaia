@@ -162,6 +162,17 @@ class SafeConfigProxy:
         return True
 
 
+def _config_bool(config, name: str, default: bool) -> bool:
+    """getattr(config, name, default) for boolean flags on SafeConfigProxy,
+    which returns None (not AttributeError) for unmapped names, defeating
+    getattr()'s own default arg (md2o). Plain `or default` is unsafe here
+    specifically because it would silently flip a genuine, intentional
+    False back to True; this only substitutes the default when the proxy's
+    answer is None."""
+    val = getattr(config, name, default)
+    return default if val is None else val
+
+
 def _parse_iso_timestamp(raw) -> Optional[datetime]:
     """Parse an ISO timestamp (session_manager/tool-ledger format). None on
     missing/unparseable — callers must treat that as "no age penalty"."""
@@ -649,7 +660,7 @@ class AgentCore:
         model_config = self.config # Use the main config object
 
         # Populate persona with an immutable Tier-1 identity pulled from config
-        persona_identity = getattr(self.config, 'identity', 'GAIA - General Artisanal Intelligence Architecture')
+        persona_identity = getattr(self.config, 'identity', 'GAIA - General Artisanal Intelligence Architecture') or 'GAIA - General Artisanal Intelligence Architecture'
         persona_safety_ref = str(getattr(self.config, 'identity_file_path', '') or '')
 
         # Build persona traits safely from active_persona (may be a simple object)
@@ -868,7 +879,7 @@ class AgentCore:
 
         # Include the immutable Tier-1 identity and a short intro in the packet content
         try:
-            content.data_fields.append(DataField(key='immutable_identity', value=getattr(self.config, 'identity', '')))
+            content.data_fields.append(DataField(key='immutable_identity', value=getattr(self.config, 'identity', '') or ''))
             intro = getattr(self.config, 'identity_intro', '')
             if intro:
                 # keep the intro concise in the packet
@@ -3349,7 +3360,7 @@ class AgentCore:
             # Falls through to full pipeline ONLY for THINKER depth.
             _use_slim = (
                 not tool_already_executed
-                and getattr(self.config, '_slim_prompt', True)
+                and _config_bool(self.config, '_slim_prompt', True)
                 and (pipeline_depth == "OPERATOR" or self._should_use_slim_prompt(plan, user_input, selected_model_name=selected_model_name))
             )
             if _use_slim:
@@ -3616,7 +3627,7 @@ class AgentCore:
     
             # --- Cognitive Self-Audit ---
             audit_cfg = self.config.constants.get("COGNITIVE_AUDIT", {})
-            is_slim_prompt = getattr(self.config, '_slim_prompt', False)
+            is_slim_prompt = _config_bool(self.config, '_slim_prompt', False)
             logger.warning("AgentCore: cognitive audit gate — enabled=%s, skip_for_slim=%s, is_slim=%s",
                          audit_cfg.get("enabled", False), audit_cfg.get("skip_for_slim_prompt", True), is_slim_prompt)
             _skip_audit = (audit_cfg.get("skip_for_slim_prompt", True) and is_slim_prompt) or pipeline_depth == "OPERATOR"
@@ -6439,7 +6450,7 @@ RESULT: COMPLEX (reason: <brief reason>)
         - For simple 'other' intents, allow slim when the request is short and not
           explicitly asking for multi-step plans or code/tool execution.
         """
-        if not getattr(self.config, '_slim_prompt', True):
+        if not _config_bool(self.config, '_slim_prompt', True):
             return False
         force_full = os.getenv("GAIA_FORCE_FULL_PROMPT", "").lower() in ("1", "true", "yes")
         if force_full:
