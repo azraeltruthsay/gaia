@@ -64,10 +64,24 @@ def resolve_under_gaia_root(path_str: str) -> Path:
     return resolved
 
 
+def _warm_pool_owner_uid_gid() -> tuple[int, int]:
+    # Match scripts/seed_warm_pool.sh's convention: the pool is owned by the
+    # invoking human (azrael), not root, so containers/processes running as
+    # that uid can write into it. sudo always sets SUDO_UID/SUDO_GID for the
+    # user that invoked it; fall back to GAIA_ROOT's owner if those are
+    # somehow unset.
+    sudo_uid, sudo_gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
+    if sudo_uid and sudo_gid:
+        return int(sudo_uid), int(sudo_gid)
+    st = GAIA_ROOT.stat()
+    return st.st_uid, st.st_gid
+
+
 def cmd_warm_pool_mount(_args: list[str]) -> int:
     WARM_POOL.mkdir(parents=True, exist_ok=True)
+    uid, gid = _warm_pool_owner_uid_gid()
     return subprocess.run(
-        ["mount", "-t", "tmpfs", "-o", "size=30G,mode=755", "tmpfs", str(WARM_POOL)]
+        ["mount", "-t", "tmpfs", "-o", f"size=30G,mode=755,uid={uid},gid={gid}", "tmpfs", str(WARM_POOL)]
     ).returncode
 
 
