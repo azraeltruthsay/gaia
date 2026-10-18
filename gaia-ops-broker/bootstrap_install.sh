@@ -50,7 +50,8 @@ fi
 echo "== 2. Wrapper scripts -> /usr/local/bin =="
 install -o root -g root -m 0755 "$HERE/gaia-ops-exec" /usr/local/bin/gaia-ops-exec
 install -o root -g root -m 0755 "$HERE/gaia-emergency-exec" /usr/local/bin/gaia-emergency-exec
-echo "  installed gaia-ops-exec, gaia-emergency-exec"
+install -o root -g root -m 0755 "$HERE/gaia-ops-request" /usr/local/bin/gaia-ops-request
+echo "  installed gaia-ops-exec, gaia-emergency-exec, gaia-ops-request"
 
 echo "== 3. sudoers drop-in =="
 TMP_SUDOERS="$(mktemp)"
