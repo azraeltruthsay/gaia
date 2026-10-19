@@ -782,6 +782,27 @@ else
             else
                 log "  ${YELLOW}⚠${RESET} gaia-prime-candidate not ready after ${waited}s — Prime-routed tests may fail"
             fi
+
+            # ayz0: gaia-prime-candidate's vLLM is deliberately tuned to pin
+            # ~14GB CPU RAM (10GB UVA offload + 4GB LMCache hot tier, bead
+            # foh) against a 16GB GPU ceiling -- that tuning is correct and
+            # must not be touched here. But on a host already under memory
+            # pressure from other load, loading it can tip the host into
+            # swap thrashing, which doesn't show up as this tenant failing
+            # to start (it reports ready) -- it instead starves
+            # gaia-core-candidate's CPU-backend worker into pathological
+            # per-request slowness, surfacing 20+ minutes later as the smoke
+            # battery's OWN tests timing out, with no visible link back to
+            # memory. Surface the real signal here, at the one point in the
+            # pipeline where it's cheap to check and easy to see.
+            mem_available_kb=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
+            swap_used_kb=$(awk '/SwapTotal/ {total=$2} /SwapFree/ {free=$2} END {print total-free}' /proc/meminfo)
+            mem_available_gb=$((mem_available_kb / 1024 / 1024))
+            swap_used_gb=$((swap_used_kb / 1024 / 1024))
+            log "  Host memory after gaia-prime-candidate load: ${mem_available_gb}GB available, ${swap_used_gb}GB swap in use"
+            if [ "$mem_available_gb" -lt 15 ]; then
+                log "  ${YELLOW}⚠${RESET} Low memory headroom (<15GB available) -- smoke tests may time out due to host swap thrashing, not a code regression (see GAIA_Project-ayz0). Consider freeing host memory and re-running if many tests fail with REQUEST FAILED: timed out."
+            fi
         else
             log "  ${YELLOW}⚠${RESET} docker compose up failed for gaia-prime-candidate — Prime-routed tests may fail"
         fi
