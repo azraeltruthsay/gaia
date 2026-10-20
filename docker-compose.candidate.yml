@@ -426,7 +426,15 @@ services:
       start_period: 10s
 
 volumes:
+  # GAIA_Project-ty5p: must match docker-compose.yml's "name:" override for
+  # this same volume exactly. Without it, Compose project-prefixes this
+  # declaration (gaia_project_gaia-candidate-shared) whenever this file is
+  # brought up standalone (ha_start.sh), while gaia-orchestrator (defined in
+  # docker-compose.yml) resolves the literal "gaia-candidate-shared" name --
+  # two different physical volumes, so gaia-orchestrator's ha_sync.sh was
+  # silently writing into one nobody else ever read from.
   gaia-candidate-shared:
+    name: gaia-candidate-shared
   gaia-candidate-sandbox:
 
 networks:
