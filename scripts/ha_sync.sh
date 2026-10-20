@@ -38,6 +38,13 @@ SYNC_ITEMS=(
     "sleep_state/prime.md"
     "sleep_state/prime_previous.md"
     "lite_journal/Lite.md"
+    # Inter-service HMAC auth key (GAIA_Project-8j0q): docker-compose.ha.yml
+    # points candidate-core/mcp at LIVE gaia-mcp/gaia-core for real failover,
+    # but the candidate shared volume never gets this file on its own — every
+    # approval-gated tool call (write_file, ai_write, shell) 401s against the
+    # live service without it. Same key value system-wide, so a plain copy
+    # (not a per-candidate key) is correct.
+    "secrets/gaia_service_key"
 )
 
 case "$MODE" in
@@ -52,6 +59,7 @@ case "$MODE" in
         mkdir -p "$CANDIDATE_SHARED/session_vectors"
         mkdir -p "$CANDIDATE_SHARED/sleep_state"
         mkdir -p "$CANDIDATE_SHARED/lite_journal"
+        mkdir -p "$CANDIDATE_SHARED/secrets"
 
         # Copy from live
         for item in "${SYNC_ITEMS[@]}"; do
@@ -67,6 +75,7 @@ case "$MODE" in
         mkdir -p "$CANDIDATE_SHARED/session_vectors"
         mkdir -p "$CANDIDATE_SHARED/sleep_state"
         mkdir -p "$CANDIDATE_SHARED/lite_journal"
+        mkdir -p "$CANDIDATE_SHARED/secrets"
 
         for item in "${SYNC_ITEMS[@]}"; do
             if [ -e "$LIVE_SHARED/$item" ]; then
