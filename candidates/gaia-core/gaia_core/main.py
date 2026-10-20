@@ -246,6 +246,39 @@ async def lifespan(app: FastAPI):
     app.state.config = config
     app.state.model_pool = pool
 
+    # h3ds: pre-warm the embed-intent classifier at startup instead of
+    # leaving it to lazy-init on first use. EmbedIntentClassifier.instance()
+    # is a process-wide singleton whose .ready flag only flips True inside
+    # agent_core.py's run_turn() generator body — but generators don't run
+    # any code until first iterated, and main.py's own tool-suppression gate
+    # (further down in this file) checks `.ready` SYNCHRONOUSLY, right after
+    # creating that generator, before the first token is ever pulled from
+    # it. On the very first turn any freshly-started gaia-core process
+    # handles, that check sees `.ready == False` and silently skips
+    # suppression for that one turn — Core gets primed by prompt_builder.py
+    # (which reads the intent agent_core's generator body classifies a few
+    # lines into its own execution) into a tool-free "social mode" prompt,
+    # but main.py's gate never got the memo and lets a hallucinated tool
+    # call through to a real (doomed) MCP round-trip, leaking the raw
+    # "[calling...]"/"[...-> failed]" markers. Every later turn in the same
+    # process works fine because the singleton is already initialised by
+    # then. Doing it here, once, before the app starts accepting traffic,
+    # removes the race instead of papering over one specific turn.
+    try:
+        from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
+        _embed_intent_cfg = getattr(config, 'constants', {}).get("EMBED_INTENT", {}) or {}
+        if _embed_intent_cfg.get("enabled", True):
+            _eic_startup = EmbedIntentClassifier.instance()
+            if not _eic_startup.ready:
+                _embed_model_startup = pool.get_embed_model(timeout=0, lazy_load=True)
+                if _embed_model_startup is not None:
+                    _eic_startup.initialise(_embed_model_startup, config=_embed_intent_cfg)
+                    logger.info("EmbedIntentClassifier pre-warmed at startup (ready=%s)", _eic_startup.ready)
+                else:
+                    logger.warning("EmbedIntentClassifier pre-warm skipped: embed model unavailable at startup")
+    except Exception:
+        logger.warning("EmbedIntentClassifier pre-warm failed (non-fatal, will lazy-init on first turn)", exc_info=True)
+
     # Start sleep cycle loop
     _sleep_loop = None
     try:
@@ -1418,7 +1451,24 @@ async def process_packet(packet_data: Dict[str, Any]):
                 from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
                 _eic = EmbedIntentClassifier.instance()
                 if _eic.ready:
-                    _intent_lbl, _ = _eic.classify(user_input or "")
+                    # h3ds: this MUST use the same confidence_threshold as
+                    # agent_core.py's early-intent estimate (which is what
+                    # prompt_builder.py's packet.intent.user_intent — and
+                    # therefore the prompt's tool-free/social-mode framing —
+                    # is actually built from). EmbedIntentClassifier.classify()
+                    # is a deterministic function of (text, threshold); calling
+                    # it here with the classifier's own hardcoded default
+                    # (0.45) instead of agent_core's configured threshold
+                    # (0.42 by default) let this independent reclassification
+                    # silently disagree with the prompt that was already built
+                    # — Core got primed for a tool-free turn but this gate's
+                    # stricter threshold let the resulting tool call through
+                    # anyway, so it hit a real (doomed) MCP round-trip and
+                    # leaked the raw "[calling...]"/"[...-> failed]" markers.
+                    from gaia_core.config import get_config as _get_config_h3ds
+                    _embed_intent_cfg = getattr(_get_config_h3ds(), 'constants', {}).get("EMBED_INTENT", {}) or {}
+                    _suppress_thr = float(_embed_intent_cfg.get("confidence_threshold", 0.42))
+                    _intent_lbl, _ = _eic.classify(user_input or "", confidence_threshold=_suppress_thr)
                     _suppress_tools = _intent_lbl in {
                         "greeting", "farewell", "gratitude", "smalltalk",
                         "social", "chitchat", "acknowledgment", "affirmation",
