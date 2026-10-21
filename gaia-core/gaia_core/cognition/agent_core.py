@@ -102,6 +102,39 @@ _CASUAL_DELIB_INTENTS = frozenset({
 strip_think_tags = _strip_think_tags_robust
 
 
+def _strip_tool_call_markup_for_history(text: str) -> str:
+    """Return only the prose portion of a deliberation response, discarding
+    any raw <tool_call>/<tool_calling:>/<|tool> markup.
+
+    GAIA_Project-bomb: the deliberation hook (both call sites) used to
+    persist the model's raw final_response straight to session history via
+    session_manager.add_message(), independently of main.py's streaming
+    loop — which DOES feed every token through ToolCallParser and silently
+    drops suppressed/tool-free tool calls before the user ever sees them.
+    When deliberation's raw output was pure tool-call markup with no prose
+    (7o99's confirmed repro: four back-to-back tool calls, zero text), that
+    markup got saved verbatim as "what GAIA said" — then replayed into her
+    own context on the next turn as prior assistant history, priming more
+    of the same pattern. Running the same parser used for the live stream
+    before persisting keeps history consistent with what the user actually
+    saw: either the real prose, or nothing (never the raw markup).
+    """
+    try:
+        from gaia_common.utils.tool_call_parser import ToolCallParser, ParseEventType
+        _parser = ToolCallParser()
+        _pieces = []
+        for _ev in _parser.feed(text or ""):
+            if _ev.type == ParseEventType.TEXT:
+                _pieces.append(_ev.text)
+        for _ev in _parser.flush():
+            if _ev.type == ParseEventType.TEXT:
+                _pieces.append(_ev.text)
+        return "".join(_pieces).strip()
+    except Exception:
+        logger.debug("_strip_tool_call_markup_for_history failed, falling back to raw text", exc_info=True)
+        return text
+
+
 class SafeConfigProxy:
     def __init__(self, raw_config):
         self._raw_config = raw_config
@@ -3302,10 +3335,18 @@ class AgentCore:
                             if self.session_manager and session_id:
                                 # Save the cleaned response so session_manager
                                 # doesn't re-strip it to empty and skip the
-                                # turn entirely.
-                                self.session_manager.add_message(
-                                    session_id, "assistant", _final_clean,
-                                )
+                                # turn entirely. bomb: persist what the user
+                                # actually saw (tool-call markup stripped the
+                                # same way main.py's stream parser would),
+                                # not the raw deliberation output — otherwise
+                                # a tool-call-only deliberation pass (7o99)
+                                # gets replayed into GAIA's own future context
+                                # as if she'd said it in plain prose.
+                                _history_text = _strip_tool_call_markup_for_history(_final_clean)
+                                if _history_text:
+                                    self.session_manager.add_message(
+                                        session_id, "assistant", _history_text,
+                                    )
                         except Exception:
                             logger.debug("Deliberation: session_manager.add_message failed", exc_info=True)
                         # ── DRIFT SCAN (a5q observer) ──
@@ -3980,11 +4021,18 @@ class AgentCore:
                             )
                             # Persist to session history so this turn shows up in
                             # subsequent context (matches the pattern at line 1765/2310).
+                            # bomb: strip tool-call markup the same way main.py's
+                            # stream parser would before persisting — otherwise a
+                            # tool-call-only deliberation pass (7o99) gets saved
+                            # verbatim and replayed into GAIA's own future context
+                            # as if she'd said it in plain prose.
                             try:
                                 if self.session_manager and session_id:
-                                    self.session_manager.add_message(
-                                        session_id, "assistant", _delib_result.final_response,
-                                    )
+                                    _history_text = _strip_tool_call_markup_for_history(_delib_result.final_response)
+                                    if _history_text:
+                                        self.session_manager.add_message(
+                                            session_id, "assistant", _history_text,
+                                        )
                             except Exception:
                                 logger.debug("Deliberation: session_manager.add_message failed", exc_info=True)
                             # ── DRIFT SCAN (a5q observer) ──
