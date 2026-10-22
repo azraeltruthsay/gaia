@@ -108,27 +108,33 @@ start_docker_stack() {
 
         while IFS= read -r line; do
             [ -z "$line" ] && continue
-            local svc_name svc_status
+            local svc_name svc_state svc_status
             svc_name="$(echo "$line" | awk '{print $1}')"
-            svc_status="$(echo "$line" | awk '{print $2}')"
+            svc_state="$(echo "$line" | awk '{print $2}')"
+            svc_status="$(echo "$line" | awk '{print $3}')"
             (( svc_count++ )) || true
 
             case "$svc_status" in
                 healthy) ;;
-                running)
-                    # Service has no healthcheck defined — treat as OK
-                    ;;
                 "")
-                    # Container was created but never started (blocked dependency)
-                    all_healthy=false
-                    created_list="${created_list} ${svc_name}"
+                    if [ "$svc_state" = "running" ]; then
+                        # Running, no healthcheck defined — treat as OK (docker
+                        # reports an empty Health field for these, same as a
+                        # container that was created but never started, so
+                        # State is what actually disambiguates the two)
+                        :
+                    else
+                        # Container was created but never started (blocked dependency)
+                        all_healthy=false
+                        created_list="${created_list} ${svc_name}"
+                    fi
                     ;;
                 *)
                     all_healthy=false
                     unhealthy_list="${unhealthy_list} ${svc_name}(${svc_status})"
                     ;;
             esac
-        done < <(COMPOSE_FILE="$COMPOSE_FILE" docker compose ps --format '{{.Name}} {{.Health}}' 2>/dev/null || true)
+        done < <(COMPOSE_FILE="$COMPOSE_FILE" docker compose ps --format '{{.Name}} {{.State}} {{.Health}}' 2>/dev/null || true)
 
         # Guard: if compose returned zero containers, something is fundamentally wrong
         if (( svc_count == 0 )); then
@@ -229,7 +235,7 @@ run_doctor_fix() {
 
     bash "$doctor_script" --fix 2>&1 | while IFS= read -r line; do
         log "  ${line}"
-    done
+    done || true
     local doctor_exit=${PIPESTATUS[0]}
 
     case $doctor_exit in
