@@ -5,7 +5,7 @@ keeping only one layer on the GPU at a time — safe for 16 GB cards.
 
 Run in a container with GPU access:
   docker run --gpus all --ipc=host \
-    -v /gaia/GAIA_Project/gaia-models:/models \
+    -v /gaia/gaia-instance/gaia-models:/models \
     --rm <image> \
     bash -c "pip install autoawq && python3 /models/staging/quantize_awq.py"
 """

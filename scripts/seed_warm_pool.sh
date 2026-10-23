@@ -19,19 +19,21 @@ CONSTANTS_FILE="${PROJECT_ROOT}/gaia-common/gaia_common/constants/gaia_constants
 
 # ── Parse config ─────────────────────────────────────────────────────────
 
-POOL_PATH=$(python3 -c "
+# GAIA_WARM_POOL_HOST / GAIA_MODELS_HOST (the same vars docker-compose uses)
+# override the constants, so a non-Arch host (e.g. WSL) can point elsewhere.
+POOL_PATH=${GAIA_WARM_POOL_HOST:-$(python3 -c "
 import json
 with open('${CONSTANTS_FILE}') as f:
     c = json.load(f)
 print(c.get('WARM_POOL', {}).get('tmpfs_path', '/mnt/gaia_warm_pool'))
-")
+")}
 
-SOURCE_PATH=$(python3 -c "
+SOURCE_PATH=${GAIA_MODELS_HOST:-$(python3 -c "
 import json
 with open('${CONSTANTS_FILE}') as f:
     c = json.load(f)
 print(c.get('WARM_POOL', {}).get('source_path', '${PROJECT_ROOT}/gaia-models'))
-")
+")}
 
 # ── Functions ────────────────────────────────────────────────────────────
 

@@ -108,7 +108,7 @@
   "WARM_POOL": {
     "enabled": true,
     "tmpfs_path": "/mnt/gaia_warm_pool",
-    "source_path": "/gaia/GAIA_Project/gaia-models",
+    "source_path": "/gaia/gaia-instance/gaia-models",
     "size_gb": 30,
     "models": {
       "nano": {

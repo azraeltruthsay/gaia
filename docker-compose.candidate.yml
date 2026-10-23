@@ -40,7 +40,7 @@ services:
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
       - ./knowledge/penpal:/knowledge/penpal:rw
-      - ../gaia-instance/gaia-models:/models:rw
+      - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:rw
       - gaia-candidate-shared:/shared:rw
       - ../gaia-instance/logs:/logs:rw
 
@@ -195,7 +195,7 @@ services:
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
       - ./knowledge/penpal:/knowledge/penpal:rw
-      - ../gaia-instance/gaia-models:/models:ro
+      - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:ro
       - gaia-candidate-sandbox:/sandbox:rw
       - gaia-candidate-shared:/shared:rw
       - ../gaia-instance/logs:/logs:rw
@@ -236,7 +236,7 @@ services:
     restart: "no"
 
     volumes:
-      - ../gaia-instance/gaia-models:/models:ro
+      - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:ro
       - ../gaia-instance/logs/kvcache/prime:/kvcache:rw
       - ./candidates/gaia-prime/lmcache_config.yaml:/etc/lmcache/config.yaml:ro
 
@@ -350,7 +350,7 @@ services:
       - ./knowledge/system_reference:/knowledge/system_reference:ro
       - ./knowledge/personas:/knowledge/personas:ro
       - ./knowledge/penpal:/knowledge/penpal:rw
-      - ../gaia-instance/gaia-models:/models:rw
+      - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:rw
       - gaia-candidate-shared:/shared:rw
       - ../gaia-instance/logs:/logs:rw
 

@@ -17,9 +17,9 @@
 set -euo pipefail
 
 MODEL_NAME="${1:?Usage: $0 <model-name>  (e.g. Qwen3-4B-abliterated, Qwen3-8B-AWQ, Claude)}"
-MODELS_DIR="/gaia/GAIA_Project/gaia-models"
-WARM_POOL="/mnt/gaia_warm_pool"
-COMPOSE_DIR="/gaia/GAIA_Project"
+COMPOSE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+MODELS_DIR="${GAIA_MODELS_HOST:-$(dirname "$COMPOSE_DIR")/gaia-instance/gaia-models}"
+WARM_POOL="${GAIA_WARM_POOL_HOST:-/mnt/gaia_warm_pool}"
 
 SOURCE="${MODELS_DIR}/${MODEL_NAME}"
 TARGET="${WARM_POOL}/${MODEL_NAME}"

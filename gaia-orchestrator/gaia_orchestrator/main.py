@@ -6,6 +6,7 @@ Central coordination service for GPU resources and container lifecycle.
 
 import asyncio
 import logging
+import os
 import re
 import subprocess
 from contextlib import asynccontextmanager
@@ -762,16 +763,18 @@ async def warm_pool_sync(request: WarmPoolSyncRequest):
     """
     import shutil
 
-    src = Path(f"/gaia/GAIA_Project/gaia-models/{request.model}")
-    dst = Path(f"/warm_pool/{request.model}")
+    models_dir = Path(os.environ.get("MODELS_DIR", "/models"))
+    warm_pool = Path(os.environ.get("WARM_POOL_DIR", "/warm_pool"))
+    src = models_dir / request.model
+    dst = warm_pool / request.model
 
     if not src.exists():
         raise HTTPException(status_code=404, detail=f"Source model not found: {src}")
 
-    if not Path("/warm_pool").exists():
+    if not warm_pool.exists():
         raise HTTPException(
             status_code=501,
-            detail="Warm pool not mounted — add /mnt/gaia_warm_pool:/warm_pool:rw to orchestrator volumes",
+            detail=f"Warm pool not mounted at {warm_pool} — check the orchestrator's warm-pool volume",
         )
 
     try:

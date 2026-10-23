@@ -55,7 +55,10 @@ services:
       # which silently broke /candidate/rollback (EROFS on checkout).
       - .:/gaia/GAIA_Project:rw
       # Warm pool for model sync (self-awareness pipeline)
-      - /mnt/gaia_warm_pool:/warm_pool:rw
+      - ${GAIA_WARM_POOL_HOST:-/mnt/gaia_warm_pool}:/warm_pool:rw
+      # Model store: source side of /warm-pool/sync (was never mounted, so
+      # the endpoint 404'd on every call)
+      - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:ro
 
     # Grant access to the host Docker socket (GID 962 = docker group on host)
     group_add:
@@ -66,6 +69,8 @@ services:
       - ORCHESTRATOR_HOST=0.0.0.0
       - ORCHESTRATOR_PORT=6410
       - ORCHESTRATOR_STATE_DIR=/shared/orchestrator
+      - MODELS_DIR=/models
+      - WARM_POOL_DIR=/warm_pool
       - ORCHESTRATOR_COMPOSE_FILE_LIVE=/gaia/GAIA_Project/docker-compose.yml
       - ORCHESTRATOR_COMPOSE_FILE_CANDIDATE=/gaia/GAIA_Project/docker-compose.candidate.yml
       # Service endpoints (inside Docker network)
@@ -117,8 +122,8 @@ services:
     command: python3 -m gaia_engine --managed --port 7777
 
     volumes:
-      - ../gaia-instance/gaia-models:/models:ro
-      - /mnt/gaia_warm_pool:/warm_pool:ro
+      - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:ro
+      - ${GAIA_WARM_POOL_HOST:-/mnt/gaia_warm_pool}:/warm_pool:ro
       - ./gaia-common:/gaia-common:ro
       # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
       - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
@@ -220,9 +225,9 @@ services:
       # Vector store (read-only - gaia-study is SOLE WRITER)
       - ../gaia-instance/knowledge/vector_store:/vector_store:ro
       # Model files (read-only, NVMe fallback)
-      - ../gaia-instance/gaia-models:/models:ro
+      - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:ro
       # Warm pool (tmpfs-backed, near-instant model loads)
-      - /mnt/gaia_warm_pool:/warm_pool:ro
+      - ${GAIA_WARM_POOL_HOST:-/mnt/gaia_warm_pool}:/warm_pool:ro
       # Logs (consolidated service logs)
       - ../gaia-instance/logs:/logs:rw
       # Shared state
@@ -526,9 +531,9 @@ services:
       # Vector store (SOLE WRITER)
       - ../gaia-instance/knowledge/vector_store:/vector_store:rw
       # Model files (WRITE for LoRA adapters)
-      - ../gaia-instance/gaia-models:/models:rw
+      - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:rw
       # Warm pool (tmpfs-backed, near-instant base model loads)
-      - /mnt/gaia_warm_pool:/warm_pool:ro
+      - ${GAIA_WARM_POOL_HOST:-/mnt/gaia_warm_pool}:/warm_pool:ro
       # Logs (consolidated service logs)
       - ../gaia-instance/logs:/logs:rw
       # Shared state
@@ -625,7 +630,7 @@ services:
       - ./knowledge/penpal:/knowledge/penpal:rw
       - ./knowledge/research:/knowledge/research:ro
       # Model files (read-only for embeddings)
-      - ../gaia-instance/gaia-models:/models:ro
+      - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:ro
       # Sandboxed workspace (isolated)
       - gaia-sandbox:/sandbox:rw
       # Logs (for introspect_logs tool + own log persistence)
@@ -717,7 +722,7 @@ services:
       - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
       - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
       - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
-      - ../gaia-instance/gaia-models:/models:ro
+      - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:ro
       - gaia-shared:/shared:rw
 
     environment:
