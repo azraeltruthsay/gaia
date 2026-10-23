@@ -233,10 +233,11 @@ run_doctor_fix() {
         return 1
     fi
 
+    # `|| true` would clobber PIPESTATUS — capture the doctor's exit in the || branch instead
+    local doctor_exit=0
     bash "$doctor_script" --fix 2>&1 | while IFS= read -r line; do
         log "  ${line}"
-    done || true
-    local doctor_exit=${PIPESTATUS[0]}
+    done || doctor_exit=${PIPESTATUS[0]}
 
     case $doctor_exit in
         0) ok "Doctor: all healthy" ;;
