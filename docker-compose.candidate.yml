@@ -183,6 +183,13 @@ services:
     volumes:
       - ./candidates/gaia-mcp:/app:rw
       - ./candidates/gaia-common:/app/gaia-common:ro
+      # GAIA_Project-afg2: Dockerfile COPY-bakes gaia-common to /gaia-common at
+      # build time (`pip install -e /gaia-common/`); config.py's constants
+      # loader checks that absolute path BEFORE /app/gaia-common, so without
+      # this live mount gaia-mcp-candidate silently ran on a stale snapshot
+      # and needed a full rebuild for any gaia-common change. Matches the
+      # mount gaia-core-candidate and production gaia-mcp already have.
+      - ./candidates/gaia-common:/gaia-common:ro
       - ../gaia-instance/knowledge:/knowledge:rw
       - ./knowledge/blueprints:/knowledge/blueprints:ro
       - ./knowledge/system_reference:/knowledge/system_reference:ro
