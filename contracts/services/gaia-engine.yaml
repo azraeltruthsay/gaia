@@ -148,7 +148,7 @@ managed_http_api:
     - endpoint: /health
       method: GET
       response: { status: str, engine: str, model_loaded: bool, mode: str, managed: bool, worker_pid: int,
-        device: str, cuda_healthy: "bool, present only when device=='cuda'",
+        device: str, cuda_healthy: "bool|null, present only when device=='cuda' (null = unverified)",
         cuda_detail: "str, present only when device=='cuda'" }
       description: "Health check (standby or active)"
       notes: "GAIA_Project-t0f2: when device=='cuda', actually probes torch.cuda.is_available()
@@ -157,7 +157,13 @@ managed_http_api:
         this endpoint reporting status=ok right up until a real inference request crashed.
         status is now 'degraded' when cuda_healthy is false, with cuda_detail explaining why
         (torch.cuda.is_available() returned False, or itself raised). device=='cpu'/'none'
-        is unaffected -- CUDA is simply not expected there."
+        is unaffected -- CUDA is simply not expected there.
+        GAIA_Project-8xr4.13: the probe runs in the WORKER (the process holding the GPU
+        context) and the manager forwards its verdict. If no worker verdict is available
+        (llama-server worker, or the active-inference short-circuit) and the manager has
+        masked its own CUDA after an earlier CPU load, cuda_healthy is null with an
+        'unverified' cuda_detail and status is NOT degraded -- the manager's torch view is
+        known-blind then."
 
     - endpoint: /status
       method: GET
