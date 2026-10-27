@@ -800,6 +800,49 @@ def _keyword_intent_classify(text: str, probe_context: str = "") -> str:
     return "other"
 
 
+# 8xr4.19: polite factual pushback on GAIA's last answer — "Didn't he get it
+# from the lady in the lake?", "Wasn't it Merlin?", "I thought it was X". The
+# intent classifier files these under "clarification", and Core's deliberation
+# adapter then treats the user's claim as a question about its own prior turn.
+# A negated auxiliary whose subject is "you"/"I" ("didn't you say...") is about
+# the conversation itself, not the facts, so it doesn't count.
+_PUSHBACK_NEG_AUX_RE = re.compile(
+    r"^\s*(?:(?:but|wait|hmm+|um+|hold on|oh)[,.!]?\s+)?"
+    r"(?:didn'?t|doesn'?t|wasn'?t|isn'?t|weren'?t|aren'?t|hasn'?t|haven'?t|"
+    r"hadn'?t|wouldn'?t|couldn'?t|shouldn'?t|did not|does not|was not|is not|were not)"
+    r"\s+(?!you\b|i\b|we\b)\w+",
+    re.IGNORECASE,
+)
+_PUSHBACK_PHRASE_RE = re.compile(
+    r"\b(?:i thought (?:it|he|she|they|that|the)\b"
+    r"|are you sure\b"
+    r"|(?:i'?m |i am )?(?:pretty |fairly |quite )?sure (?:it|he|she|they|that) (?:was|is|were|did)\b"
+    r"|i heard (?:it|that|he|she|they)\b"
+    r"|^\s*no,? (?:it|he|she|they|that)(?:'s| was| is| were| did)\b"
+    r"|^\s*actually,? (?:it|he|she|they|that)\b"
+    r"|\b(?:wasn'?t|isn'?t) it\b)",
+    re.IGNORECASE,
+)
+
+
+def is_factual_pushback(text: str, history=None) -> bool:
+    """True when the user is disputing or offering a correction to GAIA's
+    previous answer. Requires a previous assistant turn to push back on."""
+    if not text:
+        return False
+    if history is not None and not any(
+        (h.get("role") == "assistant" and (h.get("content") or "").strip())
+        for h in history if isinstance(h, dict)
+    ):
+        return False
+    if _keyword_intent_classify(text) == "correction":
+        return True
+    stripped = text.strip()
+    if stripped.endswith("?") and _PUSHBACK_NEG_AUX_RE.search(stripped):
+        return True
+    return bool(_PUSHBACK_PHRASE_RE.search(stripped))
+
+
 def _fast_track_intent_detection(text: str) -> Optional[str]:
     """
     Fast-track intent detection for common conversational patterns.

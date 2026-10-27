@@ -1513,7 +1513,9 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 if isinstance(web_g, dict) and web_g:
                     parts = []
                     has_system_data = False
+                    disputed = ""
                     for entity, info in web_g.items():
+                        disputed = disputed or (info.get("disputed_answer") or "").strip()
                         for r in info.get("results", [])[:3]:
                             title = r.get("title", "")
                             snippet = r.get("snippet", "")
@@ -1528,6 +1530,17 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                         # System-sensor data is authoritative (it's GAIA's own
                         # sensor read), so keep firm framing for that branch only.
                         parts.insert(0, "The following is VERIFIED system sensor data. Use it directly in your answer — do NOT say you lack access to this information:")
+                    elif disputed:
+                        # 8xr4.19: the user is disputing her last answer. A
+                        # plain statement of that, without the "may be wrong,
+                        # verify with tools" hedge, let Prime weigh its own
+                        # answer against the sources (3/3 vs 2/3 in probes)
+                        # instead of defending it or going off to call tools.
+                        parts.insert(
+                            0,
+                            f"[The user is disputing your previous answer: \"{disputed}\" "
+                            "Search results for the disputed point:]",
+                        )
                     else:
                         # eu9: web/knowledge grounding is candidate context, not
                         # ground truth. Frame it as such so the model treats it

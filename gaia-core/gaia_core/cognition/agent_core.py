@@ -3215,8 +3215,18 @@ class AgentCore:
                     logger.info(
                         "KnowledgeRouter: skipped — personal/chitchat ('%s')",
                         _kr_intent or _ui_pers[:30])
+            # 8xr4.19: a dispute of her last answer is grounded on the web from
+            # the whole exchange — the gates above (chitchat, intent) don't
+            # apply, and her local memory holds the answer being disputed.
+            from gaia_core.cognition.nlu.intent_detection import is_factual_pushback
+            _pushback = is_factual_pushback(user_input, history)
             try:
-                if not _kr_skip:
+                if _pushback:
+                    from gaia_core.cognition.knowledge_router import ground_pushback
+                    _user_turns = [h.get("content") or "" for h in history
+                                   if isinstance(h, dict) and h.get("role") == "user"][-2:]
+                    _grounding_ctx = ground_pushback(_user_turns + [user_input])
+                elif not _kr_skip:
                     from gaia_core.cognition.knowledge_router import ground_query
                     logger.info("KnowledgeRouter: calling ground_query for '%s' (intent=%s)", user_input[:50], plan.intent if plan else "?")
                     _grounding_ctx = ground_query(
@@ -3224,6 +3234,12 @@ class AgentCore:
                         intent=plan.intent if plan else "other",
                     )
                 if _grounding_ctx and _grounding_ctx.has_grounding:
+                    _disputed = ""
+                    if _pushback:
+                        _disputed = next((
+                            (h.get("content") or "").strip() for h in reversed(history)
+                            if isinstance(h, dict) and h.get("role") == "assistant"
+                            and (h.get("content") or "").strip()), "")
                     packet.content.data_fields.append(DataField(
                         key="web_grounding",
                         value={user_input[:50]: {
@@ -3231,6 +3247,7 @@ class AgentCore:
                                        for r in _grounding_ctx.results[:3]],
                             "source": f"knowledge_router:{','.join(_grounding_ctx.sources_queried)}",
                             "query": user_input[:120],
+                            "disputed_answer": re.sub(r"^\s*\[[A-Za-z ]+\]\s*", "", strip_think_tags(_disputed))[:300],
                         }},
                         type="json",
                         source="knowledge_router",
@@ -3294,6 +3311,19 @@ class AgentCore:
                     # felt Inner-weather line isn't diluted into a status readout.
                     _delib_intent = str(getattr(plan, "intent", "") if plan else "").lower() or _early_intent
                     _delib_casual = _delib_intent in _CASUAL_DELIB_INTENTS
+                    # Use the selected tier for deliberation so Prime's
+                    # trained behavior isn't overridden by a hardcoded
+                    # Core-flavored reflection pass. Sovereign Duality
+                    # v2 fix — see GAIA_Project bd-(filed).
+                    _delib_role = selected_model_name or "core"
+                    # 8xr4.19: when the user disputes her last answer, think
+                    # it through in deep mode. Core's adapter reads the
+                    # user's claim as a question about its own prior turn,
+                    # and Core often lacks the facts to judge the claim.
+                    if _pushback and _delib_role != "prime" and "prime" in self.model_pool.models:
+                        logger.info("[DELIBERATION] factual pushback on the last answer → deep mode (Prime)")
+                        _delib_role = "prime"
+                        _delib_casual = False
                     _delib_result = run_deliberated_turn(
                         user_input=packet.content.original_prompt or user_input or "",
                         assembled_messages=_delib_messages,
@@ -3301,11 +3331,7 @@ class AgentCore:
                         config=self.config,
                         user_message_id=getattr(packet.header, "packet_id", None),
                         session_id=session_id,
-                        # Use the selected tier for deliberation so Prime's
-                        # trained behavior isn't overridden by a hardcoded
-                        # Core-flavored reflection pass. Sovereign Duality
-                        # v2 fix — see GAIA_Project bd-(filed).
-                        model_role=selected_model_name or "core",
+                        model_role=_delib_role,
                         casual=_delib_casual,
                     )
                     # Strip any residual <think> tags from the deliberation
@@ -3318,6 +3344,10 @@ class AgentCore:
                     # <think>...; deliberation returned it as final_response;
                     # session_manager stripped it; user saw "[Core]\n\n".
                     _final_clean = strip_think_tags(_delib_result.final_response or "").strip() if _delib_result else ""
+                    # A model imitating tagged history writes its own "[Core]"
+                    # under the real header (8xr4.19).
+                    from gaia_core.memory.session_manager import _strip_mind_tag
+                    _final_clean = _strip_mind_tag(_final_clean).strip()
                     if _delib_result and _final_clean:
                         logger.info(
                             "[DELIBERATION] %s | model=%s forbidden=%d confab=%d retried=%s elapsed=%.0fms",
@@ -3328,7 +3358,8 @@ class AgentCore:
                             _delib_result.retried,
                             _delib_result.elapsed_ms,
                         )
-                        _delib_responding = getattr(self, '_last_responding_model', None) or selected_model_name
+                        _delib_responding = (getattr(self, '_last_responding_model', None)
+                                             or _delib_result.model_used or selected_model_name)
                         _delib_header = self._build_response_header(_delib_responding, packet, None, None, None)
                         yield {"type": "token", "value": _delib_header + _final_clean}
                         try:

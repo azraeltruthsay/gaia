@@ -1,6 +1,7 @@
 import os
 import glob
 import json
+import re
 import logging
 import threading
 import uuid
@@ -13,6 +14,16 @@ from gaia_core.memory.conversation.summarizer import ConversationSummarizer
 from gaia_core.memory.conversation.keywords import ConversationKeywordExtractor
 from gaia_core.memory.conversation.archiver import ConversationArchiver
 from gaia_core.utils.output_router import _strip_think_tags_robust
+
+# 8xr4.19: the "[Core]" / "[Prime]" mind tag is UI decoration on the streamed
+# reply. Persisted into history it becomes something the models imitate — a
+# Prime reply came back as "[Prime]\n[Core]\nYes — ...".
+_MIND_TAG_RE = re.compile(r"^\s*(?:\[(?:Core|Prime|Groq|Oracle|Nano|Lite)\]\s*)+")
+
+
+def _strip_mind_tag(content: str) -> str:
+    return _MIND_TAG_RE.sub("", content or "", count=1)
+
 
 logger = logging.getLogger("GAIA.SessionManager")
 
@@ -151,7 +162,7 @@ class SessionManager:
         non-conversational turns (e.g. tool results: tool/action/title/url).
         """
         if role == "assistant":
-            content = _strip_think_tags_robust(content)
+            content = _strip_mind_tag(_strip_think_tags_robust(content))
             if not content.strip():
                 logger.warning(f"Skipping empty assistant message for session '{session_id}' (was only think tags)")
                 return

@@ -14,6 +14,7 @@ a unified pipeline that queries ALL knowledge sources in priority order.
 """
 
 import json
+import re
 import logging
 import os
 import time
@@ -141,7 +142,16 @@ def _query_journal(query: str, k: int = 3, body_chars: int = 320) -> List[Ground
         logger.debug("Journal search unavailable: %s", e)
         return results
     try:
-        hits = search_entries(query, k=k)
+        # 8xr4.19: skip the 'cognition' stream. Those are per-turn deliberation
+        # transcripts — a record of what she SAID, not of what is true — and
+        # they outnumber the narrative streams ~150:1, so they won nearly every
+        # search. Fed back as grounding, a confabulated answer from the
+        # previous turn came back as "evidence" for the next one.
+        hits = [
+            (entry, score)
+            for entry, score in search_entries(query, k=k * 4)
+            if getattr(entry, "context", "self") != "cognition"
+        ][:k]
         for entry, score in hits:
             body = (entry.body or "").strip()
             if len(body) > body_chars:
@@ -428,6 +438,63 @@ def ground_query(
     ctx.elapsed_ms = (time.time() - t0) * 1000
     logger.info("KnowledgeRouter: %d results from %s in %.0fms",
                 len(ctx.results), ctx.sources_queried, ctx.elapsed_ms)
+    return ctx
+
+
+_CONVERSATION_QUERY_STOPWORDS = frozenset("""
+a an the and or but so of to in on at by for from with about into over as is
+are was were be been being do does did didn't doesn't wasn't isn't weren't
+aren't don't has have had it its it's he she they them his her their him this
+that these those there here what which who whom whose when where why how can
+could would should will shall may might must you your yours i me my we our us
+tell know think thought sure please just really actually yes no not did get got
+""".split())
+
+
+def conversation_query(user_turns: List[str], max_chars: int = 120) -> str:
+    """Keyword query built from the last few user turns, oldest first.
+
+    A follow-up like "Didn't he get it from the lady in the lake?" names no
+    one; searching it alone (or Stage 0's 'he' + 'sword') finds Onimusha and
+    Roblox codes. The earlier turns carry the subject ("King Arthur's sword").
+    """
+    seen: List[str] = []
+    for turn in user_turns:
+        for word in re.findall(r"[A-Za-z0-9][A-Za-z0-9'\-]*", turn or ""):
+            w = word.strip("'-")
+            if not w or w.lower() in _CONVERSATION_QUERY_STOPWORDS:
+                continue
+            if w.lower() not in (s.lower() for s in seen):
+                seen.append(w)
+    query = ""
+    for w in seen:
+        if len(query) + len(w) + 1 > max_chars:
+            break
+        query = f"{query} {w}".strip()
+    return query
+
+
+def ground_pushback(user_turns: List[str]) -> GroundingContext:
+    """8xr4.19: web-ground a turn where the user disputes GAIA's last answer.
+
+    Neither tier could judge "Didn't he get it from the lady in the lake?" from
+    weights alone — both defended the wizard they'd invented. With one search
+    result in front of them they answered correctly every time. Local sources
+    are skipped: they hold her own past answers, which is what is in dispute.
+    """
+    ctx = GroundingContext()
+    query = conversation_query(user_turns)
+    if not query:
+        return ctx
+    t0 = time.time()
+    try:
+        ctx.results.extend(_query_web(query))
+        ctx.sources_queried.append("web")
+    except Exception:
+        logger.debug("Pushback grounding failed", exc_info=True)
+    ctx.elapsed_ms = (time.time() - t0) * 1000
+    logger.info("KnowledgeRouter: pushback grounding %r → %d web results in %.0fms",
+                query, len(ctx.results), ctx.elapsed_ms)
     return ctx
 
 
