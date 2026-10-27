@@ -101,6 +101,53 @@ _CASUAL_DELIB_INTENTS = frozenset({
 # Use the migrated strip_think_tags from output_router
 strip_think_tags = _strip_think_tags_robust
 
+# Explicit "focus" requests trigger the AWAKE → FOCUSING GPU swap. Only a
+# person can ask for that: GAIA's own turns (heartbeat seed actions, doctor
+# probes) talk about "focus" in passing and used to swap the whole GPU
+# (8xr4.23). Whole-word match so "focused"/"refocus" don't fire either.
+_FOCUS_REQUEST_RE = re.compile(
+    r"\b(?:focus|focusing|use prime|switch to prime|heavy model|deep thinking"
+    r"|think hard|full power|big brain)\b",
+    re.IGNORECASE,
+)
+_INTERNAL_TURN_SOURCES = frozenset({"heartbeat", "gaia-doctor", "agent_core", "sleep", "internal"})
+
+
+# Words that carry no subject of their own; a Stage 0 entity made only of these
+# is searched as-is ("he" → Onimusha) and its hits poison the prompt (8xr4.20).
+_GROUNDING_FILLER = frozenset("""
+a an the he she it they him her his its their them this that these those
+i me my you your we us our who what where when why how which get got
+""".split())
+
+
+def _clean_grounding_entities(entities) -> list:
+    """Flatten the extractor's output to distinct search phrases.
+
+    Nano sometimes answers with category dicts ({'ENTITY': 'he', 'PLACE':
+    'sword'}) instead of strings; their str() went to the web verbatim.
+    """
+    out: list = []
+    for ent in entities or []:
+        parts = ent.values() if isinstance(ent, dict) else [ent]
+        for part in parts:
+            if part is None:
+                continue
+            phrase = " ".join(str(part).split()).strip(" .,;:!?\"'")
+            words = re.findall(r"[\w'-]+", phrase.lower())
+            if len(phrase) < 2 or not words or all(w in _GROUNDING_FILLER for w in words):
+                continue
+            if phrase.lower() not in (o.lower() for o in out):
+                out.append(phrase)
+    return out
+
+
+def _wants_focus_transition(text: str, source: str = "") -> bool:
+    if (source or "").lower() in _INTERNAL_TURN_SOURCES:
+        return False
+    return bool(_FOCUS_REQUEST_RE.search(text or ""))
+
+
 
 def _strip_tool_call_markup_for_history(text: str) -> str:
     """Return only the prose portion of a deliberation response, discarding
@@ -434,8 +481,9 @@ class AgentCore:
 
         from gaia_core.utils import mcp_client
         results = {}
+        web_calls_left = 1  # gaia-mcp allows 20 web searches an hour (8xr4.20)
 
-        for entity in entities:
+        for entity in _clean_grounding_entities(entities):
             entry = {"entity": entity, "sources": []}
 
             # 1. KG probe (MemPalace)
@@ -468,7 +516,8 @@ class AgentCore:
                     self.logger.debug("Grounding vector probe failed for '%s': %s", entity, e)
 
             # 3. Web fallback (only if KG and vector returned nothing)
-            if web_fallback and not entry["sources"]:
+            if web_fallback and not entry["sources"] and web_calls_left > 0:
+                web_calls_left -= 1
                 try:
                     web_result = mcp_client.call_jsonrpc("web_search", {
                         "query": entity, "max_results": 2
@@ -1575,11 +1624,29 @@ class AgentCore:
                     _early_intent,
                 )
 
+            # Follow-up gate (8xr4.20): "Where did he get the sword?" has no
+            # entities of its own — Stage 0 searched "he" and "sword" and got
+            # Onimusha and Roblox codes. The KnowledgeRouter grounds these
+            # from the whole exchange instead.
+            _stage0_skip_for_followup = False
+            if not (_stage0_skip_for_local_file or _stage0_skip_for_url
+                    or _stage0_skip_for_chitchat or _stage0_skip_for_intent):
+                try:
+                    from gaia_core.cognition.nlu.intent_detection import (
+                        is_factual_pushback, is_knowledge_followup)
+                    _s0_hist = self.session_manager.get_history(session_id)
+                    _stage0_skip_for_followup = (
+                        is_knowledge_followup(user_input, _s0_hist)
+                        or is_factual_pushback(user_input, _s0_hist))
+                except Exception:
+                    logger.debug("Stage 0 follow-up check failed", exc_info=True)
+
             _stage0_skip = (
                 _stage0_skip_for_local_file
                 or _stage0_skip_for_url
                 or _stage0_skip_for_chitchat
                 or _stage0_skip_for_intent
+                or _stage0_skip_for_followup
             )
 
             _grounding_context = None
@@ -1606,6 +1673,8 @@ class AgentCore:
                 logger.info("Stage 0 Grounding skipped: user prompt names a URL — web.fetch is the right source")
             elif _stage0_skip_for_chitchat:
                 logger.info("Stage 0 Grounding skipped: short conversational prompt (no entities worth grounding)")
+            elif _stage0_skip_for_followup:
+                logger.info("Stage 0 Grounding skipped: follow-up on the last exchange — grounded from the conversation")
 
             # --- Persona & KB selection (probe-driven with keyword fallback) ---
             if probe_result and probe_result.primary_collection:
@@ -1763,12 +1832,7 @@ class AgentCore:
             #   - Prime loads to GPU from warm pool (generator role)
             #   - Prime generates with full fidelity (safetensors, not GGUF)
             #   - Core watches from CPU as observer
-            _focus_keywords = [
-                "focus", "focusing", "use prime", "switch to prime",
-                "heavy model", "deep thinking", "think hard",
-                "full power", "big brain",
-            ]
-            _wants_focus = force_thinker or any(kw in text_lower for kw in _focus_keywords)
+            _wants_focus = force_thinker or _wants_focus_transition(text_lower, source)
             if _wants_focus:
                 logger.info("[MODEL_SELECT] Focus requested — initiating FOCUSING transition")
                 yield {"type": "token", "value": "[(i) FOCUSING mode requested — shifting Prime to GPU...]\n"}
@@ -3218,14 +3282,32 @@ class AgentCore:
             # 8xr4.19: a dispute of her last answer is grounded on the web from
             # the whole exchange — the gates above (chitchat, intent) don't
             # apply, and her local memory holds the answer being disputed.
-            from gaia_core.cognition.nlu.intent_detection import is_factual_pushback
+            # 8xr4.20: so is a follow-up that takes its subject from the last
+            # exchange ("Where did he get the sword?"), which reads as chat.
+            from gaia_core.cognition.nlu.intent_detection import (
+                is_factual_pushback, is_knowledge_followup)
             _pushback = is_factual_pushback(user_input, history)
+            _followup = not _pushback and is_knowledge_followup(user_input, history)
             try:
                 if _pushback:
-                    from gaia_core.cognition.knowledge_router import ground_pushback
+                    from gaia_core.cognition.knowledge_router import ground_conversation
                     _user_turns = [h.get("content") or "" for h in history
                                    if isinstance(h, dict) and h.get("role") == "user"][-2:]
-                    _grounding_ctx = ground_pushback(_user_turns + [user_input])
+                    _grounding_ctx = ground_conversation(_user_turns + [user_input], reason="pushback")
+                elif _followup:
+                    # Her last answer names the subject ("Excalibur") and isn't
+                    # in dispute, so its names join the earlier user turns.
+                    from gaia_core.cognition.knowledge_router import ground_conversation
+                    from gaia_core.memory.session_manager import _strip_mind_tag as _smt
+                    _recent = [h for h in history if isinstance(h, dict)
+                               and h.get("role") in ("user", "assistant")][-3:]
+                    from gaia_core.cognition.knowledge_router import proper_nouns
+                    _context = [
+                        (h.get("content") or "") if h.get("role") == "user"
+                        else proper_nouns(_smt(strip_think_tags(h.get("content") or "")))
+                        for h in _recent]
+                    _grounding_ctx = ground_conversation(
+                        [user_input], reason="follow-up", context_turns=_context)
                 elif not _kr_skip:
                     from gaia_core.cognition.knowledge_router import ground_query
                     logger.info("KnowledgeRouter: calling ground_query for '%s' (intent=%s)", user_input[:50], plan.intent if plan else "?")
@@ -3248,6 +3330,7 @@ class AgentCore:
                             "source": f"knowledge_router:{','.join(_grounding_ctx.sources_queried)}",
                             "query": user_input[:120],
                             "disputed_answer": re.sub(r"^\s*\[[A-Za-z ]+\]\s*", "", strip_think_tags(_disputed))[:300],
+                            "followup": _followup,
                         }},
                         type="json",
                         source="knowledge_router",
@@ -3324,6 +3407,15 @@ class AgentCore:
                         logger.info("[DELIBERATION] factual pushback on the last answer → deep mode (Prime)")
                         _delib_role = "prime"
                         _delib_casual = False
+                    # 8xr4.20: a follow-up with search results in hand is
+                    # answered from them by bare Core (6/6 in probes); the
+                    # deliberation adapter recited the snippet or invented
+                    # one ("From the moon").
+                    _delib_adapter = not (_followup and _grounding_ctx is not None
+                                          and _grounding_ctx.has_grounding)
+                    if not _delib_adapter:
+                        logger.info("[DELIBERATION] grounded follow-up → answering from the search results (no adapter)")
+                        _delib_casual = True
                     _delib_result = run_deliberated_turn(
                         user_input=packet.content.original_prompt or user_input or "",
                         assembled_messages=_delib_messages,
@@ -3333,6 +3425,7 @@ class AgentCore:
                         session_id=session_id,
                         model_role=_delib_role,
                         casual=_delib_casual,
+                        use_adapter=_delib_adapter,
                     )
                     # Strip any residual <think> tags from the deliberation
                     # output before yielding. _split_think_and_response already

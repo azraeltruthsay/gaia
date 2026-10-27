@@ -643,8 +643,13 @@ def run_deliberated_turn(
     session_id: Optional[str] = None,
     model_role: str = "core",
     casual: bool = False,
+    use_adapter: bool = True,
 ) -> DeliberationResult:
     """Full deliberated-turn orchestration with confabulation safety net.
+
+    ``use_adapter=False`` deliberates on the bare tier. Turns carrying
+    on-subject search results use it: the deliberation adapter recites the
+    snippet's lead instead of answering from it (8xr4.20).
 
     Flow:
       1. Deliberate on Core with the deliberation adapter active.
@@ -674,7 +679,7 @@ def run_deliberated_turn(
     # is merged into the base, so when running Prime deliberation we don't
     # try to load an adapter — Prime IS the adapter, baked into weights.
     _is_prime_tier = model_role in ("prime", "cpu_prime")
-    adapter_name = None if _is_prime_tier else cfg.get("adapter_name", "core_deliberation_v1")
+    adapter_name = None if (_is_prime_tier or not use_adapter) else cfg.get("adapter_name", "core_deliberation_v1")
     max_tokens = int(cfg.get("max_tokens", 900))
     temperature = float(cfg.get("temperature", 0.55))
     # Autonomic affect capacity (3rr): affect shapes HOW the deliberated response

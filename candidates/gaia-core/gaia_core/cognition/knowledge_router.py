@@ -252,13 +252,13 @@ def _query_knowledge_graph(query: str) -> List[GroundingResult]:
     return results
 
 
-def _query_web(query: str) -> List[GroundingResult]:
+def _query_web(query: str, max_results: int = 2, snippet_chars: int = 250) -> List[GroundingResult]:
     """Search the web for external knowledge."""
     results = []
     try:
         from gaia_core.utils import mcp_client
         raw = mcp_client.call_jsonrpc("web_search", {
-            "query": query[:120], "max_results": 2
+            "query": query[:120], "max_results": max_results
         })
         inner: Any = raw
         if isinstance(raw, dict):
@@ -269,7 +269,7 @@ def _query_web(query: str) -> List[GroundingResult]:
                 inner = inner.get("results", [])
 
         if isinstance(inner, list):
-            for r in inner[:2]:
+            for r in inner[:max_results]:
                 snippet = r.get("snippet", "")
                 title = r.get("title", "")
                 url = r.get("url", "")
@@ -277,7 +277,7 @@ def _query_web(query: str) -> List[GroundingResult]:
                     results.append(GroundingResult(
                         source="web",
                         trust_tier="verified_external",
-                        content=f"{title}: {snippet[:250]}",
+                        content=f"{title}: {snippet[:snippet_chars]}",
                         url=url,
                         utility_score=get_utility_score("general", "web"),
                         query=query,
@@ -474,28 +474,81 @@ def conversation_query(user_turns: List[str], max_chars: int = 120) -> str:
     return query
 
 
+_SENTENCE_OPENERS = frozenset("""
+according well sure okay ok however also then yes no great good oh hmm in on
+from after before as at by for if once since when while
+""".split())
+
+
+def proper_nouns(text: str) -> str:
+    """The capitalised, non-common words of an answer: its names ("Excalibur",
+    "Lady") without its prose ("According to the legend, ...")."""
+    out: List[str] = []
+    for w in re.findall(r"\b[A-Z][\w'-]+", text or ""):
+        low = w.lower()
+        if low in _CONVERSATION_QUERY_STOPWORDS or low in _SENTENCE_OPENERS:
+            continue
+        if low not in (o.lower() for o in out):
+            out.append(w)
+    return " ".join(out)
+
+
+def followup_query(question: str, earlier_turns: List[str], max_chars: int = 120) -> str:
+    """The follow-up question as asked, plus the subject words from the turns
+    before it: "Where did he get the sword? King Arthur's Excalibur". A keyword
+    bag alone drops "where … get" and finds pages that never say where.
+    gaia-mcp's search takes 120 chars, so the subject words fill what's left."""
+    question = " ".join((question or "").split())
+    asked = {w.lower() for w in re.findall(r"[\w'-]+", question)}
+    extra = [w for w in conversation_query(earlier_turns, max_chars=max_chars).split()
+             if w.lower() not in asked]
+    query = question
+    for w in extra:
+        if len(query) + len(w) + 1 > max_chars:
+            break
+        query = f"{query} {w}".strip()
+    return query
+
+
+def ground_conversation(user_turns: List[str], reason: str = "follow-up",
+                        context_turns: Optional[List[str]] = None) -> GroundingContext:
+    """Web-ground a turn whose subject lives in the earlier turns.
+
+    With ``context_turns`` the last of ``user_turns`` is searched as asked,
+    followed by the subject words of ``context_turns`` (follow-ups). Without,
+    the query is a keyword bag over ``user_turns`` (pushback — the earlier
+    answer is the thing in dispute, so it isn't searched). Local sources are
+    skipped: they hold her own past answers to this same conversation.
+    """
+    ctx = GroundingContext()
+    if context_turns is not None and user_turns:
+        query = followup_query(user_turns[-1], context_turns)
+    else:
+        query = conversation_query(user_turns)
+    if not query:
+        return ctx
+    t0 = time.time()
+    try:
+        # The question was asked of these results specifically; give the
+        # model enough of each to find the answer, not just the page lead.
+        ctx.results.extend(_query_web(query, max_results=3, snippet_chars=500))
+        ctx.sources_queried.append("web")
+    except Exception:
+        logger.debug("Conversation grounding failed", exc_info=True)
+    ctx.elapsed_ms = (time.time() - t0) * 1000
+    logger.info("KnowledgeRouter: %s grounding %r → %d web results in %.0fms",
+                reason, query, len(ctx.results), ctx.elapsed_ms)
+    return ctx
+
+
 def ground_pushback(user_turns: List[str]) -> GroundingContext:
     """8xr4.19: web-ground a turn where the user disputes GAIA's last answer.
 
     Neither tier could judge "Didn't he get it from the lady in the lake?" from
     weights alone — both defended the wizard they'd invented. With one search
-    result in front of them they answered correctly every time. Local sources
-    are skipped: they hold her own past answers, which is what is in dispute.
+    result in front of them they answered correctly every time.
     """
-    ctx = GroundingContext()
-    query = conversation_query(user_turns)
-    if not query:
-        return ctx
-    t0 = time.time()
-    try:
-        ctx.results.extend(_query_web(query))
-        ctx.sources_queried.append("web")
-    except Exception:
-        logger.debug("Pushback grounding failed", exc_info=True)
-    ctx.elapsed_ms = (time.time() - t0) * 1000
-    logger.info("KnowledgeRouter: pushback grounding %r → %d web results in %.0fms",
-                query, len(ctx.results), ctx.elapsed_ms)
-    return ctx
+    return ground_conversation(user_turns, reason="pushback")
 
 
 # ── Post-Response Learning (Skill Write) ──────────────────────────────

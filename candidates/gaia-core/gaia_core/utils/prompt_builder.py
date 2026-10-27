@@ -1514,8 +1514,16 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                     parts = []
                     has_system_data = False
                     disputed = ""
+                    followup = False
                     for entity, info in web_g.items():
                         disputed = disputed or (info.get("disputed_answer") or "").strip()
+                        followup = followup or bool(info.get("followup"))
+                    # Conversation-grounded turns (8xr4.19/.20) searched the
+                    # question itself; the answer is often past 200 chars
+                    # ("…given to Arthur by the Lady of the Lake" sat at ~390,
+                    # behind run-together result titles).
+                    _snip = 600 if (disputed or followup) else 200
+                    for entity, info in web_g.items():
                         for r in info.get("results", [])[:3]:
                             title = r.get("title", "")
                             snippet = r.get("snippet", "")
@@ -1525,7 +1533,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                                     has_system_data = True
                                     parts.append(f"[SYSTEM DATA — use this directly] {snippet[:200]}")
                                 else:
-                                    parts.append(f"- {title}: {snippet[:200]} ({url})")
+                                    parts.append(f"- {title}: {snippet[:_snip]} ({url})")
                     if has_system_data:
                         # System-sensor data is authoritative (it's GAIA's own
                         # sensor read), so keep firm framing for that branch only.
@@ -1541,6 +1549,11 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                             f"[The user is disputing your previous answer: \"{disputed}\" "
                             "Search results for the disputed point:]",
                         )
+                    elif followup:
+                        # 8xr4.20: the query was built from this question plus
+                        # the exchange it follows on from, so the results are
+                        # on-subject; the eu9 hedge made Core set them aside.
+                        parts.insert(0, "[Search results for this question, read with the conversation so far:]")
                     else:
                         # eu9: web/knowledge grounding is candidate context, not
                         # ground truth. Frame it as such so the model treats it

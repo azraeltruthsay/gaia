@@ -843,6 +843,44 @@ def is_factual_pushback(text: str, history=None) -> bool:
     return bool(_PUSHBACK_PHRASE_RE.search(stripped))
 
 
+# 8xr4.20: a knowledge follow-up leans on the last exchange for its subject —
+# "Where did he get the sword?" after "What's King Arthur's sword called?". The
+# classifier calls it chat (no rejected-fact markers), so nothing grounded it,
+# and Stage 0 web-searched "he" and "sword" on their own. A question that opens
+# with a wh-word and points back at a third party (he/she/it/they...) is one;
+# you/I/we questions are about the conversation or GAIA herself.
+_FOLLOWUP_WH_RE = re.compile(
+    r"^\s*(?:(?:and|so|but|ok(?:ay)?|then|oh)[,.!]?\s+)?"
+    r"(?:who|whom|whose|what|when|where|why|which|how)\b",
+    re.IGNORECASE,
+)
+_FOLLOWUP_ANAPHOR_RE = re.compile(
+    r"\b(?:he|she|it|they|him|her|his|hers|its|them|their|that one|those)\b",
+    re.IGNORECASE,
+)
+_FOLLOWUP_PERSONAL_RE = re.compile(
+    r"\b(?:you|your|yours|yourself|i|me|my|mine|we|us|our)\b"
+    r"|\btime is it\b|\bwhat is it like\b",
+    re.IGNORECASE,
+)
+
+
+def is_knowledge_followup(text: str, history=None) -> bool:
+    """True when a question takes its subject from the previous exchange.
+    Requires an earlier user turn and an assistant answer to follow up on."""
+    stripped = (text or "").strip()
+    if not stripped or len(stripped) > 200:
+        return False
+    hist = [h for h in (history or []) if isinstance(h, dict)]
+    if not any(h.get("role") == "user" and (h.get("content") or "").strip() for h in hist):
+        return False
+    if not any(h.get("role") == "assistant" and (h.get("content") or "").strip() for h in hist):
+        return False
+    if not _FOLLOWUP_WH_RE.search(stripped) or _FOLLOWUP_PERSONAL_RE.search(stripped):
+        return False
+    return bool(_FOLLOWUP_ANAPHOR_RE.search(stripped))
+
+
 def _fast_track_intent_detection(text: str) -> Optional[str]:
     """
     Fast-track intent detection for common conversational patterns.
@@ -1306,8 +1344,15 @@ def extract_entities_neural(text: str, max_entities: int = 5) -> list:
             answer = answer.split("</think>")[-1].strip()
         # Parse JSON list
         entities = json.loads(answer)
+        if isinstance(entities, dict):
+            entities = [entities]
         if isinstance(entities, list):
-            return [str(e).strip() for e in entities[:max_entities] if e]
+            # Category dicts ({"ENTITY": "he", "PLACE": "sword"}) are flattened
+            # to their values; str() of the dict used to be web-searched (8xr4.20).
+            flat = []
+            for e in entities:
+                flat.extend(e.values() if isinstance(e, dict) else [e])
+            return [str(e).strip() for e in flat if e and str(e).strip()][:max_entities]
         return []
     except (json.JSONDecodeError, Exception) as e:
         logger.debug("Neural entity extraction failed (non-blocking): %s", e)

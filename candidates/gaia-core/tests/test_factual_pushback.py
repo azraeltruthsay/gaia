@@ -102,7 +102,7 @@ def test_ground_pushback_uses_web_only():
         ctx = knowledge_router.ground_pushback(
             ["Can you tell me the name of King Arthur's sword?",
              "Didn't he get it from the lady in the lake?"])
-    qw.assert_called_once_with("name King Arthur's sword lady lake")
+    qw.assert_called_once_with("name King Arthur's sword lady lake", max_results=3, snippet_chars=500)
     qj.assert_not_called()
     qm.assert_not_called()
     assert ctx.has_grounding and ctx.sources_queried == ["web"]
