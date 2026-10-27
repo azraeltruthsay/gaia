@@ -309,6 +309,10 @@ class ModelPool:
         self.config = config or get_config()
         self.models: Dict[str, Any] = {}
         self.model_status: Dict[str, Any] = {}  # new: track each model's current role
+        # 8xr4.14: per-thread record of which fallback actually answered the
+        # last forward_to_model call, so response headers don't credit the
+        # tier that failed (a Groq reply was shown as "[Prime]").
+        self._fallback_local = threading.local()
         self.persona_manager = PersonaManager(self.config.PERSONAS_DIR)  # Initialize PersonaManager
         self.active_persona_obj = None  # Store the active PersonaAdapter object
         self.resource_monitor = ResourceMonitor.get_instance() # New line
@@ -1222,6 +1226,7 @@ class ModelPool:
         if not name or name not in self.models:
             raise ValueError(f"Model '{role}' not found in pool.")
         model = self.models[name]
+        self._fallback_local.name = None
         self.set_status(name, "busy")
         try:
             if adapter_name and hasattr(model, "create_chat_completion_with_adapter"):
@@ -1263,6 +1268,7 @@ class ModelPool:
                     else:
                         continue
                     logger.info("Inference fallback to '%s' succeeded", fallback_name)
+                    self._fallback_local.name = fallback_name
                     return self._tee_to_generation_log(result, fallback_name, role)
                 except Exception as fb_exc:
                     logger.warning("Fallback '%s' also failed: %s", fallback_name, fb_exc)
@@ -1276,6 +1282,13 @@ class ModelPool:
         finally:
             if release:
                 self.release_model(name)
+
+    def consume_last_fallback(self) -> Optional[str]:
+        """Return (and clear) the fallback model that answered this thread's
+        last forward_to_model call, or None if the primary answered."""
+        name = getattr(self._fallback_local, "name", None)
+        self._fallback_local.name = None
+        return name
 
     def register_adapter_with_prime(self, adapter_name: str, adapter_path: str) -> bool:
         """Register a LoRA adapter with the remote vLLM server (gaia-prime).

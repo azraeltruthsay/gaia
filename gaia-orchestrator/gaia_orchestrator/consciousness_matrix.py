@@ -121,6 +121,11 @@ class ConsciousnessMatrix:
         # "unconscious" = everything starts unloaded (manual control)
         self._default_preset = os.environ.get("CONSCIOUSNESS_DEFAULT_PRESET", "parked")
 
+        # 8xr4.14: the lifecycle gear is reloaded from disk on boot but tiers
+        # follow the startup preset, so a persisted gear can describe a GPU
+        # placement that no longer exists. Checked once, after first settle.
+        self._boot_label_verified = False
+
         # Skill adapters to auto-load when a tier enters Subconscious (CPU) mode.
         # GGUF LoRA adapters loaded via /adapter/load with configurable scale.
         self._cpu_adapters = {
@@ -923,6 +928,68 @@ class ConsciousnessMatrix:
         except Exception:
             return False
 
+    # Matrix level → TIER_EXPECTATIONS device string
+    _LEVEL_TO_DEVICE = {
+        ConsciousnessLevel.CONSCIOUS: "gpu",
+        ConsciousnessLevel.SUBCONSCIOUS: "cpu",
+        ConsciousnessLevel.UNCONSCIOUS: "unloaded",
+    }
+
+    def _infer_lifecycle_from_placement(self):
+        """Gear implied by actual tier placement (boot default for CPU-only is PARKED)."""
+        from gaia_common.lifecycle.states import LifecycleState
+        if self._tiers["prime"].actual == ConsciousnessLevel.CONSCIOUS:
+            return LifecycleState.FOCUSING
+        core = self._tiers["core"].actual
+        if core == ConsciousnessLevel.CONSCIOUS:
+            return LifecycleState.AWAKE
+        if core == ConsciousnessLevel.SUBCONSCIOUS:
+            return LifecycleState.PARKED
+        return LifecycleState.DEEP_SLEEP
+
+    async def _verify_boot_lifecycle_label(self) -> None:
+        """One-shot boot check (8xr4.14): once the matrix has settled, relabel a
+        persisted gear whose REQUIRED tiers contradict actual placement.
+
+        Observed: Arch persisted 'focusing'; the WSL boot loaded the 'parked'
+        preset (Core CPU, Prime unloaded) but kept the 'focusing' label, so
+        gaia-core routed turns to an unloaded Prime and fell back to Groq.
+        A persisted gear that still matches reality (e.g. orchestrator restart
+        while AWAKE) is kept.
+        """
+        if self._boot_label_verified or not self._lifecycle_machine:
+            return
+        # Wait for first settle: every real tier at target, healthy, idle.
+        if not all(s.ok for t, s in self._tiers.items() if t != "nano"):
+            return
+        self._boot_label_verified = True
+        try:
+            from gaia_common.lifecycle.states import LifecycleState, TIER_EXPECTATIONS
+            current = self._lifecycle_machine._snapshot.state
+            if isinstance(current, str):
+                current = LifecycleState(current)
+            if current in (LifecycleState.MEDITATION, LifecycleState.TRANSITIONING):
+                return
+            violated = [
+                tier for tier, exp in TIER_EXPECTATIONS.get(current, {}).items()
+                if exp.required and tier in self._tiers
+                and self._LEVEL_TO_DEVICE[self._tiers[tier].actual] != exp.device
+            ]
+            if not violated:
+                return
+            inferred = self._infer_lifecycle_from_placement()
+            logger.warning(
+                "Boot check: persisted lifecycle '%s' contradicts placement (%s) — relabeling to '%s'",
+                current.value, ", ".join(f"{t}={self._tiers[t].actual.name}" for t in violated),
+                inferred.value,
+            )
+            await self._lifecycle_machine.set_state_external(
+                target=inferred,
+                reason=f"boot_verify: persisted {current.value} contradicted by placement",
+            )
+        except Exception as e:
+            logger.warning("Boot lifecycle label check failed: %s", e)
+
     async def _poll_loop(self, interval: float):
         """Continuously probe tiers, validate matrix, and auto-reconcile drift."""
         while True:
@@ -995,6 +1062,8 @@ class ConsciousnessMatrix:
                             tier, state.target.name, state.actual.name,
                             state.healthy, state.error[:50] if state.error else ""
                         )
+
+                await self._verify_boot_lifecycle_label()
             except Exception as e:
                 logger.debug("Poll error: %s", e)
             await asyncio.sleep(interval)

@@ -6033,8 +6033,16 @@ class AgentCore:
         Build a concise status header prepended to user-facing responses.
         Shows the 'mind' (model) that generated the response.
         """
-        # If an escalation occurred, use the model that actually responded
-        actual_model = getattr(self, '_last_responding_model', None) or model_name
+        # If an escalation occurred, use the model that actually responded;
+        # an inference fallback (e.g. Groq) outranks both (8xr4.14).
+        fallback = None
+        try:
+            fallback = self.model_pool.consume_last_fallback()
+        except Exception:
+            pass
+        if not isinstance(fallback, str):
+            fallback = None
+        actual_model = fallback or getattr(self, '_last_responding_model', None) or model_name
         self._last_responding_model = None  # reset after use
         mind_name = self._MIND_ALIASES.get(actual_model or "unknown", actual_model or "unknown")
         tag = self.MIND_TAG_FORMAT.format(mind=mind_name)

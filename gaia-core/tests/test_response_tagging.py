@@ -97,3 +97,52 @@ class TestHeaderFormat:
         assert "Model:" not in header
         assert "State:" not in header
         assert "Observer:" not in header
+
+
+# ── Inference fallback attribution (8xr4.14) ─────────────────────────
+
+
+class TestFallbackAttribution:
+    def test_groq_fallback_outranks_selected_tier(self):
+        # Prime was selected but failed; Groq answered. Header must say Groq.
+        ac = _make_agent_core()
+        ac.model_pool.consume_last_fallback.return_value = "groq_fallback"
+        header = ac._build_response_header("prime", _make_packet(), None, None, None)
+        assert header == "[Groq]\n\n"
+
+    def test_no_fallback_keeps_selected_tier(self):
+        ac = _make_agent_core()
+        ac.model_pool.consume_last_fallback.return_value = None
+        header = ac._build_response_header("prime", _make_packet(), None, None, None)
+        assert header == "[Prime]\n\n"
+
+
+class TestPoolFallbackRecord:
+    def _pool(self, primary_exc):
+        import threading
+        from gaia_core.models._model_pool_impl import ModelPool
+
+        pool = ModelPool.__new__(ModelPool)  # skip heavy init
+        pool._fallback_local = threading.local()
+        primary, groq = MagicMock(), MagicMock()
+        if primary_exc:
+            primary.create_chat_completion.side_effect = RuntimeError("prime unreachable")
+        primary.create_chat_completion.return_value = {"choices": []}
+        groq.create_chat_completion.return_value = {"choices": []}
+        pool.models = {"prime": primary, "groq_fallback": groq}
+        pool._resolve_model_name_for_role = lambda role: role
+        pool.set_status = lambda *a, **k: None
+        pool.release_model = lambda *a, **k: None
+        pool._tee_to_generation_log = lambda r, n, role: r
+        return pool
+
+    def test_fallback_answer_is_recorded_once(self):
+        pool = self._pool(primary_exc=True)
+        pool.forward_to_model("prime", messages=[])
+        assert pool.consume_last_fallback() == "groq_fallback"
+        assert pool.consume_last_fallback() is None
+
+    def test_primary_answer_records_nothing(self):
+        pool = self._pool(primary_exc=False)
+        pool.forward_to_model("prime", messages=[])
+        assert pool.consume_last_fallback() is None
