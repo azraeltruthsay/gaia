@@ -86,6 +86,24 @@ def _run_on_bot_loop(coro, timeout: float = 30.0):
     return future.result(timeout=timeout)
 
 
+async def _await_on_bot_loop(coro, timeout: float = 30.0):
+    """Async counterpart of _run_on_bot_loop, for callers already on a loop.
+
+    gaia-web's main.py runs the bot on uvicorn's own loop, so a route handler
+    is usually ON the bot loop. Blocking there on future.result() starves the
+    very loop that has to run the coroutine: every send deadlocked until the
+    timeout (8xr4.21). Await directly when we're on the bot loop; otherwise
+    hop over without blocking ours.
+    """
+    if _bot_loop is None or _bot_loop.is_closed():
+        coro.close()
+        raise RuntimeError("Bot event loop not available")
+    if asyncio.get_running_loop() is _bot_loop:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    future = asyncio.run_coroutine_threadsafe(coro, _bot_loop)
+    return await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
+
+
 class DiscordInterface:
     """
     Discord interface for the GAIA Web Gateway.
@@ -1104,7 +1122,7 @@ async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Op
         return True
 
     try:
-        return _run_on_bot_loop(_send(), timeout=30.0)
+        return await _await_on_bot_loop(_send(), timeout=30.0)
     except Exception as e:
         try:
             from gaia_common.utils.error_logging import log_gaia_error
@@ -1135,7 +1153,7 @@ async def send_to_user(user_id: str, content: str) -> bool:
         return True
 
     try:
-        return _run_on_bot_loop(_send(), timeout=30.0)
+        return await _await_on_bot_loop(_send(), timeout=30.0)
     except Exception as e:
         try:
             from gaia_common.utils.error_logging import log_gaia_error
