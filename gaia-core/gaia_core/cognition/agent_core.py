@@ -5536,8 +5536,60 @@ class AgentCore:
         "from my monitoring",
     ]
 
+    def _reply_answers_question(self, content: str, user_input: str,
+                                model_name: Optional[str]) -> Optional[bool]:
+        """Ask the responding model whether its reply answers the question.
+
+        Signals 4 and 7 only see *shape* (no number in the reply, or a very
+        short reply), so they misfire on correct terse answers — "Excalibur."
+        to "tell me the name of King Arthur's sword" was escalated to Prime,
+        which then confabulated (8xr4.16). A one-word YES/NO judgment from the
+        model reads the meaning instead.
+
+        A bare "does it answer? YES/NO" is yes-biased (Gemma4-E4B passed
+        "Sure!" and "I'm ready to share the time"), so the model instead
+        quotes the words that answer, and the quote must actually occur in
+        the reply. When the reply has no answer the model tends to answer the
+        question itself, and that text isn't in the reply. Probed 14/14 on
+        the live Core vs 5/8 for YES/NO (2026-10-26).
+
+        Calls the model directly (no fallback chain: a cloud model shouldn't
+        be the judge). Returns None if the check can't run, so callers keep
+        the old escalate-on-suspicion path.
+        """
+        if not model_name:
+            return None
+        try:
+            name = self.model_pool._resolve_model_name_for_role(model_name)
+            model = self.model_pool.models.get(name) if name else None
+            if model is None or not hasattr(model, "create_chat_completion"):
+                return None
+            res = model.create_chat_completion(
+                messages=[{"role": "user", "content": (
+                    f"Question: {user_input.strip()[:500]}\n"
+                    f"Reply: {content.strip()[:500]}\n\n"
+                    "Quote the exact words in the reply that answer the question. "
+                    "If no words in the reply answer it, write NONE."
+                )}],
+                max_tokens=16,
+                temperature=0.0,
+            )
+            out = strip_think_tags(res["choices"][0]["message"]["content"]).strip()
+        except Exception as e:
+            self.logger.debug("Answer check unavailable: %s", e)
+            return None
+        lines = out.splitlines()
+        quote = lines[0].strip().strip("\"'").strip().rstrip(".!").lower() if lines else ""
+        if not quote:
+            return None
+        if quote.startswith("none"):
+            return False
+        norm = lambda t: re.sub(r"\s+", " ", t.lower())  # noqa: E731
+        return norm(quote) in norm(content)
+
     def _should_escalate_for_uncertainty(self, content: str, user_input: str,
-                                          entropy: float = 0.0) -> bool:
+                                          entropy: float = 0.0,
+                                          model_name: Optional[str] = None) -> bool:
         """Detect when Nano's response shows uncertainty that warrants escalation.
 
         Three escalation signals (any one triggers):
@@ -5545,9 +5597,14 @@ class AgentCore:
         2. Hedging phrases on factual questions — model admits it can't answer
         3. Process-without-answer — model describes HOW it would answer but doesn't
            actually provide the answer (e.g., "I check the Clock line" without a time)
+
+        Shape-only signals (4: no numeric value, 7: very short) only mark the
+        reply as suspect; the model then judges whether it answers the
+        question (_reply_answers_question) before anything is escalated.
         """
         lower = content.lower()
         input_lower = user_input.lower()
+        answer_suspect = None  # reason string when a shape-only signal fires
 
         # Signal 1: High entropy from engine
         if entropy > 2.0:
@@ -5583,8 +5640,7 @@ class AgentCore:
             import re
             has_value = bool(re.search(r'\d{1,2}:\d{2}|\d+\s*(gb|mb|%|seconds|minutes|hours|days)', lower))
             if not has_value:
-                self.logger.info("Uncertainty escalation: factual question but no value in response")
-                return True
+                answer_suspect = "factual question but no value in response"
 
         # Signal 5: Nano explicitly declines or deflects a task
         # Catches "I can't recite", "I don't have knowledge", "I'm not familiar" etc.
@@ -5622,18 +5678,25 @@ class AgentCore:
             self.logger.info("Uncertainty escalation: planning request got short response (%d chars)", len(content))
             return True
 
-        # Signal 7: Very short response or classification tag — not a real answer
-        # Catches raw classification outputs like "COMPLEX", "SIMPLE", single words
+        # Signal 8: Response is a classification tag, not prose. Checked before
+        # signal 7 so a leaked tag escalates without an answer check.
         stripped = content.strip()
-        if len(stripped) < 20:
-            self.logger.info("Uncertainty escalation: response too short to be a real answer (%d chars: '%s')", len(stripped), stripped[:30])
-            return True
-
-        # Signal 8: Response is a classification tag, not prose
         classification_tags = {"complex", "simple", "routing", "escalate", "tool_use",
                                "tool_routing", "decline", "redirect", "pass"}
         if stripped.lower().rstrip(".!") in classification_tags:
             self.logger.info("Uncertainty escalation: response is a classification tag, not an answer: '%s'", stripped)
+            return True
+
+        # Signal 7: Very short response — may not be a real answer
+        if len(stripped) < 20 and not answer_suspect:
+            answer_suspect = f"response very short ({len(stripped)} chars: '{stripped[:30]}')"
+
+        if answer_suspect:
+            if self._reply_answers_question(content, user_input, model_name):
+                self.logger.info("Uncertainty check: %s, but the reply answers the question — keeping it",
+                                 answer_suspect)
+                return False
+            self.logger.info("Uncertainty escalation: %s", answer_suspect)
             return True
 
         return False
@@ -7062,7 +7125,8 @@ RESULT: COMPLEX (reason: <brief reason>)
             # without delivering the actual answer. Uses entropy + hedging signals.
             if use_slim and not _vision_turn:
                 resp_entropy = res.get("usage", {}).get("mean_entropy", 0.0)
-                if self._should_escalate_for_uncertainty(content, user_input, entropy=resp_entropy):
+                if self._should_escalate_for_uncertainty(content, user_input, entropy=resp_entropy,
+                                                         model_name=selected_model_name):
                     self.logger.info("Uncertainty escalation from '%s' (entropy=%.2f) — trying next tier",
                                      selected_model_name, resp_entropy)
                     escalated = self._escalate_slim_response(selected_model_name, messages, max_resp_tokens, grounding_context=_grounding_text, knowledge_base_name=_kb_for_escalation)

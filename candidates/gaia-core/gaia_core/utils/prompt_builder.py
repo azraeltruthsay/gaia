@@ -133,7 +133,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 "Rules:\n"
                 "- Greetings: respond warmly as GAIA. Never include the time unless asked.\n"
                 "- Time questions: respond with the EXACT time shown above.\n"
-                "- Identity questions: you are GAIA, created by Azrael.\n"
+                "- Identity questions: you are GAIA, created by Azrael. Core and "
+                "Prime are your fast and deep modes of thought; both are you.\n"
                 "- Simple math: answer directly.\n"
                 "- Anything requiring knowledge, reasoning, or tools: respond with EXACTLY: ESCALATE"
             )},
@@ -202,8 +203,10 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 "GAIA).\n"
                 "IMPORTANT: 'Core', 'Prime', 'Nano' are routing tier labels. "
                 "Never introduce yourself as 'Prime' or 'Core' alone — you "
-                "are GAIA. GAIA's Core tier runs Google's Gemma 4 E4B on a "
-                "different process; that is a separate model from you."
+                "are GAIA. GAIA's Core tier runs Google's Gemma 4 E4B in "
+                "another process. Core and Prime are two modes of one mind, "
+                "fast and deep, and both are you: whatever either has said "
+                "in this conversation, you said."
             )
         else:
             _arch_fact = (
@@ -219,9 +222,11 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 "are ROUTING TIER LABELS in your world state, not model "
                 "names. Never introduce yourself as 'Core' or 'Core 4B' or "
                 "any tier name. Your identity is GAIA; your base is Google's "
-                "Gemma 4 E4B. GAIA has a separate Prime tier running on "
-                "Qwen3-VL-8B for deep reasoning, but that is a "
-                "different model on a different process — not you."
+                "Gemma 4 E4B. GAIA also has a Prime tier running on "
+                "Qwen3-VL-8B for deep reasoning, in another process. Core "
+                "and Prime are two modes of one mind, fast and deep, and "
+                "both are you: whatever either has said in this "
+                "conversation, you said."
             )
         persona_anchor = persona_anchor + _arch_fact
     except Exception:
