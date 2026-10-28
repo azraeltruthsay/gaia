@@ -136,6 +136,8 @@ class ConsciousnessMatrix:
         self._adapter_scale = float(os.environ.get("CPU_ADAPTER_SCALE", "0.5"))
 
         self._lock = asyncio.Lock()
+        # jykh: one transition per tier at a time (see _transition_tier).
+        self._tier_locks: Dict[str, asyncio.Lock] = {}
         self._poll_task: Optional[asyncio.Task] = None
 
     # ── Public API ────────────────────────────────────────────────────
@@ -491,7 +493,31 @@ class ConsciousnessMatrix:
     async def _transition_tier(
         self, tier: str, from_level: ConsciousnessLevel, to_level: ConsciousnessLevel
     ) -> dict:
-        """Execute a consciousness state transition for a single tier."""
+        """Execute a consciousness state transition for a single tier, one at a
+        time per tier.
+
+        jykh: the poll loop's auto-reconcile skips a tier that is
+        transitioning, but set_target() (awake, focusing, …) did not, so a
+        manual /consciousness/awake during a reconcile ran a second load of
+        the same tier alongside it. Both checked "already loaded?" before
+        either finished, both swapped Core onto the GPU, the single-holder
+        invariant broke and Core was left unloaded. The loaders are idempotent
+        once serialized — the second sees the model already loaded and does
+        nothing — so the lock is the whole fix. (The caller's own from_level
+        is kept: re-reading it as "already CONSCIOUS" would send the waiter
+        down the unload-then-reload path; and the voice gear relies on its
+        deliberate from_level reset to swap NF4↔GGUF.)
+        """
+        lock = self._tier_locks.setdefault(tier, asyncio.Lock())
+        if lock.locked():
+            logger.info("Consciousness: %s transition already in flight — waiting for it", tier)
+        async with lock:
+            return await self._run_transition(tier, from_level, to_level)
+
+    async def _run_transition(
+        self, tier: str, from_level: ConsciousnessLevel, to_level: ConsciousnessLevel
+    ) -> dict:
+        """The transition itself; callers go through _transition_tier."""
         state = self._tiers[tier]
         endpoint = self._endpoints[tier]
         state.transitioning = True
