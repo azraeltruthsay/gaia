@@ -175,8 +175,12 @@ managed_http_api:
       method: POST
       protocol: "OpenAI-compatible"
       request: { messages: list, max_tokens: int, temperature: float, stream: bool }
-      response: "OpenAI ChatCompletion or SSE stream"
+      response: "OpenAI ChatCompletion or SSE stream; message.reasoning_content carries Gemma 4's native thought channel when present (h1ok)"
       description: "Chat completion — proxied to worker subprocess"
+      decode: "Torch/GPU text requests on verified architectures (Gemma 4) decode through a static
+        KV cache + CUDA-graph replay of the single-token step (uapv: ~15 -> ~55 tok/s with a LoRA);
+        hidden states still feed the activation stream. Env GAIA_CUDA_GRAPHS=0 restores the
+        dynamic-cache loop. Vision/audio requests are unchanged."
       notes: "Serialized through inference semaphore (max_concurrent). SSE streaming via readline proxy.
         Non-streaming errors: 500 {error} for a normal generation failure; 503
         {error, error_code: GAIA-ENGINE-GPU-DEAD} specifically when the engine
