@@ -24,12 +24,23 @@ Usage:
     results = palace.recall("quantization")
     layout = palace.navigate()
     stats = palace.status()
+
+Lifecycle (6afh): memories in permanent wings/rooms (config
+MEMPALACE.lifecycle.permanent, default identity + operational/milestones)
+or pinned by id (<root>/pinned.json) are kept forever. sweep() moves the
+rest, once unused for lifecycle.archive_after_days, to <root>/archive/<wing>/<room>/
+— still searchable with recall(include_archive=True), but not in everyday
+recall. Recall hits count as use (their mtime is refreshed). The lookup
+memory has its own, finer-grained lifecycle (LookupMemory.sweep), run too.
 """
 
 import hashlib
+import json
 import logging
 import os
 import re
+import shutil
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -40,6 +51,11 @@ from gaia_common.utils.knowledge_graph import KnowledgeGraph
 from gaia_common.utils.lookup_memory import LookupMemory
 
 logger = logging.getLogger("GAIA.MemPalace")
+
+# Kept forever unless config says otherwise: who she is, and what she's done.
+DEFAULT_PERMANENT = ("identity", "operational/milestones")
+DEFAULT_ARCHIVE_AFTER_DAYS = 365
+ARCHIVE_DIRNAME = "archive"
 
 
 class MemPalace:
@@ -64,6 +80,11 @@ class MemPalace:
         # 0vuz: what she has looked up, verbatim + provenance (the AAAK
         # wings keep only compressed codes, which can't answer a question).
         self.lookups = LookupMemory(self._root_dir / "knowledge" / "lookups")
+        lifecycle = config.get("lifecycle", {}) or {}
+        self._permanent = tuple(lifecycle.get("permanent", DEFAULT_PERMANENT))
+        self._archive_after_days = float(lifecycle.get("archive_after_days", DEFAULT_ARCHIVE_AFTER_DAYS))
+        self._archive_dir = self._root_dir / ARCHIVE_DIRNAME
+        self._pins_path = self._root_dir / "pinned.json"
 
         # Create palace directory structure
         self._ensure_directories()
@@ -361,10 +382,11 @@ class MemPalace:
 
     # ── Recall ───────────────────────────────────────────────────────────
 
-    def recall(self, query: str, top_k: int = 5) -> dict:
+    def recall(self, query: str, top_k: int = 5, include_archive: bool = False) -> dict:
         """Semantic recall with KG enrichment.
 
-        1. Search stored memories for query matches (text search across AAAK files)
+        1. Search stored memories for query matches (text search across AAAK
+           files; the archive only with include_archive)
         2. For any entities found in results, query KG for related triples
         3. Return {results: [...], kg_context: [...]}
         """
@@ -377,6 +399,9 @@ class MemPalace:
 
         # Search across all AAAK files
         for aaak_file in self._root_dir.rglob("*.aaak"):
+            archived = self._is_archived(aaak_file)
+            if archived and not include_archive:
+                continue
             try:
                 content = aaak_file.read_text(encoding="utf-8")
                 content_lower = content.lower()
@@ -389,7 +414,7 @@ class MemPalace:
 
                 if score > 0:
                     # Extract relative path for location
-                    rel_path = aaak_file.relative_to(self._root_dir)
+                    rel_path = aaak_file.relative_to(self._archive_dir if archived else self._root_dir)
                     parts = rel_path.parts
                     wing = parts[0] if len(parts) > 1 else "unknown"
                     room = parts[1] if len(parts) > 2 else "unknown"
@@ -400,6 +425,8 @@ class MemPalace:
                         "room": room,
                         "content": content,
                         "score": score,
+                        "archived": archived,
+                        "_path": aaak_file,
                     })
             except Exception:
                 continue
@@ -407,6 +434,12 @@ class MemPalace:
         # Sort by score descending, take top_k
         results.sort(key=lambda x: -x["score"])
         results = results[:top_k]
+        for r in results:
+            # Being recalled is being used: keeps it out of the next sweep.
+            try:
+                os.utime(r.pop("_path"))
+            except OSError:
+                logger.debug("MemPalace: could not mark %s as used", r["palace_id"])
 
         # KG enrichment: query entities found in results
         kg_context = []
@@ -557,12 +590,96 @@ class MemPalace:
             "wings": wings_stats,
             "kg_stats": kg_stats,
             "disk_usage_mb": round(total_size / (1024 * 1024), 2),
+            "archived": sum(1 for _ in self._archive_dir.rglob("*.aaak")) if self._archive_dir.exists() else 0,
+            "pinned": len(self._pins() - {"*"}),
             "lookups": self._lookup_stats(),
         }
+
+    # ── Lifecycle ────────────────────────────────────────────────────────
+
+    def _is_archived(self, path: Path) -> bool:
+        try:
+            path.relative_to(self._archive_dir)
+            return True
+        except ValueError:
+            return False
+
+    def _pins(self) -> set:
+        try:
+            return set(json.loads(self._pins_path.read_text(encoding="utf-8")))
+        except FileNotFoundError:
+            return set()
+        except (OSError, ValueError, TypeError) as e:
+            # A broken pin file must not let the sweep archive pinned
+            # memories: treat everything as pinned until it's fixed.
+            logger.error("MemPalace: unreadable %s (%s); sweep will archive nothing", self._pins_path, e)
+            return {"*"}
+
+    def pin(self, palace_id: str, pinned: bool = True) -> dict:
+        """Keep a memory forever (or release it). Pinning an archived memory
+        restores it."""
+        pins = self._pins() - {"*"}
+        pins = pins | {palace_id} if pinned else pins - {palace_id}
+        tmp = self._pins_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(sorted(pins), indent=1), encoding="utf-8")
+        tmp.replace(self._pins_path)
+        restored = self.restore(palace_id)["ok"] if pinned else False
+        logger.info("MemPalace: %s %s%s", "pinned" if pinned else "unpinned", palace_id,
+                    " (restored from archive)" if restored else "")
+        return {"ok": True, "palace_id": palace_id, "pinned": pinned, "restored": restored}
+
+    def _permanent_room(self, rel: Path) -> bool:
+        parts = rel.parts
+        return any(p == parts[0] or p == "/".join(parts[:2]) for p in self._permanent)
+
+    def restore(self, palace_id: str) -> dict:
+        """Move an archived memory back to its wing/room."""
+        for f in self._archive_dir.rglob(f"{palace_id}.aaak") if self._archive_dir.exists() else []:
+            dest = self._root_dir / f.relative_to(self._archive_dir)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(f), str(dest))
+            os.utime(dest)  # restored = in use again; don't re-archive next sweep
+            logger.info("MemPalace: restored %s from the archive", palace_id)
+            return {"ok": True, "palace_id": palace_id}
+        return {"ok": False, "error": f"{palace_id} is not in the archive"}
+
+    def sweep(self, dry_run: bool = False) -> dict:
+        """Archive memories unused for archive_after_days, except permanent
+        rooms and pinned ids; then run the lookup memory's own sweep."""
+        pins = self._pins()
+        cutoff = time.time() - self._archive_after_days * 86400
+        moved, errors = [], []
+        if "*" not in pins:
+            for f in list(self._root_dir.rglob("*.aaak")):
+                if self._is_archived(f):
+                    continue
+                rel = f.relative_to(self._root_dir)
+                if self._permanent_room(rel) or f.stem in pins:
+                    continue
+                try:
+                    if f.stat().st_mtime >= cutoff:
+                        continue
+                    moved.append(str(rel))
+                    if not dry_run:
+                        dest = self._archive_dir / rel
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(f), str(dest))
+                except OSError as e:
+                    errors.append(f"{rel}: {e}")
+                    logger.warning("MemPalace: could not archive %s: %s", rel, e)
+        try:
+            lookups = self.lookups.sweep(dry_run=dry_run)
+        except Exception as e:
+            logger.warning("MemPalace: lookup memory sweep failed: %s", e)
+            lookups = {"error": str(e)}
+        logger.info("MemPalace: sweep %s %d memorie(s) to the archive (unused > %.0fd)",
+                    "would move" if dry_run else "moved", len(moved), self._archive_after_days)
+        return {"ok": not errors, "archived": moved, "errors": errors,
+                "lookups": lookups, "dry_run": dry_run}
 
     def _lookup_stats(self) -> dict:
         try:
             return self.lookups.stats()
         except Exception as e:
             logger.warning("Lookup memory stats failed: %s", e)
-            return {"lookups": 0, "disputed": 0}
+            return {"lookups": 0, "disputed": 0, "pinned": 0, "confirmed": 0, "archived": 0}

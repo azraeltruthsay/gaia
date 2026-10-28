@@ -418,6 +418,20 @@ class SleepTaskScheduler:
             min_interval_seconds=12 * 3600,
         ))
 
+        # GAIA_Project-6afh: memory palace lifecycle. Pinned memories and
+        # permanent wings stay forever; the rest move to the palace archive
+        # once unused (still searchable on request, not in everyday recall).
+        # Disk-only work in gaia-mcp — cheap, but once a day is plenty.
+        self.register_task(SleepTask(
+            task_id="memory_lifecycle",
+            task_type="MEMORY",
+            priority=6,
+            interruptible=True,
+            estimated_duration_seconds=10,
+            handler=self._run_memory_lifecycle,
+            min_interval_seconds=24 * 3600,
+        ))
+
         # DocSentinel — living documentation (Phase 6)
         self.register_task(SleepTask(
             task_id="doc_sentinel_glossary",
@@ -1367,6 +1381,26 @@ class SleepTaskScheduler:
                 logger.info("Penpal: no new episodes (last_check now)")
         except Exception as e:
             logger.warning("Penpal review failed: %s", e)
+
+    def _run_memory_lifecycle(self, **kwargs) -> None:
+        """Archive unused palace memories and lookups (6afh). The palace
+        lives in gaia-mcp, so the sweep runs there."""
+        try:
+            from gaia_core.utils import mcp_client
+            raw = mcp_client.call_jsonrpc("palace_lifecycle_sweep", {})
+            inner = raw.get("response", raw) if isinstance(raw, dict) else {}
+            res = inner.get("result", inner) if isinstance(inner, dict) else {}
+            if not isinstance(res, dict) or "archived" not in res:
+                logger.warning("Memory lifecycle: unexpected sweep reply: %s", str(raw)[:200])
+                return
+            lookups = res.get("lookups") or {}
+            logger.info("Memory lifecycle: archived %d palace memorie(s) and %d lookup(s); "
+                        "%s lookups active (%s pinned)%s",
+                        len(res.get("archived") or []), len(lookups.get("archived") or []),
+                        lookups.get("active", "?"), lookups.get("pinned", "?"),
+                        f"; errors: {res['errors']}" if res.get("errors") else "")
+        except Exception as e:
+            logger.warning("Memory lifecycle sweep failed: %s", e)
 
     # ------------------------------------------------------------------
     # skill_creator_cycle (SELF_IMPROVE) — auto-draft skills from failures

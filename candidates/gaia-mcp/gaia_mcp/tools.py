@@ -321,6 +321,11 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "palace_store_lookup": lambda p: _palace_store_lookup_impl(p),
         "palace_recall_lookup": lambda p: _palace_recall_lookup_impl(p),
         "palace_dispute_lookup": lambda p: _palace_dispute_lookup_impl(p),
+        # 6afh: did a lookup actually answer? + pin/archive lifecycle
+        "palace_lookup_feedback": lambda p: _palace_lookup_feedback_impl(p),
+        "palace_pin": lambda p: _palace_pin_impl(p),
+        "palace_restore": lambda p: _palace_restore_impl(p),
+        "palace_lifecycle_sweep": lambda p: _palace_lifecycle_sweep_impl(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
         "replace": lambda p: _replace_impl(p),
@@ -1125,7 +1130,7 @@ def _palace_recall_impl(params: dict) -> dict:
     if not query:
         return {"ok": False, "error": "query parameter required"}
     top_k = int(params.get("top_k", 5))
-    return palace.recall(query, top_k=top_k)
+    return palace.recall(query, top_k=top_k, include_archive=bool(params.get("include_archive")))
 
 
 def _palace_store_lookup_impl(params: dict) -> dict:
@@ -1148,6 +1153,8 @@ def _palace_recall_lookup_impl(params: dict) -> dict:
         query,
         top_k=int(params.get("top_k", 3)),
         min_score=float(params.get("min_score", 0.34)),
+        # 6afh: the archive is searched only when asked ("rummage deeper").
+        include_archive=bool(params.get("include_archive")),
     )
     return {"ok": True, "query": query, "results": hits}
 
@@ -1158,6 +1165,53 @@ def _palace_dispute_lookup_impl(params: dict) -> dict:
     if not isinstance(ids, list):
         return {"ok": False, "error": "ids must be a list"}
     return {"ok": True, "marked": _get_palace().lookups.mark_disputed(ids)}
+
+
+def _palace_lookup_feedback_impl(params: dict) -> dict:
+    """6afh: tell lookup memory whether an answer grounded on these sources
+    actually came from them. sources: [{memory_id?, url, snippet}]."""
+    question = params.get("question", "")
+    sources = params.get("sources")
+    if not question or not isinstance(sources, list):
+        return {"ok": False, "error": "question and sources (list) required"}
+    result = _get_palace().lookups.feedback(question, params.get("answer", ""), sources)
+    return {"ok": True, **result}
+
+
+def _palace_pin_impl(params: dict) -> dict:
+    """Keep memories forever (pinned=False releases them). `ids` are lookup
+    record ids; `palace_id` is an AAAK wing memory."""
+    pinned = params.get("pinned", True) is not False
+    palace = _get_palace()
+    out: dict = {"ok": True}
+    ids = params.get("ids") or []
+    if not isinstance(ids, list):
+        return {"ok": False, "error": "ids must be a list"}
+    if ids:
+        out["lookups"] = palace.lookups.pin(ids, pinned=pinned)
+    if params.get("palace_id"):
+        out["palace"] = palace.pin(str(params["palace_id"]), pinned=pinned)
+    if not ids and not params.get("palace_id"):
+        return {"ok": False, "error": "ids (lookups) or palace_id required"}
+    return out
+
+
+def _palace_restore_impl(params: dict) -> dict:
+    """Bring archived memories back into everyday recall."""
+    palace = _get_palace()
+    ids = params.get("ids") or []
+    if not isinstance(ids, list):
+        return {"ok": False, "error": "ids must be a list"}
+    out: dict = {"ok": True, "lookups": palace.lookups.restore(ids) if ids else 0}
+    if params.get("palace_id"):
+        out["palace"] = palace.restore(str(params["palace_id"]))
+    return out
+
+
+def _palace_lifecycle_sweep_impl(params: dict) -> dict:
+    """Archive idle / unused / long-stale memories (pinned and permanent
+    ones are never moved). dry_run=True reports without moving."""
+    return _get_palace().sweep(dry_run=bool(params.get("dry_run")))
 
 
 def _palace_navigate_impl(params: dict) -> dict:

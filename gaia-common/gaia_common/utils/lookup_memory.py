@@ -15,6 +15,21 @@ Layout: one JSON record per (url, snippet) under
 <palace root>/knowledge/lookups/<id>.json. Recall is a keyword-overlap scan
 over the records — fine for thousands of records; an index or embeddings
 can replace it later without changing the record format.
+
+Earning trust (6afh): a record retrieved for a question is not yet proof it
+ANSWERS that question — the 0vuz live test stored three Excalibur pages that
+never say where Arthur got the sword, matched them strongly next session, and
+skipped the web while Core invented. So after each grounded answer, feedback()
+checks it: an answer that hedges, or names things none of its sources say, adds
+the question to the records' `unhelpful_queries`; a supported answer adds it to
+`confirmed_queries`. Only a record confirmed for (nearly) the same question may
+answer from memory alone; anything else rides along with a fresh search.
+
+Lifecycle (6afh): `pinned` records are kept forever (pinned by hand, or
+automatically once confirmed PIN_AFTER_CONFIRMATIONS times). sweep() moves
+idle, never-used or long-stale records into <root>/archive/, which recall
+skips unless include_archive=True — searchable, but not in her way. A record
+the web returns again, or one she pins, comes back out of the archive.
 """
 
 from __future__ import annotations
@@ -47,6 +62,33 @@ _VOLATILE_RE = re.compile(
     r"who is the (ceo|president|prime minister|head|leader))\b",
     re.IGNORECASE,
 )
+
+# Lifecycle (days of inactivity — since retrieved, recalled or confirmed —
+# before a record moves to the archive). Pinned records never move.
+PIN_AFTER_CONFIRMATIONS = 3     # answered well this often: keep forever
+ARCHIVE_UNUSED_DAYS = 30        # never recalled, never confirmed
+ARCHIVE_IDLE_DAYS = 120         # recalled before, but not lately
+ARCHIVE_CONFIRMED_DAYS = 365    # proved useful, then fell out of use
+ARCHIVE_STALE_GRACE_DAYS = 30   # stale/disputed this long with no refresh
+MAX_ACTIVE_RECORDS = 5000       # beyond this, the least-recently-active go
+ARCHIVE_DIRNAME = "archive"
+
+# An answer that says, in effect, "my sources don't say".
+_HEDGE_RE = re.compile(
+    r"\b(i'?m not (sure|certain)|not (entirely )?(sure|certain|clear)|uncertain|unclear|"
+    r"it depends on (which|the) (version|source|telling|account|story)|"
+    r"(depending|depends) on (which|the) (version|source|telling|account)|"
+    r"(the|my|these) (sources?|search results?|results?) (don'?t|do not|doesn'?t|does not)|"
+    r"(couldn'?t|could not|can'?t|cannot|wasn'?t able to) (find|confirm|verify|determine)|"
+    r"(don'?t|do not) have (enough|any|specific|reliable) (information|details|data)|"
+    r"no (specific |clear |reliable )?(information|details|mention)|"
+    r"(isn'?t|is not|aren'?t|are not|wasn'?t|was not) (specified|mentioned|stated|clear)|"
+    r"if you (can )?(provide|share|tell me)|i (don'?t|do not) know)\b",
+    re.IGNORECASE,
+)
+# A sourced answer may add this share of named things the sources don't say
+# (her own framing: "Arthurian", "Britain") before it counts as unsupported.
+MAX_UNSUPPORTED_NAME_SHARE = 0.5
 
 _STOPWORDS = frozenset("""
 a an and are as at be been but by can could did do does doing for from get got
@@ -95,6 +137,55 @@ def question_match(query: str, past_queries: Iterable[str]) -> float:
     return best
 
 
+_NAME_RE = re.compile(r"\b[A-Z][a-zA-Z'\-]{2,}")
+# Capitalised only because they open a sentence; not names.
+_OPENERS = frozenset("""
+according well sure okay however also then yes great good hmm after before
+once since while although though there here this that these those some many
+most legend legends story stories tradition traditionally later eventually
+finally first one another other both each yet still instead
+""".split())
+
+
+def answer_names(text: str) -> set:
+    """Capitalised words — the names an answer commits to ("Merlin",
+    "Lancelot", "Avalon") — minus stopwords and sentence openers, lowercased.
+    Names that open a sentence still count ("Merlin gave it to him.")."""
+    out = set()
+    for w in _NAME_RE.findall(text or ""):
+        w = re.sub(r"'s$", "", w.lower()).strip("'-")
+        if w not in _STOPWORDS and w not in _FUNCTION_WORDS and w not in _OPENERS:
+            out.add(w)
+    return out
+
+
+def assess_answer(question: str, answer: str, source_texts: Iterable[str]) -> Dict[str, object]:
+    """Did `answer` come from its sources? Lexical and deliberately simple.
+
+    verdict:
+      hedged      — the answer says its sources don't say (or asks for one).
+      unsupported — most names the answer adds (beyond the question's) appear
+                    in none of the sources: Core filled the gap itself.
+      supported   — otherwise.
+    `unsupported_names` lists the names no source mentions.
+    """
+    answer = answer or ""
+    if not answer.strip():
+        return {"verdict": "hedged", "unsupported_names": [], "reason": "empty answer"}
+    if _HEDGE_RE.search(answer):
+        return {"verdict": "hedged", "unsupported_names": [],
+                "reason": _HEDGE_RE.search(answer).group(0)}
+    source_words = set()
+    for t in source_texts:
+        source_words |= set(_words(t))
+    added = answer_names(answer) - set(_words(question))
+    missing = sorted(n for n in added if n not in source_words)
+    if added and len(missing) / len(added) > MAX_UNSUPPORTED_NAME_SHARE:
+        return {"verdict": "unsupported", "unsupported_names": missing,
+                "reason": f"{len(missing)}/{len(added)} names not in sources"}
+    return {"verdict": "supported", "unsupported_names": missing, "reason": ""}
+
+
 def is_volatile(query: str) -> bool:
     return bool(_VOLATILE_RE.search(query or ""))
 
@@ -114,11 +205,17 @@ def _parse(ts: str) -> Optional[datetime]:
         return None
 
 
+def _days_since(ts: Optional[str], now: datetime) -> Optional[float]:
+    dt = _parse(ts) if ts else None
+    return (now - dt).total_seconds() / 86400 if dt else None
+
+
 class LookupMemory:
-    """File-backed store of remembered lookups."""
+    """File-backed store of remembered lookups, with a searchable archive."""
 
     def __init__(self, root: Path):
         self.root = Path(root)
+        self.archive_root = self.root / ARCHIVE_DIRNAME
 
     # ── write ─────────────────────────────────────────────────────────
 
@@ -129,6 +226,16 @@ class LookupMemory:
     def _path(self, rid: str) -> Path:
         return self.root / f"{rid}.json"
 
+    def _archived_path(self, rid: str) -> Path:
+        return self.archive_root / f"{rid}.json"
+
+    def _find(self, rid: str) -> Optional[Path]:
+        """Where record `rid` lives now — active first, then the archive."""
+        for path in (self._path(rid), self._archived_path(rid)):
+            if path.exists():
+                return path
+        return None
+
     def _load(self, path: Path) -> Optional[dict]:
         try:
             return json.loads(path.read_text(encoding="utf-8"))
@@ -136,20 +243,41 @@ class LookupMemory:
             logger.warning("LookupMemory: unreadable record %s: %s", path.name, e)
             return None
 
-    def _save(self, rec: dict) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
-        path = self._path(rec["id"])
-        tmp = path.with_suffix(".tmp")
+    def _save(self, rec: dict, archived: bool = False) -> None:
+        """Write `rec` active (default) or into the archive, removing the
+        copy on the other side so a record lives in exactly one place."""
+        target = self._archived_path(rec["id"]) if archived else self._path(rec["id"])
+        other = self._path(rec["id"]) if archived else self._archived_path(rec["id"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".tmp")
         tmp.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
-        tmp.replace(path)  # atomic: a concurrent recall never reads half a record
+        tmp.replace(target)  # atomic: a concurrent recall never reads half a record
+        if other.exists():
+            try:
+                other.unlink()
+            except OSError as e:
+                logger.warning("LookupMemory: %s left in both active and archive: %s", rec["id"], e)
+
+    def _records(self, include_archive: bool = False):
+        """(path, record, archived) for every readable record."""
+        dirs = [(self.root, False)] + ([(self.archive_root, True)] if include_archive else [])
+        for d, archived in dirs:
+            if not d.exists():
+                continue
+            for path in d.glob("*.json"):
+                rec = self._load(path)
+                if rec:
+                    yield path, rec, archived
 
     def remember(self, query: str, results: Iterable[dict], kind: str = "search",
                  now: Optional[datetime] = None) -> List[str]:
-        """Remember each usable result of a lookup. Returns the record ids.
+        """Remember each usable result of a lookup. Returns the record ids,
+        and tags each result dict with its `memory_id` so the caller (and
+        whoever it hands the results to) can give feedback on it later.
 
         A result seen again (same url + snippet) is refreshed — new
         retrieved_at, query added, any dispute cleared, since the web just
-        corroborated it — rather than duplicated.
+        corroborated it — rather than duplicated. An archived one comes back.
         """
         now = now or _now()
         days = VOLATILE_DAYS if is_volatile(query) else STABLE_DAYS
@@ -162,8 +290,8 @@ class LookupMemory:
                 continue
             url = (r.get("url") or "").strip()
             rid = self._record_id(url, snippet)
-            path = self._path(rid)
-            rec = self._load(path) if path.exists() else None
+            path = self._find(rid)
+            rec = self._load(path) if path else None
             if rec is None:
                 rec = {
                     "id": rid,
@@ -183,9 +311,12 @@ class LookupMemory:
             rec["retrieved_at"] = _iso(now)
             rec["revalidate_after"] = _iso(now + timedelta(days=days))
             rec.pop("disputed_at", None)
+            rec.pop("archived_at", None)       # back in everyday recall
+            rec.pop("archived_reason", None)
             try:
                 self._save(rec)
                 ids.append(rid)
+                r["memory_id"] = rid
             except OSError as e:
                 logger.warning("LookupMemory: could not save %s: %s", rid, e)
         if ids:
@@ -193,32 +324,171 @@ class LookupMemory:
                         len(ids), (query or "")[:80], kind, days)
         return ids
 
+    def _update(self, ids: Iterable[str], change, what: str) -> int:
+        """Apply `change(rec)` to each record (active or archived; it stays
+        where it is). Returns how many were changed."""
+        n = 0
+        for rid in ids:
+            path = self._find(rid)
+            rec = self._load(path) if path else None
+            if rec is None:
+                continue
+            change(rec)
+            try:
+                self._save(rec, archived=path.parent == self.archive_root)
+                n += 1
+            except OSError as e:
+                logger.warning("LookupMemory: could not %s %s: %s", what, rid, e)
+        return n
+
     def mark_disputed(self, ids: Iterable[str], now: Optional[datetime] = None) -> int:
         """Flag records as needing revalidation (e.g. the user pushed back on
         an answer they supported). A disputed record is still recalled, but
         marked stale so it never stands in for a fresh lookup; the next
-        lookup that returns it again clears the flag."""
-        now = now or _now()
-        n = 0
-        for rid in ids:
-            path = self._path(rid)
-            rec = self._load(path) if path.exists() else None
-            if rec is None:
-                continue
-            rec["disputed_at"] = _iso(now)
-            try:
-                self._save(rec)
-                n += 1
-            except OSError as e:
-                logger.warning("LookupMemory: could not mark %s disputed: %s", rid, e)
+        lookup that returns it again clears the flag. Its confirmations go
+        too: an answer the user disputes didn't prove the record useful."""
+        stamp = _iso(now or _now())
+
+        def change(rec):
+            rec["disputed_at"] = stamp
+            rec["confirmed_queries"] = []
+
+        n = self._update(ids, change, "mark disputed")
         if n:
             logger.info("LookupMemory: %d record(s) marked for revalidation", n)
         return n
 
+    def pin(self, ids: Iterable[str], pinned: bool = True) -> int:
+        """Keep records forever (never archived) — or release them. Pinning
+        an archived record brings it back."""
+        ids = list(ids)
+
+        def change(rec):
+            rec["pinned"] = bool(pinned)
+
+        n = self._update(ids, change, "pin")
+        if pinned:
+            for rid in ids:
+                self.restore([rid])
+        if n:
+            logger.info("LookupMemory: %d record(s) %s", n, "pinned" if pinned else "unpinned")
+        return n
+
+    def restore(self, ids: Iterable[str]) -> int:
+        """Bring archived records back into everyday recall."""
+        n = 0
+        for rid in ids:
+            path = self._archived_path(rid)
+            rec = self._load(path) if path.exists() else None
+            if rec is None:
+                continue
+            rec.pop("archived_at", None)
+            rec.pop("archived_reason", None)
+            try:
+                self._save(rec)
+                n += 1
+            except OSError as e:
+                logger.warning("LookupMemory: could not restore %s: %s", rid, e)
+        if n:
+            logger.info("LookupMemory: %d record(s) restored from the archive", n)
+        return n
+
+    # ── feedback: did the memory actually answer? ────────────────────
+
+    def _resolve_sources(self, sources: Iterable[dict]) -> Dict[str, dict]:
+        """Map each source the answer was grounded on to its record: by
+        `memory_id` when the caller kept it, else by url (+ snippet opening,
+        when a url has several records)."""
+        by_url: Dict[str, List[dict]] = {}
+        wanted: Dict[str, dict] = {}
+        need_url = []
+        for src in sources or []:
+            if not isinstance(src, dict):
+                continue
+            rid = src.get("memory_id")
+            if rid and self._find(rid):
+                wanted[rid] = src
+            elif src.get("url"):
+                need_url.append(src)
+        if need_url:
+            for _path, rec, _a in self._records(include_archive=True):
+                by_url.setdefault(rec.get("url", ""), []).append(rec)
+            for src in need_url:
+                recs = by_url.get(src["url"], [])
+                text = " ".join(str(src.get("snippet") or "").split()).lower()
+                exact = [r for r in recs if " ".join(r.get("snippet", "").split())[:60].lower() in text]
+                for r in exact or recs:
+                    wanted[r["id"]] = src
+        return wanted
+
+    def feedback(self, question: str, answer: str, sources: Iterable[dict],
+                 now: Optional[datetime] = None) -> Dict[str, object]:
+        """Record whether the lookups behind an answer actually answered
+        `question` (see assess_answer). Supported: the question joins each
+        record's `confirmed_queries` (and leaves `unhelpful_queries`); a
+        record confirmed PIN_AFTER_CONFIRMATIONS times is pinned. Hedged or
+        unsupported: the question joins `unhelpful_queries`, so the next time
+        it's asked memory rides along with a fresh search instead of
+        standing in for one."""
+        now = now or _now()
+        sources = [s for s in (sources or []) if isinstance(s, dict)]
+        resolved = self._resolve_sources(sources)
+        # Judge against what the caller showed the model and the records'
+        # own text (a caller may pass only ids, or a truncated snippet).
+        texts = [str(s.get("snippet") or "") for s in sources]
+        rec_words: Dict[str, set] = {}
+        for rid, src in resolved.items():
+            path = self._find(rid)
+            rec = self._load(path) if path else None
+            if rec:
+                text = f"{rec.get('title', '')} {rec.get('snippet', '')}"
+                texts.append(text)
+                rec_words[rid] = set(_words(f"{text} {src.get('snippet') or ''}"))
+        verdict = assess_answer(question, answer, texts)
+        if not resolved or not (question or "").strip():
+            return {**verdict, "records": 0}
+        good = verdict["verdict"] == "supported"
+        stamp = _iso(now)
+        targets = list(resolved)
+        if good:
+            # Confirm only the records that say what the answer says (the
+            # Quizlet card with "the Lake", not the Excalibur page lead shown
+            # beside it); the rest were neither help nor harm. An answer that
+            # names nothing new can't tell them apart — all are confirmed.
+            names = answer_names(answer) - set(_words(question))
+            contributed = [rid for rid in targets if names & rec_words.get(rid, set())]
+            if names and contributed:
+                targets = contributed
+
+        def change(rec):
+            confirmed = [q for q in rec.get("confirmed_queries", []) if q != question]
+            unhelpful = [q for q in rec.get("unhelpful_queries", []) if q != question]
+            if good:
+                rec["confirmed_queries"] = (confirmed + [question])[-MAX_QUERIES_PER_RECORD:]
+                rec["unhelpful_queries"] = unhelpful
+                rec["times_confirmed"] = rec.get("times_confirmed", 0) + 1
+                rec["last_confirmed_at"] = stamp
+                if rec["times_confirmed"] >= PIN_AFTER_CONFIRMATIONS and not rec.get("pinned"):
+                    rec["pinned"] = True
+                    rec["pinned_reason"] = f"confirmed {rec['times_confirmed']} times"
+                    logger.info("LookupMemory: %s pinned (%s)", rec["id"], rec["pinned_reason"])
+            else:
+                rec["confirmed_queries"] = confirmed
+                rec["unhelpful_queries"] = (unhelpful + [question])[-MAX_QUERIES_PER_RECORD:]
+
+        n = self._update(targets, change, "record feedback for")
+        if good:
+            self.restore(targets)  # it proved useful; back into everyday recall
+        logger.info("LookupMemory: answer to %r was %s (%s); %d record(s) %s",
+                    question[:80], verdict["verdict"], verdict["reason"] or "names found in sources",
+                    n, "confirmed" if good else "marked unhelpful for it")
+        return {**verdict, "records": n}
+
     # ── read ──────────────────────────────────────────────────────────
 
     def recall(self, query: str, top_k: int = 3, min_score: float = 0.34,
-               now: Optional[datetime] = None, touch: bool = True) -> List[dict]:
+               now: Optional[datetime] = None, touch: bool = True,
+               include_archive: bool = False) -> List[dict]:
         """Remembered lookups relevant to `query`, best first.
 
         The record's own title + snippet must cover at least `min_score` of
@@ -227,19 +497,17 @@ class LookupMemory:
         that search's query, so counting queries fully let an off-topic
         result ("Onimusha: Way of the Sword" for "King Arthur sword") look
         relevant. Each hit carries `score`, `question_match` (how close
-        `query` is to a question this record was actually retrieved for —
-        the bar for answering from memory without a fresh lookup) and
-        `stale` (past revalidate_after, or disputed).
+        `query` is to a question this record was retrieved for),
+        `confirmed_match` / `unhelpful_match` (… to one it answered well /
+        failed to answer — 6afh), `stale` (past revalidate_after, or
+        disputed) and `archived`. The archive is only searched on request.
         """
         now = now or _now()
         terms = content_terms(query)
-        if not terms or not self.root.exists():
+        if not terms:
             return []
         scored = []
-        for path in self.root.glob("*.json"):
-            rec = self._load(path)
-            if not rec:
-                continue
+        for path, rec, archived in self._records(include_archive):
             text_terms = content_terms(f"{rec.get('title', '')} {rec.get('snippet', '')}")
             text_hit = terms & text_terms
             text_score = len(text_hit) / len(terms)
@@ -248,36 +516,117 @@ class LookupMemory:
             query_only = (terms & content_terms(" ".join(rec.get("queries", [])))) - text_hit
             score = min(1.0, text_score + 0.5 * len(query_only) / len(terms))
             qmatch = question_match(query, rec.get("queries", []))
-            scored.append((score, qmatch, rec))
+            scored.append((score, qmatch, rec, archived))
         # Rank by relevance + question match: many records mention the
         # subject equally ("Excalibur is the sword of King Arthur" scores 1.0
         # for any Excalibur question); the one looked up for THIS question
         # (the Lady of the Lake, for "where did he get it") should lead.
-        scored.sort(key=lambda sqr: (sqr[0] + sqr[1], sqr[2].get("retrieved_at", "")), reverse=True)
+        scored.sort(key=lambda t: (t[0] + t[1], t[2].get("retrieved_at", "")), reverse=True)
         hits = []
-        for score, qmatch, rec in scored[:top_k]:
+        for score, qmatch, rec, archived in scored[:top_k]:
             revalidate = _parse(rec.get("revalidate_after", ""))
             stale = bool(rec.get("disputed_at")) or (revalidate is not None and now > revalidate)
             hits.append({**rec, "score": round(score, 3), "stale": stale,
-                         "question_match": round(qmatch, 3)})
+                         "question_match": round(qmatch, 3),
+                         "confirmed_match": round(question_match(query, rec.get("confirmed_queries", [])), 3),
+                         "unhelpful_match": round(question_match(query, rec.get("unhelpful_queries", [])), 3),
+                         "archived": archived})
             if touch:
                 rec["times_recalled"] = rec.get("times_recalled", 0) + 1
                 rec["last_recalled_at"] = _iso(now)
                 try:
-                    self._save(rec)
+                    # Stats only; an archive hit stays archived until it
+                    # proves useful (feedback) or the web returns it.
+                    self._save(rec, archived=archived)
                 except OSError:
                     # Usage stats are best-effort; recall still succeeds.
                     logger.debug("LookupMemory: could not update recall stats for %s", rec.get("id"))
         if hits:
-            logger.info("LookupMemory: recalled %d for %r (best %.2f%s)", len(hits), query[:80],
-                        hits[0]["score"], ", stale" if hits[0]["stale"] else "")
+            logger.info("LookupMemory: recalled %d for %r (best %.2f%s%s)", len(hits), query[:80],
+                        hits[0]["score"], ", stale" if hits[0]["stale"] else "",
+                        ", from archive" if hits[0]["archived"] else "")
         return hits
 
+    # ── lifecycle ─────────────────────────────────────────────────────
+
+    def _archive_reason(self, rec: dict, now: datetime) -> Optional[str]:
+        """Why `rec` should leave everyday recall, or None to keep it."""
+        if rec.get("pinned"):
+            return None
+        activity = [d for d in (
+            _days_since(rec.get("retrieved_at"), now),
+            _days_since(rec.get("last_recalled_at"), now),
+            _days_since(rec.get("last_confirmed_at"), now),
+        ) if d is not None]
+        idle = min(activity) if activity else None
+        if idle is None:
+            return None  # no dates to judge by; leave it alone
+        stale_for = max(filter(lambda d: d is not None, (
+            _days_since(rec.get("disputed_at"), now),
+            _days_since(rec.get("revalidate_after"), now),
+        )), default=None)
+        if stale_for is not None and stale_for > ARCHIVE_STALE_GRACE_DAYS:
+            return f"stale for {stale_for:.0f}d"
+        if rec.get("times_confirmed"):
+            limit = ARCHIVE_CONFIRMED_DAYS
+        elif rec.get("times_recalled"):
+            limit = ARCHIVE_IDLE_DAYS
+        else:
+            limit = ARCHIVE_UNUSED_DAYS
+        if idle > limit:
+            return f"idle {idle:.0f}d (limit {limit}d)"
+        return None
+
+    def sweep(self, now: Optional[datetime] = None, dry_run: bool = False,
+              max_active: int = MAX_ACTIVE_RECORDS) -> Dict[str, object]:
+        """Move records that are idle, never used or long stale into the
+        archive; then, if more than `max_active` remain, the least-recently
+        active unpinned ones too. Pinned records are never touched. Returns
+        what moved (or would, with dry_run)."""
+        now = now or _now()
+        moved: List[Dict[str, str]] = []
+        kept = []
+        pinned = 0
+        for _path, rec, _a in self._records():
+            pinned += bool(rec.get("pinned"))
+            reason = self._archive_reason(rec, now)
+            if reason:
+                moved.append({"id": rec["id"], "title": rec.get("title", ""), "reason": reason})
+                if not dry_run:
+                    self._archive(rec, reason, now)
+            else:
+                kept.append(rec)
+        overflow = [r for r in kept if not r.get("pinned")]
+        excess = len(kept) - max_active
+        if excess > 0:
+            overflow.sort(key=lambda r: max(r.get(k) or "" for k in (
+                "retrieved_at", "last_recalled_at", "last_confirmed_at")))
+            for rec in overflow[:excess]:
+                moved.append({"id": rec["id"], "title": rec.get("title", ""), "reason": "over capacity"})
+                if not dry_run:
+                    self._archive(rec, "over capacity", now)
+        active = len(kept) - max(0, min(excess, len(overflow)))
+        logger.info("LookupMemory: sweep %s %d record(s) to the archive; %d active (%d pinned)",
+                    "would move" if dry_run else "moved", len(moved), active, pinned)
+        return {"archived": moved, "active": active, "pinned": pinned, "dry_run": dry_run}
+
+    def _archive(self, rec: dict, reason: str, now: datetime) -> None:
+        rec["archived_at"] = _iso(now)
+        rec["archived_reason"] = reason
+        try:
+            self._save(rec, archived=True)
+        except OSError as e:
+            logger.warning("LookupMemory: could not archive %s: %s", rec.get("id"), e)
+
     def stats(self) -> Dict[str, int]:
-        n = disputed = 0
-        for path in self.root.glob("*.json") if self.root.exists() else []:
-            rec = self._load(path)
-            if rec:
-                n += 1
-                disputed += bool(rec.get("disputed_at"))
-        return {"lookups": n, "disputed": disputed}
+        n = disputed = pinned = confirmed = archived = 0
+        for _path, rec, is_archived in self._records(include_archive=True):
+            if is_archived:
+                archived += 1
+                continue
+            n += 1
+            disputed += bool(rec.get("disputed_at"))
+            pinned += bool(rec.get("pinned"))
+            confirmed += bool(rec.get("times_confirmed"))
+        return {"lookups": n, "disputed": disputed, "pinned": pinned,
+                "confirmed": confirmed, "archived": archived}

@@ -1208,6 +1208,43 @@ class AgentCore:
             logger.exception("AgentCore: unexpected error during pre-generation safety check")
             return False, 'guardian_exception'
 
+    def _lookup_feedback(self, response: str, packet) -> None:
+        """Send knowledge-router grounding + the answer to gaia-mcp's lookup
+        memory (palace_lookup_feedback) on a daemon thread. Only the router's
+        question-level grounding counts: the semantic probe's per-entity
+        searches weren't asked the question."""
+        grounding = None
+        for df in getattr(packet.content, "data_fields", None) or []:
+            if getattr(df, "key", "") != "web_grounding" or not isinstance(df.value, dict):
+                continue
+            for info in df.value.values():
+                if isinstance(info, dict) and str(info.get("source", "")).startswith("knowledge_router"):
+                    grounding = info
+        if not grounding or not grounding.get("results"):
+            return
+        answer = strip_think_tags(response or "")
+        params = {
+            "question": grounding.get("memory_query") or grounding.get("query", ""),
+            "answer": answer[:4000],
+            "sources": [{"memory_id": r.get("memory_id", ""), "url": r.get("url", ""),
+                         "snippet": r.get("snippet", "")}
+                        for r in grounding["results"] if isinstance(r, dict)],
+        }
+        def _send():
+            try:
+                from gaia_core.utils import mcp_client
+                raw = mcp_client.call_jsonrpc("palace_lookup_feedback", params)
+                inner = raw.get("response", raw) if isinstance(raw, dict) else {}
+                res = inner.get("result", inner) if isinstance(inner, dict) else {}
+                if isinstance(res, dict) and res.get("records"):
+                    logger.info("Lookup memory feedback: %s for %d record(s) (%s)",
+                                res.get("verdict"), res["records"], res.get("reason") or "-")
+            except Exception as e:
+                logger.warning("Lookup memory feedback failed: %s", e)
+
+        import threading
+        threading.Thread(target=_send, daemon=True, name="lookup-feedback").start()
+
     def run_turn(
         self,
         user_input: str,
@@ -3390,12 +3427,17 @@ class AgentCore:
                             # flag ones due for a re-check.
                             "results": [
                                 {"title": r.title or r.source, "snippet": r.content, "url": r.url,
-                                 "remembered": True, "retrieved_at": r.retrieved_at, "stale": r.stale}
+                                 "remembered": True, "retrieved_at": r.retrieved_at, "stale": r.stale,
+                                 "memory_id": r.memory_id}
                                 if r.source == "memory" else
-                                {"title": r.source, "snippet": r.content, "url": r.url}
+                                {"title": r.source, "snippet": r.content, "url": r.url,
+                                 "memory_id": r.memory_id}
                                 for r in _grounding_ctx.results[:3]],
                             "source": f"knowledge_router:{','.join(_grounding_ctx.sources_queried)}",
                             "query": user_input[:120],
+                            # 6afh: the question lookup memory was asked;
+                            # answer feedback is filed under it.
+                            "memory_query": getattr(_grounding_ctx, "query", "") or user_input,
                             "disputed_answer": re.sub(r"^\s*\[[A-Za-z ]+\]\s*", "", strip_think_tags(_disputed))[:300],
                             "followup": _followup,
                         }},
@@ -3579,6 +3621,11 @@ class AgentCore:
                             )
                         except Exception:
                             logger.debug("Cross-tier audit scheduling failed (non-fatal)", exc_info=True)
+                        # 6afh: did the answer come from its lookups? (async)
+                        try:
+                            self._lookup_feedback(_final_clean, packet)
+                        except Exception:
+                            logger.debug("Lookup memory feedback hook failed", exc_info=True)
                         try:
                             packet.response.candidate = _delib_result.final_response
                             packet.status.finalized = True
@@ -3652,6 +3699,11 @@ class AgentCore:
                         except Exception:
                             pass
 
+                    # 6afh: did the answer come from its lookups? (async)
+                    try:
+                        self._lookup_feedback(text, packet)
+                    except Exception:
+                        logger.debug("Lookup memory feedback hook failed", exc_info=True)
                     # KV prefix save handled by engine manager during controlled
                     # events (model unload, shutdown). No background threads here.
                     return
@@ -4283,6 +4335,11 @@ class AgentCore:
                                 packet.status.state = PacketState.COMPLETED
                             except Exception:
                                 pass
+                            # 6afh: did the answer come from its lookups? (async)
+                            try:
+                                self._lookup_feedback(_delib_result.final_response, packet)
+                            except Exception:
+                                logger.debug("Lookup memory feedback hook failed", exc_info=True)
                             yield {"type": "token", "value": _delib_result.final_response}
                             return
                 except Exception:
@@ -4989,6 +5046,16 @@ class AgentCore:
                     ).start()
             except Exception:
                 logger.debug("Observer scorer hook failed", exc_info=True)
+
+            # ── Lookup memory feedback (6afh, async, non-blocking) ──
+            # Did the answer come from the lookups it was grounded on? A
+            # hedge or invented names marks them unhelpful for this question
+            # (next time: search again); a supported answer confirms them
+            # (next time: memory may answer alone).
+            try:
+                self._lookup_feedback(full_response, packet)
+            except Exception:
+                logger.debug("Lookup memory feedback hook failed", exc_info=True)
 
             # --- Output Routing & Persistence (Always Run) ---
             # This function now needs to handle the v0.3 packet

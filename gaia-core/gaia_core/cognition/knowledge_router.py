@@ -40,6 +40,10 @@ class GroundingResult:
     score: float = 0.0
     question_match: float = 0.0
     memory_id: str = ""
+    # 6afh: how close the question is to one this record answered well /
+    # failed to answer before (lookup memory feedback).
+    confirmed_match: float = 0.0
+    unhelpful_match: float = 0.0
 
 
 @dataclass
@@ -48,6 +52,9 @@ class GroundingContext:
     results: List[GroundingResult] = field(default_factory=list)
     elapsed_ms: float = 0.0
     sources_queried: List[str] = field(default_factory=list)
+    # 6afh: the question lookup memory was asked — feedback on the answer
+    # goes back under this same question, so a later recall can match it.
+    query: str = ""
 
     @property
     def has_grounding(self) -> bool:
@@ -232,6 +239,13 @@ _AAAK_RECORD_RE = re.compile(r"^\w+\|\w+\|\d{4}-\d{2}-\d{2}\|")
 # enough: in the live test the sword's-*name* results scored 0.75 for "Where
 # did he get the sword?" (same subject words), the search was skipped, and
 # Core answered "Morgan Le Fay".
+#
+# 6afh: being retrieved FOR a question isn't proof a record ANSWERS it (the
+# Excalibur pages stored for "where did he get it" never say where). So
+# memory alone answers only when a record was confirmed — an earlier answer
+# from it held up (lookup_memory.feedback) — for much the same question.
+# Unconfirmed memory rides along with a fresh search; records that failed
+# this question before are dropped.
 LOOKUP_MIN_SCORE = 0.34
 STRONG_MEMORY_SCORE = 0.5
 STRONG_QUESTION_MATCH = 0.6
@@ -273,15 +287,28 @@ def _query_lookup_memory(query: str, top_k: int = 3,
                 score=float(hit.get("score") or 0.0),
                 question_match=float(hit.get("question_match") or 0.0),
                 memory_id=hit.get("id", ""),
+                confirmed_match=float(hit.get("confirmed_match") or 0.0),
+                unhelpful_match=float(hit.get("unhelpful_match") or 0.0),
             ))
     except Exception as e:
         logger.debug("Lookup memory recall failed: %s", e)
-    return results
+    failed = [r for r in results if r.unhelpful_match >= STRONG_QUESTION_MATCH]
+    if failed:
+        logger.info("KnowledgeRouter: dropping %d remembered lookup(s) that failed this question before",
+                    len(failed))
+    return [r for r in results if r.unhelpful_match < STRONG_QUESTION_MATCH]
 
 
 def _strong_memory(results: List[GroundingResult]) -> bool:
+    """A fresh, relevant record already confirmed for (nearly) this question."""
     return any(r.source == "memory" and not r.stale and r.score >= STRONG_MEMORY_SCORE
-               and r.question_match >= STRONG_QUESTION_MATCH for r in results)
+               and r.question_match >= STRONG_QUESTION_MATCH
+               and r.confirmed_match >= STRONG_QUESTION_MATCH for r in results)
+
+
+def _asked_before(results: List[GroundingResult]) -> bool:
+    """She looked up (nearly) this question before, whatever came of it."""
+    return any(r.source == "memory" and r.question_match >= STRONG_QUESTION_MATCH for r in results)
 
 
 def _dispute_memory(results: List[GroundingResult]) -> None:
@@ -372,6 +399,8 @@ def _query_web(query: str, max_results: int = 2, snippet_chars: int = 250) -> Li
                         url=url,
                         utility_score=get_utility_score("general", "web"),
                         query=query,
+                        # gaia-mcp remembered it; feedback goes to this record.
+                        memory_id=r.get("memory_id", ""),
                     ))
     except Exception as e:
         logger.debug("Web search failed: %s", e)
@@ -464,7 +493,7 @@ def ground_query(
 
     _load_utility_scores()
     t0 = time.time()
-    ctx = GroundingContext()
+    ctx = GroundingContext(query=query)
 
     # 0. System context — live sensor data (time, uptime, GPU)
     # Highest trust — these are direct system readings, not model knowledge.
@@ -615,20 +644,36 @@ def followup_query(question: str, earlier_turns: List[str], max_chars: int = 120
 
 
 def recall_answer(question: str) -> Optional[GroundingContext]:
-    """Memory-only grounding for turns the router otherwise skips (intent
-    'chat' covers plenty of factual questions). Local and cheap — no web.
-    Returns None unless she looked up much the same question before
-    (_strong_memory), so chitchat stays ungrounded and doesn't register as
-    a knowledge gap."""
+    """Grounding for turns the router otherwise skips (intent 'chat' covers
+    plenty of factual questions), if she looked much the same question up
+    before. Returns None otherwise, so chitchat stays ungrounded and doesn't
+    register as a knowledge gap.
+      - memory confirmed for this question (_strong_memory): memory only.
+      - asked before but not confirmed (6afh): it's a knowledge question
+        her memory hasn't answered yet — search again, memory after.
+    """
     t0 = time.time()
     memory = _query_lookup_memory(question)
-    if not _strong_memory(memory):
+    if _strong_memory(memory):
+        ctx = GroundingContext(results=[r for r in memory if not r.stale],
+                               sources_queried=["memory"], query=question)
+        ctx.elapsed_ms = (time.time() - t0) * 1000
+        logger.info("KnowledgeRouter: %r answered from %d remembered lookup(s) (question match %.2f)",
+                    question[:80], len(ctx.results), max(r.question_match for r in memory))
+        return ctx
+    if not _asked_before(memory):
         return None
-    ctx = GroundingContext(results=[r for r in memory if not r.stale],
-                           sources_queried=["memory"])
+    ctx = GroundingContext(query=question)
+    try:
+        ctx.results.extend(_query_web(question, max_results=3, snippet_chars=500))
+        ctx.sources_queried.append("web")
+    except Exception:
+        logger.debug("Re-lookup of an unconfirmed memory failed", exc_info=True)
+    ctx.results.extend(memory)
+    ctx.sources_queried.append("memory")
     ctx.elapsed_ms = (time.time() - t0) * 1000
-    logger.info("KnowledgeRouter: %r answered from %d remembered lookup(s) (question match %.2f)",
-                question[:80], len(ctx.results), max(r.question_match for r in memory))
+    logger.info("KnowledgeRouter: %r was looked up before but never confirmed; searched again "
+                "(%d web + %d remembered)", question[:80], len(ctx.results) - len(memory), len(memory))
     return ctx
 
 
@@ -655,6 +700,7 @@ def ground_conversation(user_turns: List[str], reason: str = "follow-up",
         query = conversation_query(user_turns)
     if not query:
         return ctx
+    ctx.query = query
     pushback = reason.startswith("pushback")
     t0 = time.time()
     memory = _query_lookup_memory(query)

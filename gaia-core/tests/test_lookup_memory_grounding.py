@@ -1,6 +1,7 @@
 """0vuz: grounding consults what GAIA looked up before — answering from a
 strong fresh memory without searching, revalidating on pushback — and the
-prompt cites where each remembered fact came from."""
+prompt cites where each remembered fact came from. 6afh: "strong" means
+confirmed for this question by an earlier answer that held up."""
 
 from unittest.mock import patch
 
@@ -8,13 +9,14 @@ from gaia_core.cognition import knowledge_router as kr
 from gaia_core.cognition.knowledge_router import GroundingResult
 
 
-def _mem(score=0.9, stale=False, rid="m1", qmatch=0.8):
+def _mem(score=0.9, stale=False, rid="m1", qmatch=0.8, confirmed=0.8, unhelpful=0.0):
     return GroundingResult(
         source="memory", trust_tier="remembered", query="q",
         content="The Lady of the Lake gives King Arthur the sword Excalibur.",
         url="https://en.wikipedia.org/wiki/Lady_of_the_Lake",
         title="Lady of the Lake - Wikipedia", retrieved_at="2026-10-27T12:00:00+00:00",
-        stale=stale, score=score, question_match=qmatch, memory_id=rid)
+        stale=stale, score=score, question_match=qmatch, memory_id=rid,
+        confirmed_match=confirmed, unhelpful_match=unhelpful)
 
 
 def _web():
@@ -37,7 +39,9 @@ def test_followup_answers_from_strong_memory_without_searching():
 def test_followup_searches_when_memory_is_weak_or_stale():
     # weak relevance, stale, or relevant-but-a-different-question (the live
     # "where did he get it" vs remembered "what's it called" case)
-    for mem in (_mem(score=0.4), _mem(stale=True), _mem(score=0.75, qmatch=0.29)):
+    # …or relevant and asked before, but never confirmed to answer it (6afh)
+    for mem in (_mem(score=0.4), _mem(stale=True), _mem(score=0.75, qmatch=0.29),
+                _mem(confirmed=0.0)):
         with patch.object(kr, "_query_lookup_memory", return_value=[mem]), \
                 patch.object(kr, "_query_web", return_value=[_web()]) as qw:
             ctx = kr.ground_conversation(Q, context_turns=CTX)
@@ -190,11 +194,88 @@ def test_semantic_fallback_searches_when_nothing_is_remembered():
 
 
 def test_recall_answer_needs_a_strong_question_match():
-    with patch.object(kr, "_query_lookup_memory", return_value=[_mem()]):
+    with patch.object(kr, "_query_lookup_memory", return_value=[_mem()]), \
+            patch.object(kr, "_query_web") as qw:
         ctx = kr.recall_answer("Where did King Arthur get Excalibur?")
+    qw.assert_not_called()
     assert ctx is not None and ctx.sources_queried == ["memory"]
+    assert ctx.query == "Where did King Arthur get Excalibur?"
     # Same subject, different question — or chitchat — gives nothing (None,
     # so it isn't counted as a knowledge gap either).
-    for mem in ([_mem(qmatch=0.2)], [_mem(stale=True)], []):
+    for mem in ([_mem(qmatch=0.2)], []):
         with patch.object(kr, "_query_lookup_memory", return_value=mem):
             assert kr.recall_answer("How are you today?") is None
+
+
+def test_recall_answer_searches_again_when_memory_never_answered():
+    # 6afh live case: the Excalibur pages stored for "where did he get it"
+    # never say where; unconfirmed (or stale), they must not stand in for a
+    # search — but the question is a known knowledge question, so search.
+    for mem in (_mem(confirmed=0.0), _mem(stale=True)):
+        with patch.object(kr, "_query_lookup_memory", return_value=[mem]), \
+                patch.object(kr, "_query_web", return_value=[_web()]) as qw:
+            ctx = kr.recall_answer("Where did King Arthur get Excalibur?")
+        qw.assert_called_once()
+        assert ctx.sources_queried == ["web", "memory"]
+        assert [r.source for r in ctx.results] == ["web", "memory"]
+
+
+def test_memory_that_failed_this_question_is_dropped():
+    hits = [{"id": "bad", "snippet": "Excalibur is the mythical sword of King Arthur.", "url": "u",
+             "score": 1.0, "question_match": 0.8, "unhelpful_match": 0.8},
+            {"id": "ok", "snippet": "The Lady of the Lake gives Arthur Excalibur.", "url": "v",
+             "score": 0.9, "question_match": 0.8, "confirmed_match": 0.7}]
+    with patch("gaia_core.utils.mcp_client.call_jsonrpc",
+               return_value={"ok": True, "response": {"result": {"results": hits}}}):
+        res = kr._query_lookup_memory("Where did King Arthur get Excalibur?")
+    assert [r.memory_id for r in res] == ["ok"] and res[0].confirmed_match == 0.7
+    assert kr._strong_memory(res)
+
+
+def test_web_results_carry_their_memory_id():
+    web = {"results": [{"title": "Lady of the Lake", "snippet": "The Lady of the Lake gives Arthur Excalibur.",
+                        "url": "https://w", "memory_id": "abc123"}]}
+    with patch("gaia_core.utils.mcp_client.call_jsonrpc",
+               return_value={"ok": True, "response": {"result": web}}):
+        res = kr._query_web("Where did King Arthur get Excalibur?")
+    assert res[0].memory_id == "abc123"
+
+
+def _feedback_packet(source="knowledge_router:web"):
+    from gaia_common.protocols.cognition_packet import CognitionPacket, Content, DataField
+    info = {"results": [{"title": "web", "snippet": "The Lady of the Lake gives Arthur Excalibur.",
+                         "url": "https://w", "memory_id": "abc123"}],
+            "source": source, "query": "Where did he get it?",
+            "memory_query": "Where did he get the sword? King Arthur Excalibur"}
+    return CognitionPacket(content=Content(
+        original_prompt="Where did he get it?",
+        data_fields=[DataField(key="web_grounding", value={"q": info}, type="json")]))
+
+
+def _run_feedback(packet, answer="<think>hmm</think>From the Lady of the Lake."):
+    import threading
+    from gaia_core.cognition.agent_core import AgentCore
+    sent = []
+    done = threading.Event()
+
+    def fake(method, params):
+        sent.append((method, params))
+        done.set()
+        return {"response": {"result": {"verdict": "supported", "records": 1}}}
+    with patch("gaia_core.utils.mcp_client.call_jsonrpc", side_effect=fake):
+        AgentCore._lookup_feedback(object.__new__(AgentCore), answer, packet)
+        done.wait(2)
+    return sent
+
+
+def test_answer_feedback_goes_to_lookup_memory_under_the_recall_question():
+    sent = _run_feedback(_feedback_packet())
+    assert sent[0][0] == "palace_lookup_feedback"
+    params = sent[0][1]
+    assert params["question"] == "Where did he get the sword? King Arthur Excalibur"
+    assert params["answer"] == "From the Lady of the Lake."
+    assert params["sources"][0]["memory_id"] == "abc123"
+
+
+def test_no_feedback_for_semantic_probe_grounding():
+    assert _run_feedback(_feedback_packet(source="web_search")) == []
