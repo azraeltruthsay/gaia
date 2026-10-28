@@ -37,6 +37,7 @@ significance comes from the introspection-evidence count. Phase 3
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -126,6 +127,10 @@ _KNOWN_ACRONYMS = frozenset({
 # clearest tells (e.g. "model_executor.eval()").
 _FUNCTION_CALL_RE = re.compile(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\s*\(")
 _ACRONYM_RE = re.compile(r"\b([A-Z]{2,5})\b")
+
+# Gemma 4's thinking switch: at the top of the system turn it opens the
+# model's own <|channel>thought ...<channel|> channel before the answer.
+NATIVE_THINK_TOKEN = "<|think|>"
 
 _DELIBERATION_INSTRUCTIONS = """\
 Before answering, think in a <think>...</think> block. Inside the \
@@ -596,6 +601,7 @@ def deliberate(
     session_id: Optional[str] = None,
     casual: bool = False,
     offer_tools: bool = True,
+    native_thinking: bool = False,
 ) -> DeliberationResult:
     """Run a single-call deliberation pass: thinking phase + final response.
 
@@ -615,19 +621,32 @@ def deliberate(
     (prompt_builder.offers_tools), leaves out the tool schema: offering tools
     the runtime then suppresses left Core's reply as a bare, discarded call
     (1ha9).
+
+    `native_thinking`, True with the core_thinking_v1 adapter, uses Gemma 4's
+    own thought channel instead of the <think> instructions: <|think|> opens
+    the system turn and no deliberation text is added. The engine returns the
+    thought as reasoning_content, apart from the answer (h1ok — the <think>
+    instructions went unfollowed ~94% of the time and leaked into replies).
     """
     t0 = time.time()
 
     messages = [dict(m) for m in assembled_messages]
-    _instructions = _CASUAL_DELIBERATION_INSTRUCTIONS if casual else _DELIBERATION_INSTRUCTIONS
-    addendum = "\n\n---\nDELIBERATION:\n" + _instructions
-    if messages and messages[0].get("role") == "system":
-        messages[0] = {
-            **messages[0],
-            "content": (messages[0].get("content", "").rstrip() + addendum),
-        }
+    if native_thinking:
+        _instructions = ""
+        if messages and messages[0].get("role") == "system":
+            messages[0] = {**messages[0], "content": NATIVE_THINK_TOKEN + "\n" + messages[0].get("content", "")}
+        else:
+            messages.insert(0, {"role": "system", "content": NATIVE_THINK_TOKEN})
     else:
-        messages.insert(0, {"role": "system", "content": _instructions})
+        _instructions = _CASUAL_DELIBERATION_INSTRUCTIONS if casual else _DELIBERATION_INSTRUCTIONS
+        addendum = "\n\n---\nDELIBERATION:\n" + _instructions
+        if messages and messages[0].get("role") == "system":
+            messages[0] = {
+                **messages[0],
+                "content": (messages[0].get("content", "").rstrip() + addendum),
+            }
+        else:
+            messages.insert(0, {"role": "system", "content": _instructions})
 
     # Ground tool-calling in the REAL tool list. Without this, the model has
     # no grounding for what tools exist and can hallucinate plausible-sounding
@@ -646,6 +665,7 @@ def deliberate(
 
     model = None
     raw = ""
+    reasoning = None
     try:
         try:
             model = model_pool.acquire_model(model_role)
@@ -671,7 +691,9 @@ def deliberate(
             if adapter_name:
                 forward_kwargs["adapter_name"] = adapter_name
             res = model_pool.forward_to_model(model_role, **forward_kwargs)
-            raw = (res["choices"][0]["message"]["content"] or "").strip()
+            _msg = res["choices"][0]["message"]
+            raw = (_msg["content"] or "").strip()
+            reasoning = _msg.get("reasoning_content")
         except Exception:
             logger.exception("Deliberation: model call failed")
             raw = ""
@@ -684,7 +706,18 @@ def deliberate(
 
     elapsed_ms = (time.time() - t0) * 1000.0
 
-    thinking, final_response, fallback_used = _split_think_and_response(raw)
+    if isinstance(reasoning, str):
+        # Native thought channel: the engine already separated it. A thought
+        # cut off before the answer leaves final_response empty, and the
+        # caller falls back to the ordinary path rather than voice the thought.
+        thinking, final_response = reasoning.strip(), raw
+        fallback_used = not final_response
+        logger.info("Deliberation: native thought %d chars, answer %d chars",
+                    len(thinking), len(final_response))
+    else:
+        if native_thinking:
+            logger.info("Deliberation: native thinking requested but no thought channel returned")
+        thinking, final_response, fallback_used = _split_think_and_response(raw)
     final_response = _strip_leading_input_echo(final_response, user_input)
     final_response, _echo_dropped = _strip_scaffold_echo(
         final_response, _scaffold_text(messages[0].get("content", ""), _instructions), user_input)
@@ -727,6 +760,10 @@ def deliberate(
 
 
 # ── Top-level orchestration: deliberate + safety net ────────────────────
+
+def _flag(value) -> bool:
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
 
 def run_deliberated_turn(
     user_input: str,
@@ -777,6 +814,15 @@ def run_deliberated_turn(
     _is_prime_tier = model_role in ("prime", "cpu_prime")
     adapter_name = None if (_is_prime_tier or not use_adapter) else cfg.get("adapter_name", "core_deliberation_v1")
     max_tokens = int(cfg.get("max_tokens", 900))
+    # h1ok: Core thinks in Gemma 4's own thought channel, restored by the
+    # core_thinking_v1 adapter, instead of following <think> instructions.
+    # Gemma-only, so never on Prime (Qwen). The thought itself needs room:
+    # traces run ~100–1000 tokens before the answer starts.
+    native_thinking = (not _is_prime_tier and use_adapter and _flag(
+        cfg.get("native_thinking", os.environ.get("DELIBERATION_NATIVE_THINKING", "0"))))
+    if native_thinking:
+        adapter_name = cfg.get("thinking_adapter_name", "core_thinking_v1")
+        max_tokens = int(cfg.get("native_max_tokens", 2048))
     temperature = float(cfg.get("temperature", 0.55))
     # Autonomic affect capacity (3rr): affect shapes HOW the deliberated response
     # is generated — warmer/roomier when eager/curious, cooler/terser when worn or
@@ -813,6 +859,7 @@ def run_deliberated_turn(
         session_id=session_id,
         casual=casual,
         offer_tools=offer_tools,
+        native_thinking=native_thinking,
     )
 
     # 2. If clean, return as-is

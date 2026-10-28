@@ -279,6 +279,8 @@ class VLLMRemoteModel:
         duration = time.time() - start
 
         content = resp["choices"][0]["message"]["content"]
+        # Gemma 4's native thought channel, split off by the engine (h1ok).
+        reasoning = resp["choices"][0]["message"].get("reasoning_content")
         self._log_usage(resp, duration)
 
         return {
@@ -286,6 +288,7 @@ class VLLMRemoteModel:
                 "message": {
                     "role": "assistant",
                     "content": content,
+                    **({"reasoning_content": reasoning} if reasoning is not None else {}),
                 },
                 "finish_reason": resp["choices"][0].get("finish_reason", "stop"),
             }],

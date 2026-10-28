@@ -273,6 +273,11 @@ services:
       # mode (no LLM — cheap rule/embedding checks only). Was bypassed there. Set 0
       # to disable. Remediation is a follow-up; for now it observes + logs + health.
       - OBSERVER_ON_STREAM=${OBSERVER_ON_STREAM:-1}
+      # h1ok: Core deliberates in Gemma 4's own thought channel (<|think|>,
+      # core_thinking_v1 adapter) instead of following <think> instructions it
+      # ignored ~94% of the time and leaked into replies. Held-out eval: thought
+      # 44/44 vs 14/44, scaffold leaks 0 vs 10, same latency. Set 0 to revert.
+      - DELIBERATION_NATIVE_THINKING=${DELIBERATION_NATIVE_THINKING:-1}
       # Affect appraisal (P0): feed the affect system from real subsystems —
       # coherence (consistency), competence (tool outcomes), curiosity (knowledge
       # gaps) write FUNCTIONAL drives/foci (never feels — those are hers). DEFAULT
