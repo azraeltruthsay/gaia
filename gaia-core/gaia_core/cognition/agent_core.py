@@ -2753,29 +2753,37 @@ class AgentCore:
                 if save_result:
                     if save_result.get("action") == "dedup_blocked":
                         existing = save_result["existing_doc"]
-                        yield {"type": "token", "value": (
+                        _save_reply = (
                             f"I found an existing document that closely matches this information "
                             f"(similarity: {existing['similarity']:.0%}): **{existing['title']}**. "
                             f"No duplicate was created. If this is genuinely new information, "
                             f"please rephrase or add distinguishing details."
-                        )}
-                        return
+                        )
                     elif save_result.get("ok"):
-                        yield {"type": "token", "value": (
+                        _save_reply = (
                             f"Acknowledged. I've documented '{save_result['subject']}' "
                             f"to `{save_result['path']}`."
-                        )}
+                        )
                         if save_result.get("embed_ok"):
-                            yield {"type": "token", "value": " It's now indexed for future retrieval."}
-                        return
+                            _save_reply += " It's now indexed for future retrieval."
                     else:
-                        yield {"type": "token", "value": (
+                        _save_reply = (
                             f"I tried to save that information but encountered an issue: "
                             f"{save_result.get('error', 'unknown error')}. "
                             f"The MCP write_file tool may require approval."
-                        )}
-                        return
-    
+                        )
+                    yield {"type": "token", "value": _save_reply}
+                    # rlx8: this reply was never added to the session, so the
+                    # history held two user turns in a row ("Remember this: my
+                    # favorite color is cerulean." / "What is my favorite
+                    # color?") and Core read the second as about herself.
+                    try:
+                        self.session_manager.add_message(session_id, "assistant", _save_reply)
+                    except Exception:
+                        self.logger.warning("Explicit save: could not record the reply in session %s",
+                                            session_id, exc_info=True)
+                    return
+
                 # 2. Auto-detect: long D&D info dump → offer to save (don't write yet)
                 auto_classification = run_auto_detect(user_input, knowledge_base_name)
                 if auto_classification:

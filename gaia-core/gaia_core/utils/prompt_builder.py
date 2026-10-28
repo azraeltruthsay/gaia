@@ -82,6 +82,39 @@ def _content_token_count(content) -> int:
         return total
     return 0
 
+# Slim mode (rlx8): recent turns only, trimmed — it exists to keep the prompt
+# small for the fast-reflex path.
+_SLIM_HISTORY_TURNS = 6
+_SLIM_HISTORY_CHARS = 600
+
+
+def _slim_history(packet) -> List[Dict]:
+    """The last few conversation turns as chat messages for the slim prompt:
+    starting with a user turn (it follows an assistant exemplar), consecutive
+    same-role turns merged so roles alternate before the real user turn."""
+    try:
+        snippets = getattr(getattr(packet, "context", None), "relevant_history_snippet", None) or []
+    except Exception:
+        return []
+    msgs: List[Dict] = []
+    for snip in snippets[-_SLIM_HISTORY_TURNS:]:
+        role = getattr(snip, "role", "") or ""
+        text = str(getattr(snip, "summary", "") or getattr(snip, "text", "") or "").strip()
+        if role not in ("user", "assistant") or not text:
+            continue
+        text = text[:_SLIM_HISTORY_CHARS]
+        if msgs and msgs[-1]["role"] == role:
+            msgs[-1]["content"] += "\n" + text
+        else:
+            msgs.append({"role": role, "content": text})
+    while msgs and msgs[0]["role"] != "user":
+        msgs.pop(0)
+    # The real user turn comes next, so the history must end on GAIA's turn.
+    if msgs and msgs[-1]["role"] == "user":
+        msgs.append({"role": "assistant", "content": "(no reply)"})
+    return msgs
+
+
 def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None, slim_mode: bool = False, kv_prefix_active: bool = False) -> List[Dict]:
     """
     Builds a prompt from a v0.3 CognitionPacket, using a tiered, budget-aware logic.
@@ -158,6 +191,11 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             # a leak just reinforces "I'm GAIA," which is harmless everywhere.
             {"role": "user", "content": "Who are you?"},
             {"role": "assistant", "content": "I'm GAIA, a sovereign AI created by Azrael."},
+            # rlx8: the conversation so far, between the exemplars and the
+            # real turn. Slim mode had none, so "What is my favorite color?"
+            # right after "Remember this: my favorite color is cerulean." got
+            # "I don't have a favorite color" / "Blue".
+            *_slim_history(packet),
             {"role": "user", "content": packet.content.original_prompt}
         ]
     logger.info(packet)

@@ -103,6 +103,10 @@ def detect_save_command(user_input: str) -> Optional[Dict[str, str]]:
             if not content:
                 content = user_input
 
+            # rlx8: "Remember this: my favorite color is cerulean." names no
+            # subject; name the save after what it says, not 'untitled'.
+            if not subject and content and content != user_input:
+                subject = " ".join(content.split()[:8]).rstrip(".!?,;:")
             result = {"subject": subject or "untitled", "raw_content": content}
             if symbol:
                 result["symbol"] = symbol
