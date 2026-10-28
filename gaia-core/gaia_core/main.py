@@ -1942,8 +1942,17 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 # no-tools instruction. If even THIS hallucinates,
                                 # give up gracefully with an honest one-line
                                 # apology rather than silence or more plumbing.
+                                # r4p6: the retry still carries what the tool
+                                # returned, as plain text in the user turn —
+                                # without it Core answered "what's on this
+                                # page?" with an invented book.
                                 if _cont_hallucinated_again and not _cont_produced_text:
                                     logger.info("Attempting one clean-slate corrective retry (no tool-call precedent in history)")
+                                    if rpc_result.get("ok") and isinstance(actual_result, dict) and actual_result.get("content"):
+                                        _tool_text = str(actual_result["content"])[:4000]
+                                    else:
+                                        import re as _re
+                                        _tool_text = _re.sub(r"</?tool_result>", "", result_xml).strip()
                                     _retry_messages = [
                                         {"role": "system", "content": (
                                             "You are GAIA, a direct and capable writer. You do not have "
@@ -1951,7 +1960,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                                             "this — just answer the user's request directly, in plain "
                                             "natural-language text, right now."
                                         )},
-                                        {"role": "user", "content": user_input},
+                                        {"role": "user", "content": (
+                                            f"{user_input}\n\n"
+                                            f"(Already done: {tc.tool_name} returned the following.)\n\n"
+                                            f"{_tool_text}"
+                                        )},
                                     ]
                                     try:
                                         _retry_gen = _agent_core.generate_continuation(

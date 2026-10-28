@@ -514,7 +514,7 @@ TEST_CASES = [
         validators=[
             v_non_empty,
             v_contains_any(
-                "melville", "moby", "dick", "whale", "herman",
+                "melville", "moby", "whale", "herman",
                 "ahab", "perth", "blacksmith", "pequod", "harpoon",
             ),
         ],
