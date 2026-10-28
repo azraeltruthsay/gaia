@@ -37,18 +37,13 @@ def mock_agent_core():
         },
     }
 
-    with patch('gaia_common.utils.entity_validator.EntityValidator'), \
-         patch('gaia_core.memory.session_manager.SessionManager'), \
+    with patch('gaia_core.memory.session_manager.SessionManager'), \
          patch('gaia_core.main.AIManagerShim'):
         core = AgentCore(config)
         core.logger = MagicMock()
         core.model_pool = MagicMock()
         core.identity_guardian = MagicMock()
         core.identity_guardian.verify_prompt_stack.return_value = (True, [])
-        # correct_text must pass the string through — the blast-shield regex
-        # downstream operates on the returned value.
-        core.entity_validator = MagicMock()
-        core.entity_validator.correct_text.side_effect = lambda t: t
         core.timeline_store = None
         return core
 

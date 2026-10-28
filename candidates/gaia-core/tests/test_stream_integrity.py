@@ -54,8 +54,7 @@ def mock_agent_core():
     config.SHARED_DIR = "/tmp/gaia_test_shared"
     config.constants = config_obj.constants
     
-    with patch('gaia_common.utils.entity_validator.EntityValidator'), \
-         patch('gaia_core.memory.session_manager.SessionManager'), \
+    with patch('gaia_core.memory.session_manager.SessionManager'), \
          patch('gaia_core.main.AIManagerShim'):
         
         core = AgentCore(config)

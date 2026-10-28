@@ -25,7 +25,6 @@ log_chat_entry_structured = lambda *args, **kwargs: None  # Placeholder
 from gaia_core.utils.stream_observer import StreamObserver
 import gaia_core.utils.mcp_client as mcp_client
 from gaia_core.config import get_config
-from gaia_common.utils.entity_validator import EntityValidator
 from gaia_common.utils.error_logging import log_gaia_error
 
 # Get constants from config for backwards compatibility
@@ -450,9 +449,6 @@ class AgentCore:
         self.semantic_codex = SemanticCodex.instance(self.config)
         self.codex_writer = CodexWriter(self.config, self.semantic_codex)
         
-        # Initialize EntityValidator for noun correction
-        self.entity_validator = EntityValidator.from_config(self.config)
-
         # Initialize Identity Guardian for reflex and prompt validation
         self.identity_guardian = CoreIdentityGuardian(self.config)
 
@@ -1315,9 +1311,12 @@ class AgentCore:
         # Normalize metadata
         _metadata = metadata or {}
         
-        # Apply entity validation/correction to user input
-        if user_input:
-            user_input = self.entity_validator.correct_text(user_input)
+        # 578k: the user's words reach the pipeline as they were written.
+        # An EntityValidator used to fuzzy-match every capitalised word
+        # against project names here (difflib, cutoff 0.8), and "Who wrote
+        # Pride and Prejudice?" became "…Prime and Prejudice" before Core
+        # saw it. A closed vocabulary can't tell a typo from a different
+        # real word. Transcription fixes belong to the speech-to-text step.
 
         # Blast Shield (agent-input layer): catch destructive shell patterns
         # BEFORE the model is invoked. Prompt-based hedging on this model is
