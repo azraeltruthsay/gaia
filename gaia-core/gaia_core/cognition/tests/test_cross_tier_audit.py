@@ -122,3 +122,73 @@ class TestMaybeEmitSamvega:
             journal_entry_id="j4", summary="",
         )
         assert path is None
+
+
+# ── Verdict-first (d12t follow-up) ──────────────────────────────────────
+
+class _Pool:
+    """Fake model pool: replies in order, records every call."""
+
+    def __init__(self, *replies):
+        self.replies = list(replies)
+        self.calls = []
+
+    def forward_to_model(self, role, messages, **kw):
+        self.calls.append({"role": role, "messages": [dict(m) for m in messages], **kw})
+        return {"choices": [{"message": {"content": self.replies.pop(0)}}]}
+
+
+def _run(monkeypatch, pool, cfg=None):
+    from gaia_core.cognition import cross_tier_audit as cta
+    notes = []
+    monkeypatch.setattr(cta, "_claim_entry", lambda eid: True)
+    monkeypatch.setattr(cta, "_lifecycle_allows_audit", lambda: (True, "ok"))
+    monkeypatch.setattr(cta, "_maybe_emit_samvega", lambda **kw: None)
+    import gaia_core.memory.journal as journal
+    monkeypatch.setattr(journal, "annotate_entry", lambda eid, note, **kw: notes.append(note) or True)
+    res = cta.run_cross_tier_audit_sync(
+        user_input="What is the capital of France?", thinking="It's Paris.",
+        final_response="Paris.", journal_entry_id="cognition-1", model_pool=pool,
+        config={"CROSS_TIER_AUDIT": cfg or {}})
+    return res, notes
+
+
+def test_clean_verdict_ends_the_audit_after_one_short_call(monkeypatch):
+    pool = _Pool("clean")
+    res, notes = _run(monkeypatch, pool)
+    assert res.clean and not res.findings and len(pool.calls) == 1
+    call = pool.calls[0]
+    assert call["max_tokens"] <= 8 and call["chat_template_kwargs"] == {"enable_thinking": False}
+    assert call["temperature"] == 0.0  # deterministic gate
+    assert call["messages"][-1]["content"].endswith("answer with one word, clean or flagged.")
+    assert notes and notes[0].startswith("Cross-tier audit (clean, Prime)")  # still journaled
+
+
+def test_flagged_verdict_gets_the_full_audit_extending_the_same_conversation(monkeypatch):
+    detail = "AUDIT: flagged\nFLAGS:\n- confabulation: invented a component\nSUMMARY: made something up"
+    pool = _Pool("AUDIT: flagged", detail)
+    res, _ = _run(monkeypatch, pool)
+    assert not res.clean and res.findings[0].category == "confabulation"
+    first, second = pool.calls
+    # Same prefix: the second call only appends turns (gaia_cpp reuses the KV).
+    assert second["messages"][:2] == first["messages"]
+    assert second["messages"][2] == {"role": "assistant", "content": "AUDIT: flagged"}
+    assert "chat_template_kwargs" not in second  # details think as before
+
+
+def test_full_audit_can_overturn_a_flagged_verdict(monkeypatch):
+    res, _ = _run(monkeypatch, _Pool("flagged", "AUDIT: clean\nSUMMARY: fine on reflection"))
+    assert res.clean
+
+
+def test_unreadable_verdict_falls_through_to_the_full_audit(monkeypatch):
+    pool = _Pool("hmm", "AUDIT: clean\nSUMMARY: ok")
+    res, _ = _run(monkeypatch, pool)
+    assert res.clean and len(pool.calls) == 2
+
+
+def test_verdict_first_can_be_turned_off(monkeypatch):
+    pool = _Pool("AUDIT: clean\nSUMMARY: ok")
+    res, _ = _run(monkeypatch, pool, cfg={"verdict_first": False})
+    assert res.clean and len(pool.calls) == 1
+    assert pool.calls[0]["messages"][-1]["content"].endswith("Run the audit now.")

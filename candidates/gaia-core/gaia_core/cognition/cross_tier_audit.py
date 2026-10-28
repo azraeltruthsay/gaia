@@ -76,6 +76,7 @@ class AuditResult:
     followup: str = ""  # natural in-voice correction, set only when flagged
     raw_output: str = ""
     elapsed_ms: float = 0.0
+    verdict_ms: float = 0.0  # verdict-first: the one-word gate's share of elapsed_ms
     skipped_reason: Optional[str] = None  # set if audit skipped (lifecycle, etc.)
     samvega_path: Optional[str] = None    # set if a samvega artifact was created
     annotated_entry: Optional[str] = None  # journal entry id that was annotated
@@ -166,21 +167,47 @@ If you genuinely have no concerns, output "AUDIT: clean" with the \
 SUMMARY line and nothing else. Don't invent concerns to fill space."""
 
 
-def _build_audit_prompt(user_input: str, thinking: str, final_response: str) -> List[Dict[str, str]]:
-    """Build the message list for Prime's audit pass."""
-    user_content = (
+def _audit_context(user_input: str, thinking: str, final_response: str) -> str:
+    return (
         "USER MESSAGE:\n"
         f"{user_input.strip()}\n\n"
         "CORE'S THINKING (was inside <think>...</think>):\n"
         f"{(thinking or '(empty)').strip()}\n\n"
         "CORE'S FINAL RESPONSE:\n"
         f"{(final_response or '(empty)').strip()}\n\n"
-        "Run the audit now."
     )
+
+
+def _build_audit_prompt(user_input: str, thinking: str, final_response: str) -> List[Dict[str, str]]:
+    """Build the message list for Prime's audit pass (one-shot)."""
     return [
         {"role": "system", "content": _AUDIT_INSTRUCTIONS},
-        {"role": "user", "content": user_content},
+        {"role": "user", "content": _audit_context(user_input, thinking, final_response) + "Run the audit now."},
     ]
+
+
+# Verdict-first (GAIA_Project-d12t follow-up): one word first, the full audit
+# only when it's flagged. On CPU each generated token costs ~15x a prompt
+# token, and most turns are clean, so most audits end after a few tokens.
+# The second call extends the first conversation, so with gaia_cpp's prefix
+# reuse it reads only the new turns. The full audit can still come back
+# clean — the one-word answer is a gate, not the verdict of record.
+_VERDICT_QUESTION = "First, the verdict alone: answer with one word, clean or flagged."
+_DETAIL_REQUEST = "Now give the full audit, in the output format above."
+_ONE_WORD_RE = re.compile(r"\b(clean|flagged)\b", re.IGNORECASE)
+
+
+def _build_verdict_prompt(user_input: str, thinking: str, final_response: str) -> List[Dict[str, str]]:
+    return [
+        {"role": "system", "content": _AUDIT_INSTRUCTIONS},
+        {"role": "user", "content": _audit_context(user_input, thinking, final_response) + _VERDICT_QUESTION},
+    ]
+
+
+def _parse_verdict(raw: str) -> Optional[bool]:
+    """True = clean, False = flagged, None = no readable verdict."""
+    m = _ONE_WORD_RE.search(raw or "")
+    return None if not m else m.group(1).lower() == "clean"
 
 
 # ── Output parsing ──────────────────────────────────────────────────────
@@ -410,19 +437,39 @@ def run_cross_tier_audit_sync(
 
     max_tokens = int(max_audit_tokens or cfg.get("max_audit_tokens", 350))
     temperature = float(audit_temperature or cfg.get("audit_temperature", 0.3))
+    verdict_first = bool(cfg.get("verdict_first", True))
 
-    messages = _build_audit_prompt(user_input, thinking, final_response)
+    def _ask(msgs, n, temp=None, **extra):
+        res = model_pool.forward_to_model("prime", messages=msgs, max_tokens=n,
+                                          temperature=temperature if temp is None else temp,
+                                          top_p=0.9, **extra)
+        return (res.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
 
     t0 = time.time()
+    verdict_only = False
+    verdict_ms = 0.0
     try:
-        res = model_pool.forward_to_model(
-            "prime",
-            messages=messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=0.9,
-        )
-        raw = (res.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        if verdict_first:
+            verdict_msgs = _build_verdict_prompt(user_input, thinking, final_response)
+            # Thinking off: a one-word gate isn't worth hundreds of thinking
+            # tokens, each as costly as an answer token. Greedy (temp 0): the
+            # gate must give the same turn the same answer — at the audit's
+            # 0.3 one live entry came back clean, then flagged.
+            verdict_raw = _ask(verdict_msgs, 8, temp=0.0,
+                               chat_template_kwargs={"enable_thinking": False})
+            verdict_ms = (time.time() - t0) * 1000.0
+            verdict = _parse_verdict(verdict_raw)
+            if verdict is True:
+                raw, verdict_only = verdict_raw, True
+            else:
+                # Flagged, or no readable verdict: the full audit decides.
+                raw = _ask(verdict_msgs + [
+                    {"role": "assistant", "content": verdict_raw or "flagged"},
+                    {"role": "user", "content": _DETAIL_REQUEST},
+                ], max_tokens)
+                logger.debug("Cross-tier audit: verdict %r → full audit", verdict_raw[:20])
+        else:
+            raw = _ask(_build_audit_prompt(user_input, thinking, final_response), max_tokens)
     except Exception:
         logger.exception("Cross-tier audit: Prime call failed")
         return AuditResult(
@@ -432,7 +479,10 @@ def run_cross_tier_audit_sync(
         )
 
     elapsed_ms = (time.time() - t0) * 1000.0
-    clean, findings, summary, followup = _parse_audit_response(raw)
+    if verdict_only:
+        clean, findings, summary, followup = True, [], "verdict only: no concerns", ""
+    else:
+        clean, findings, summary, followup = _parse_audit_response(raw)
 
     # Annotate the journal entry — clean or flagged
     annotated = None
@@ -472,8 +522,9 @@ def run_cross_tier_audit_sync(
         _maybe_push_followup(session_id, followup, cfg)
 
     logger.info(
-        "Cross-tier audit complete: entry=%s clean=%s findings=%d elapsed=%.0fms samvega=%s followup=%s",
+        "Cross-tier audit complete: entry=%s clean=%s findings=%d elapsed=%.0fms (verdict %s) samvega=%s followup=%s",
         journal_entry_id, clean, len(findings), elapsed_ms,
+        f"{verdict_ms:.0f}ms{', only' if verdict_only else ''}" if verdict_first else "off",
         os.path.basename(samvega_path) if samvega_path else "-",
         "yes" if (samvega_path and followup) else "no",
     )
@@ -485,6 +536,7 @@ def run_cross_tier_audit_sync(
         followup=followup,
         raw_output=raw,
         elapsed_ms=elapsed_ms,
+        verdict_ms=verdict_ms,
         annotated_entry=annotated,
         samvega_path=samvega_path,
     )
