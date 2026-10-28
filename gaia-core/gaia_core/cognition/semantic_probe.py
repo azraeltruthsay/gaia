@@ -860,7 +860,41 @@ def _web_search_fallback(entities: List[str]) -> Dict[str, Dict]:
     MCP_ENDPOINT = "http://gaia-mcp:8765/jsonrpc"
     results = {}
 
+    def _recall(entity: str) -> List[Dict]:
+        """0vuz: what she looked up before about this entity. A fresh,
+        relevant memory stands in for the search (no repeat lookup); the
+        hits keep their provenance so the prompt can cite them."""
+        try:
+            payload = _json.dumps({
+                "jsonrpc": "2.0",
+                "method": "palace_recall_lookup",
+                "params": {"query": entity, "top_k": 3, "min_score": 0.6},
+                "id": 1,
+            }).encode()
+            req = Request(MCP_ENDPOINT, data=payload,
+                          headers={"Content-Type": "application/json"})
+            with urlopen(req, timeout=2) as resp:
+                data = _json.loads(resp.read())
+            hits = (data.get("result") or {}).get("results", [])
+            return [{
+                "title": h.get("title") or h.get("domain", ""),
+                "snippet": (h.get("snippet") or "")[:200],
+                "url": h.get("url", ""),
+                "remembered": True,
+                "retrieved_at": h.get("retrieved_at", ""),
+                "stale": False,
+            } for h in hits if isinstance(h, dict) and h.get("snippet") and not h.get("stale")]
+        except Exception:
+            logger.debug("Lookup memory recall failed for '%s'", entity, exc_info=True)
+            return []
+
     for entity in entities:
+        remembered = _recall(entity)
+        if remembered:
+            results[entity] = {"results": remembered, "source": "lookup_memory", "query": entity}
+            logger.info("Web fallback for '%s': answered from %d remembered lookup(s), no search",
+                        entity, len(remembered))
+            continue
         try:
             payload = _json.dumps({
                 "jsonrpc": "2.0",

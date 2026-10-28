@@ -189,6 +189,21 @@ def _get_config() -> Tuple[SourceTrustConfig, _RateLimiter, _RateLimiter]:
 # web_search
 # ---------------------------------------------------------------------------
 
+def _remember_lookup(params: dict, query: str, results: List[dict], kind: str) -> None:
+    """0vuz: keep what was just looked up in the palace's lookup memory,
+    verbatim and with provenance, so GAIA can recall and cite it later
+    without searching again. Best-effort — a memory failure is logged and
+    never fails the lookup itself. Callers can opt out with remember=False
+    (e.g. health probes)."""
+    if params.get("remember") is False or not results:
+        return
+    try:
+        from gaia_mcp.tools import _get_palace  # lazy: tools imports this module
+        _get_palace().lookups.remember(query, results, kind=kind)
+    except Exception as e:
+        logger.warning("web %s: could not remember lookup for %r: %s", kind, query[:80], e)
+
+
 def web_search(params: dict) -> dict:
     """Search the web via DuckDuckGo and return annotated results.
 
@@ -271,6 +286,9 @@ def web_search(params: dict) -> dict:
             "trust_tier": trust.tier_for_domain(domain),
         })
 
+    # Remembered under the question as asked, not the site:-decorated query.
+    _remember_lookup(params, query, results[:max_results], "search")
+
     return {
         "ok": True,
         "query": effective_query,
@@ -280,9 +298,49 @@ def web_search(params: dict) -> dict:
     }
 
 
+_ddgs_patched = False
+
+
+def _patch_ddgs_text_joining() -> None:
+    """Fix ddgs gluing words together in every result snippet.
+
+    ddgs (9.x) BaseSearchEngine.extract_results strips each HTML text node
+    and joins them with "", so the engine's <b>highlighted</b> query terms
+    lose the spaces around them: "<b>Excalibur</b> is the sword of <b>King
+    Arthur</b>" came back "Excaliburis the sword ofKingArthur". Every web
+    result GAIA read looked like that, and lookup memory (0vuz) couldn't
+    match "Arthur" or "Excalibur" in it. The text nodes already carry their
+    own spaces, so join them raw and collapse whitespace instead.
+    Best-effort: if ddgs changes shape, searches still run unpatched.
+    """
+    global _ddgs_patched
+    if _ddgs_patched:
+        return
+    _ddgs_patched = True
+    try:
+        from ddgs.base import BaseSearchEngine
+
+        def extract_results(self, html_text):
+            html_text = self.pre_process_html(html_text)
+            tree = self.extract_tree(html_text)
+            results = []
+            for item in tree.xpath(self.items_xpath):
+                result = self.result_type()
+                for key, value in self.elements_xpath.items():
+                    result.__setattr__(key, " ".join("".join(item.xpath(value)).split()))
+                results.append(result)
+            return results
+
+        BaseSearchEngine.extract_results = extract_results
+        logger.info("web_search: patched ddgs snippet text joining (words were glued at highlights)")
+    except Exception as e:
+        logger.warning("web_search: could not patch ddgs text joining; snippets may have glued words: %s", e)
+
+
 def _ddg_search(query: str, max_results: int) -> List[dict]:
     """Search DuckDuckGo using the library, falling back to Instant Answer API."""
     # Try ddgs library first (renamed from duckduckgo_search)
+    _patch_ddgs_text_joining()
     try:
         from ddgs import DDGS
         with DDGS() as ddgs:
@@ -423,6 +481,10 @@ def web_fetch(params: dict) -> dict:
     title, text = _extract_content(html, url)
 
     tier = trust.tier_for_domain(domain)
+    _remember_lookup(params, f"{url} {title}".strip(), [{
+        "title": title, "url": url, "snippet": text,
+        "domain": domain, "trust_tier": tier,
+    }], "fetch")
     return {
         "ok": True,
         "title": title,

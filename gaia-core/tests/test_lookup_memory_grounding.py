@@ -1,0 +1,200 @@
+"""0vuz: grounding consults what GAIA looked up before — answering from a
+strong fresh memory without searching, revalidating on pushback — and the
+prompt cites where each remembered fact came from."""
+
+from unittest.mock import patch
+
+from gaia_core.cognition import knowledge_router as kr
+from gaia_core.cognition.knowledge_router import GroundingResult
+
+
+def _mem(score=0.9, stale=False, rid="m1", qmatch=0.8):
+    return GroundingResult(
+        source="memory", trust_tier="remembered", query="q",
+        content="The Lady of the Lake gives King Arthur the sword Excalibur.",
+        url="https://en.wikipedia.org/wiki/Lady_of_the_Lake",
+        title="Lady of the Lake - Wikipedia", retrieved_at="2026-10-27T12:00:00+00:00",
+        stale=stale, score=score, question_match=qmatch, memory_id=rid)
+
+
+def _web():
+    return GroundingResult(source="web", trust_tier="verified_external",
+                           content="Excalibur was given by the Lady of the Lake.", url="https://w")
+
+
+Q = ["Where did he get the sword?"]
+CTX = ["Can you tell me the name of King Arthur's sword?", "Excalibur"]
+
+
+def test_followup_answers_from_strong_memory_without_searching():
+    with patch.object(kr, "_query_lookup_memory", return_value=[_mem()]), \
+            patch.object(kr, "_query_web") as qw:
+        ctx = kr.ground_conversation(Q, context_turns=CTX)
+    qw.assert_not_called()
+    assert ctx.sources_queried == ["memory"] and ctx.results[0].source == "memory"
+
+
+def test_followup_searches_when_memory_is_weak_or_stale():
+    # weak relevance, stale, or relevant-but-a-different-question (the live
+    # "where did he get it" vs remembered "what's it called" case)
+    for mem in (_mem(score=0.4), _mem(stale=True), _mem(score=0.75, qmatch=0.29)):
+        with patch.object(kr, "_query_lookup_memory", return_value=[mem]), \
+                patch.object(kr, "_query_web", return_value=[_web()]) as qw:
+            ctx = kr.ground_conversation(Q, context_turns=CTX)
+        qw.assert_called_once()
+        assert [r.source for r in ctx.results] == ["web", "memory"]
+
+
+def test_pushback_revalidates_memory_against_the_web():
+    calls = []
+    with patch.object(kr, "_query_lookup_memory", return_value=[_mem()]), \
+            patch("gaia_core.utils.mcp_client.call_jsonrpc",
+                  side_effect=lambda m, p: calls.append((m, p)) or {"ok": True}), \
+            patch.object(kr, "_query_web", side_effect=lambda *a, **k: calls.append(("web",)) or [_web()]):
+        ctx = kr.ground_conversation(["Wasn't it Merlin who gave it to him?"], reason="pushback")
+    # Marked BEFORE the search, so a re-returned result is refreshed (cleared).
+    assert calls[0] == ("palace_dispute_lookup", {"ids": ["m1"]})
+    assert calls[1] == ("web",)
+    assert [r.source for r in ctx.results] == ["web"]
+
+
+def test_pushback_falls_back_to_stale_marked_memory_when_web_is_empty():
+    with patch.object(kr, "_query_lookup_memory", return_value=[_mem()]), \
+            patch("gaia_core.utils.mcp_client.call_jsonrpc", return_value={"ok": True}), \
+            patch.object(kr, "_query_web", return_value=[]):
+        ctx = kr.ground_conversation(["Wasn't it Merlin?"], reason="pushback")
+    assert [r.source for r in ctx.results] == ["memory"] and ctx.results[0].stale
+
+
+def test_ground_query_skips_web_on_strong_memory():
+    with patch.object(kr, "_query_system_context", return_value=[]), \
+            patch.object(kr, "_query_mempalace", return_value=[]), \
+            patch.object(kr, "_query_lookup_memory", return_value=[_mem()]), \
+            patch.object(kr, "_query_journal", return_value=[]), \
+            patch.object(kr, "_query_knowledge_graph", return_value=[]), \
+            patch.object(kr, "_query_web") as qw:
+        ctx = kr.ground_query("Where did King Arthur get Excalibur?")
+    qw.assert_not_called()
+    assert "memory" in ctx.sources_queried
+
+
+def test_aaak_only_palace_memories_are_not_grounding():
+    aaak = {"results": [{"palace_id": "p1", "content":
+            'technical|architecture|2026-10-20|system_clock|correction|util=0\n'
+            '0:ACT+KIN+ART|actually_king_arthur|"Did you know that"|TECHNICAL'}]}
+    with patch("gaia_core.utils.mcp_client.call_jsonrpc",
+               return_value={"ok": True, "response": {"result": aaak}}):
+        assert kr._query_mempalace("King Arthur") == []
+
+
+def test_lookup_memory_recall_parses_mcp_hits():
+    hit = {"id": "abc", "snippet": "The Lady of the Lake gives Arthur Excalibur.", "url": "u",
+           "title": "", "domain": "en.wikipedia.org", "retrieved_at": "2026-10-27T12:00:00+00:00",
+           "stale": False, "score": 0.75}
+    with patch("gaia_core.utils.mcp_client.call_jsonrpc",
+               return_value={"ok": True, "response": {"result": {"results": [hit]}}}) as rpc:
+        res = kr._query_lookup_memory("King Arthur Excalibur")
+    assert rpc.call_args[0][0] == "palace_recall_lookup"
+    assert res[0].title == "en.wikipedia.org" and res[0].memory_id == "abc" and res[0].score == 0.75
+
+
+def test_lookup_memory_recall_failure_is_empty_not_fatal():
+    with patch("gaia_core.utils.mcp_client.call_jsonrpc", side_effect=RuntimeError("mcp down")):
+        assert kr._query_lookup_memory("King Arthur") == []
+
+
+def _packet(results, disputed=""):
+    from gaia_common.protocols.cognition_packet import CognitionPacket, Content, DataField
+    info = {"results": results, "source": "knowledge_router:memory", "query": "q"}
+    if disputed:
+        info["disputed_answer"] = disputed
+    return CognitionPacket(content=Content(
+        original_prompt="Where did he get the sword?",
+        data_fields=[DataField(key="web_grounding", value={"q": info}, type="json")]))
+
+
+def _text(packet):
+    from gaia_core.utils import prompt_builder
+    return " ".join(str(m.get("content", "")) for m in prompt_builder.build_from_packet(packet))
+
+
+REMEMBERED = {"title": "Lady of the Lake - Wikipedia", "snippet": "The Lady of the Lake gives Arthur Excalibur.",
+              "url": "https://en.wikipedia.org/wiki/Lady_of_the_Lake", "remembered": True,
+              "retrieved_at": "2026-10-27T12:00:00+00:00", "stale": False}
+
+
+def test_remembered_lookups_render_as_memory_with_citation():
+    text = _text(_packet([REMEMBERED]))
+    assert "From your memory of earlier lookups" in text
+    assert "Lady of the Lake - Wikipedia, looked up 2026-10-27" in text
+    assert "Candidate context" not in text
+
+
+def test_stale_memory_is_flagged_and_mixed_results_keep_web_header():
+    stale = dict(REMEMBERED, stale=True)
+    web = {"title": "web", "snippet": "Excalibur was given by the Lady of the Lake.", "url": "https://w"}
+    text = _text(_packet([web, stale]))
+    assert "may be out of date" in text
+    assert "From your memory of earlier lookups" not in text
+
+
+class _Resp:
+    def __init__(self, body):
+        self._body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def read(self):
+        import json
+        return json.dumps(self._body).encode()
+
+
+def _probe_rpc(recall_hits):
+    """Fake gaia-mcp for semantic_probe: records which methods were called."""
+    import json
+    calls = []
+
+    def fake(req, timeout=None):
+        method = json.loads(req.data)["method"]
+        calls.append(method)
+        if method == "palace_recall_lookup":
+            return _Resp({"result": {"results": recall_hits}})
+        return _Resp({"result": {"results": [{"title": "Excalibur", "snippet": "web says", "url": "https://w"}]}})
+    return fake, calls
+
+
+def test_semantic_fallback_uses_memory_instead_of_searching():
+    from gaia_core.cognition import semantic_probe
+    hit = {"id": "a", "title": "Excalibur - Wikipedia", "snippet": "Excalibur is the legendary sword of King Arthur.",
+           "url": "https://en.wikipedia.org/wiki/Excalibur", "retrieved_at": "2026-10-27T12:00:00+00:00",
+           "stale": False, "score": 1.0}
+    fake, calls = _probe_rpc([hit])
+    with patch("urllib.request.urlopen", side_effect=fake):
+        out = semantic_probe._web_search_fallback(["Excalibur"])
+    assert calls == ["palace_recall_lookup"]
+    assert out["Excalibur"]["source"] == "lookup_memory"
+    assert out["Excalibur"]["results"][0]["remembered"] is True
+
+
+def test_semantic_fallback_searches_when_nothing_is_remembered():
+    from gaia_core.cognition import semantic_probe
+    fake, calls = _probe_rpc([])
+    with patch("urllib.request.urlopen", side_effect=fake):
+        out = semantic_probe._web_search_fallback(["Excalibur"])
+    assert calls == ["palace_recall_lookup", "web_search"]
+    assert out["Excalibur"]["source"] == "web_search"
+
+
+def test_recall_answer_needs_a_strong_question_match():
+    with patch.object(kr, "_query_lookup_memory", return_value=[_mem()]):
+        ctx = kr.recall_answer("Where did King Arthur get Excalibur?")
+    assert ctx is not None and ctx.sources_queried == ["memory"]
+    # Same subject, different question — or chitchat — gives nothing (None,
+    # so it isn't counted as a knowledge gap either).
+    for mem in ([_mem(qmatch=0.2)], [_mem(stale=True)], []):
+        with patch.object(kr, "_query_lookup_memory", return_value=mem):
+            assert kr.recall_answer("How are you today?") is None

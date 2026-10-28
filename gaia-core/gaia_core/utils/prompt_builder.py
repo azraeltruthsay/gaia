@@ -1523,18 +1523,35 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                     # ("…given to Arthur by the Lady of the Lake" sat at ~390,
                     # behind run-together result titles).
                     _snip = 600 if (disputed or followup) else 200
+                    _n_shown = _n_remembered = 0
                     for entity, info in web_g.items():
                         for r in info.get("results", [])[:3]:
                             title = r.get("title", "")
                             snippet = r.get("snippet", "")
                             url = r.get("url", "")
                             if snippet:
+                                _n_shown += 1
                                 if title in ("system_clock", "system_uptime"):
                                     has_system_data = True
                                     parts.append(f"[SYSTEM DATA — use this directly] {snippet[:200]}")
+                                elif r.get("remembered"):
+                                    # 0vuz: a lookup she made before. The
+                                    # citation (source + date) lets her say
+                                    # where she read it; recall already chose
+                                    # it for this question, so it gets the
+                                    # longer snippet.
+                                    _n_remembered += 1
+                                    _when = (r.get("retrieved_at") or "")[:10]
+                                    _note = ", may be out of date" if r.get("stale") else ""
+                                    _cite = ", ".join(x for x in (title, f"looked up {_when}" if _when else "") if x)
+                                    parts.append(f"- {snippet[:600]} ({_cite}{_note}; {url})")
                                 else:
                                     parts.append(f"- {title}: {snippet[:_snip]} ({url})")
-                    if has_system_data:
+                    if _n_remembered and _n_remembered == _n_shown and not disputed:
+                        # Declarative and first-person: her own record of
+                        # what she read (Gemma accepts facts, not "you feel").
+                        parts.insert(0, "[From your memory of earlier lookups, with where each came from:]")
+                    elif has_system_data:
                         # System-sensor data is authoritative (it's GAIA's own
                         # sensor read), so keep firm framing for that branch only.
                         parts.insert(0, "The following is VERIFIED system sensor data. Use it directly in your answer — do NOT say you lack access to this information:")

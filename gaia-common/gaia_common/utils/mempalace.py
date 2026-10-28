@@ -37,6 +37,7 @@ from typing import Dict, List, Optional, Tuple
 from gaia_common.utils.aaak_dialect import AAKDialect
 from gaia_common.utils.general_extractor import extract_memories
 from gaia_common.utils.knowledge_graph import KnowledgeGraph
+from gaia_common.utils.lookup_memory import LookupMemory
 
 logger = logging.getLogger("GAIA.MemPalace")
 
@@ -60,6 +61,9 @@ class MemPalace:
         kg_path = config.get("kg_path")
         self._kg = KnowledgeGraph(db_path=kg_path)
         self._dialect = AAKDialect(entities=self._entities)
+        # 0vuz: what she has looked up, verbatim + provenance (the AAAK
+        # wings keep only compressed codes, which can't answer a question).
+        self.lookups = LookupMemory(self._root_dir / "knowledge" / "lookups")
 
         # Create palace directory structure
         self._ensure_directories()
@@ -553,4 +557,12 @@ class MemPalace:
             "wings": wings_stats,
             "kg_stats": kg_stats,
             "disk_usage_mb": round(total_size / (1024 * 1024), 2),
+            "lookups": self._lookup_stats(),
         }
+
+    def _lookup_stats(self) -> dict:
+        try:
+            return self.lookups.stats()
+        except Exception as e:
+            logger.warning("Lookup memory stats failed: %s", e)
+            return {"lookups": 0, "disputed": 0}

@@ -52,7 +52,8 @@ def test_followup_needs_a_previous_exchange():
 
 
 def test_conversation_grounding_queries_the_exchange():
-    with patch.object(knowledge_router, "_query_web", return_value=[]) as qw:
+    with patch.object(knowledge_router, "_query_web", return_value=[]) as qw, \
+            patch.object(knowledge_router, "_query_lookup_memory", return_value=[]):
         knowledge_router.ground_conversation(
             [HIST[0]["content"], "Where did he get the sword?"])
     qw.assert_called_once_with("name King Arthur's sword", max_results=3, snippet_chars=500)
@@ -62,6 +63,8 @@ def test_conversation_grounding_queries_the_exchange():
     ([{"ENTITY": "he", "PLACE": "sword"}, {"EVENT": "get the sword"}], ["sword", "get the sword"]),
     (["he", "it", "King Arthur", "king arthur", " Excalibur. "], ["King Arthur", "Excalibur"]),
     (["", None, "x"], []),
+    ([["King Arthur", "sword"], {"A": ["Excalibur"]}], ["King Arthur", "sword", "Excalibur"]),
+    (["['Excalibur', 'lake']", "[not a list"], ["Excalibur", "lake", "[not a list"]),
 ])
 def test_clean_grounding_entities(raw, clean):
     assert _clean_grounding_entities(raw) == clean
@@ -111,7 +114,8 @@ def test_followup_query_keeps_the_question():
 
 
 def test_followup_grounding_uses_context_turns():
-    with patch.object(knowledge_router, "_query_web", return_value=[]) as qw:
+    with patch.object(knowledge_router, "_query_web", return_value=[]) as qw, \
+            patch.object(knowledge_router, "_query_lookup_memory", return_value=[]):
         knowledge_router.ground_conversation(
             ["Where did he get the sword?"], context_turns=[HIST[1]["content"]])
     (query,), _ = qw.call_args

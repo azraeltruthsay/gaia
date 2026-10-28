@@ -126,11 +126,30 @@ def _clean_grounding_entities(entities) -> list:
 
     Nano sometimes answers with category dicts ({'ENTITY': 'he', 'PLACE':
     'sword'}) instead of strings; their str() went to the web verbatim.
+    Nested lists (['King Arthur', 'sword']) went out the same way, as the
+    literal text "['King Arthur', 'sword']" (0vuz live test), so values are
+    flattened recursively — including list literals that arrive as text.
     """
+    import ast
+
+    def _leaves(x):
+        if isinstance(x, str) and x.strip().startswith("[") and x.strip().endswith("]"):
+            try:
+                x = ast.literal_eval(x.strip())
+            except (ValueError, SyntaxError):
+                pass  # not a literal after all; treat as a phrase
+        if isinstance(x, dict):
+            for v in x.values():
+                yield from _leaves(v)
+        elif isinstance(x, (list, tuple, set)):
+            for v in x:
+                yield from _leaves(v)
+        else:
+            yield x
+
     out: list = []
     for ent in entities or []:
-        parts = ent.values() if isinstance(ent, dict) else [ent]
-        for part in parts:
+        for part in _leaves(ent):
             if part is None:
                 continue
             phrase = " ".join(str(part).split()).strip(" .,;:!?\"'")
@@ -515,7 +534,21 @@ class AgentCore:
                 except Exception as e:
                     self.logger.debug("Grounding vector probe failed for '%s': %s", entity, e)
 
-            # 3. Web fallback (only if KG and vector returned nothing)
+            # 2b. Lookup memory (0vuz) — something she looked up before
+            # stands in for the web fallback below (no repeat search).
+            if not entry["sources"]:
+                try:
+                    from gaia_core.cognition.knowledge_router import _query_lookup_memory
+                    remembered = [r for r in _query_lookup_memory(entity, top_k=2) if not r.stale]
+                    if remembered:
+                        entry["sources"].append({"type": "memory", "hits": len(remembered),
+                                                 "preview": remembered[0].content[:200]})
+                        entry["memory"] = [{"title": r.title, "snippet": r.content[:400], "url": r.url,
+                                            "retrieved_at": r.retrieved_at} for r in remembered]
+                except Exception as e:
+                    self.logger.debug("Grounding memory probe failed for '%s': %s", entity, e)
+
+            # 3. Web fallback (only if KG, vector and memory returned nothing)
             if web_fallback and not entry["sources"] and web_calls_left > 0:
                 web_calls_left -= 1
                 try:
@@ -3288,6 +3321,7 @@ class AgentCore:
                 is_factual_pushback, is_knowledge_followup)
             _pushback = is_factual_pushback(user_input, history)
             _followup = not _pushback and is_knowledge_followup(user_input, history)
+            _memory_answer = False
             try:
                 if _pushback:
                     from gaia_core.cognition.knowledge_router import (
@@ -3321,7 +3355,13 @@ class AgentCore:
                         for h in _recent]
                     _grounding_ctx = ground_conversation(
                         [user_input], reason="follow-up", context_turns=_context)
-                elif not _kr_skip:
+                elif _kr_skip:
+                    # 0vuz: skipped as chat, but if she looked this question
+                    # up before, her memory of it still answers (no web).
+                    from gaia_core.cognition.knowledge_router import recall_answer
+                    _grounding_ctx = recall_answer(user_input)
+                    _memory_answer = _grounding_ctx is not None
+                else:
                     from gaia_core.cognition.knowledge_router import ground_query
                     logger.info("KnowledgeRouter: calling ground_query for '%s' (intent=%s)", user_input[:50], plan.intent if plan else "?")
                     _grounding_ctx = ground_query(
@@ -3331,10 +3371,11 @@ class AgentCore:
                 if _grounding_ctx and _grounding_ctx.has_grounding:
                     if not _pushback:
                         _disputed = ""
-                    if _pushback or _followup:
+                    if _pushback or _followup or _memory_answer:
                         # The semantic probe's per-entity search ("Avalon")
                         # came first and prompt_builder renders only the first
-                        # web_grounding, so these results were dropped.
+                        # web_grounding, so these results were dropped. A
+                        # question-level memory beats per-entity results too.
                         _before = len(packet.content.data_fields)
                         packet.content.data_fields = [
                             df for df in packet.content.data_fields
@@ -3344,8 +3385,15 @@ class AgentCore:
                     packet.content.data_fields.append(DataField(
                         key="web_grounding",
                         value={user_input[:50]: {
-                            "results": [{"title": r.source, "snippet": r.content, "url": r.url}
-                                       for r in _grounding_ctx.results[:3]],
+                            # 0vuz: remembered lookups keep their provenance
+                            # so the prompt can cite them (title, date) and
+                            # flag ones due for a re-check.
+                            "results": [
+                                {"title": r.title or r.source, "snippet": r.content, "url": r.url,
+                                 "remembered": True, "retrieved_at": r.retrieved_at, "stale": r.stale}
+                                if r.source == "memory" else
+                                {"title": r.source, "snippet": r.content, "url": r.url}
+                                for r in _grounding_ctx.results[:3]],
                             "source": f"knowledge_router:{','.join(_grounding_ctx.sources_queried)}",
                             "query": user_input[:120],
                             "disputed_answer": re.sub(r"^\s*\[[A-Za-z ]+\]\s*", "", strip_think_tags(_disputed))[:300],
@@ -3430,10 +3478,15 @@ class AgentCore:
                     # answered from them by bare Core (6/6 in probes); the
                     # deliberation adapter recited the snippet or invented
                     # one ("From the moon").
-                    _delib_adapter = not (_followup and _grounding_ctx is not None
+                    # The adapter recites or invents over grounding (8xr4.20);
+                    # bare Core answers from it. Same for an answer from her
+                    # memory of an earlier lookup (0vuz).
+                    _delib_adapter = not ((_followup or _memory_answer) and _grounding_ctx is not None
                                           and _grounding_ctx.has_grounding)
                     if not _delib_adapter:
-                        logger.info("[DELIBERATION] grounded follow-up → answering from the search results (no adapter)")
+                        logger.info("[DELIBERATION] grounded %s → answering from the %s (no adapter)",
+                                    "follow-up" if _followup else "question",
+                                    "search results" if _followup else "remembered lookups")
                         _delib_casual = True
                     _delib_result = run_deliberated_turn(
                         user_input=packet.content.original_prompt or user_input or "",

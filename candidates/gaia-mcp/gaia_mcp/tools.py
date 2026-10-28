@@ -317,6 +317,10 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "palace_recall": lambda p: _palace_recall_impl(p),
         "palace_navigate": lambda p: _palace_navigate_impl(p),
         "palace_status": lambda p: _palace_status_impl(p),
+        # 0vuz: lookup memory — what GAIA has looked up, with provenance
+        "palace_store_lookup": lambda p: _palace_store_lookup_impl(p),
+        "palace_recall_lookup": lambda p: _palace_recall_lookup_impl(p),
+        "palace_dispute_lookup": lambda p: _palace_dispute_lookup_impl(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
         "replace": lambda p: _replace_impl(p),
@@ -1122,6 +1126,38 @@ def _palace_recall_impl(params: dict) -> dict:
         return {"ok": False, "error": "query parameter required"}
     top_k = int(params.get("top_k", 5))
     return palace.recall(query, top_k=top_k)
+
+
+def _palace_store_lookup_impl(params: dict) -> dict:
+    """Remember a lookup's results (verbatim + provenance). web_search and
+    web_fetch already do this automatically; this is for other callers."""
+    results = params.get("results")
+    if not isinstance(results, list):
+        return {"ok": False, "error": "results (list of {title, url, snippet, ...}) required"}
+    ids = _get_palace().lookups.remember(
+        params.get("query", ""), results, kind=params.get("kind", "search"))
+    return {"ok": True, "ids": ids}
+
+
+def _palace_recall_lookup_impl(params: dict) -> dict:
+    """Recall remembered lookups relevant to a query, best first."""
+    query = params.get("query", "")
+    if not query:
+        return {"ok": False, "error": "query parameter required"}
+    hits = _get_palace().lookups.recall(
+        query,
+        top_k=int(params.get("top_k", 3)),
+        min_score=float(params.get("min_score", 0.34)),
+    )
+    return {"ok": True, "query": query, "results": hits}
+
+
+def _palace_dispute_lookup_impl(params: dict) -> dict:
+    """Mark remembered lookups as needing revalidation."""
+    ids = params.get("ids") or []
+    if not isinstance(ids, list):
+        return {"ok": False, "error": "ids must be a list"}
+    return {"ok": True, "marked": _get_palace().lookups.mark_disputed(ids)}
 
 
 def _palace_navigate_impl(params: dict) -> dict:
