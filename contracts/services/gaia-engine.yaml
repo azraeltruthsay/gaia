@@ -207,6 +207,30 @@ managed_http_api:
       method: POST
       description: "Restore KV cache snapshot"
 
+    # GGUF / gaia_cpp backend (d12t): the KV cache is kept between requests
+    # (prefix reuse + in-memory snapshots). Env: GAIA_CPP_PREFIX_REUSE (1),
+    # GAIA_CPP_KV_SNAPSHOTS (2), GAIA_CPP_KV_BASELINE (state loaded at
+    # start), GAIA_CPP_KV_DIR (/shared/kv_states).
+    - endpoint: /kv/stats
+      method: GET
+      description: "gaia_cpp: cached tokens, snapshots, reuse counters (also in /health → kv)"
+
+    - endpoint: /kv/clear
+      method: POST
+      description: "gaia_cpp: drop the KV cache and snapshots"
+
+    - endpoint: /kv/save
+      method: POST
+      request: { name: str }
+      response: "{ok, tokens, path}"
+      description: "gaia_cpp: save the live KV to GAIA_CPP_KV_DIR/<name>.kvstate (bare name only)"
+
+    - endpoint: /kv/load
+      method: POST
+      request: { name: str }
+      response: "{ok, tokens, path}"
+      description: "gaia_cpp: load a saved state as the live KV and a pinned baseline snapshot"
+
     - endpoint: /adapter/load
       method: POST
       description: "Load LoRA adapter"

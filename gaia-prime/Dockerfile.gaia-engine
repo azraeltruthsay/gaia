@@ -37,6 +37,14 @@ RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} https://github.com/ggml-org/ll
         -DGGML_CPU_AARCH64=OFF \
     && cmake --build build --target llama-server llama-quantize -j$(nproc)
 
+# Stage the CUDA runtime libs at a plain path. /usr/local/cuda is a symlink
+# chain through /etc/alternatives, which the legacy (non-BuildKit) builder
+# can't follow in COPY --from ("no source files were specified" — the WSL
+# docker CLI has no buildx). cp follows it here; COPY then reads a real dir.
+RUN mkdir -p /build/cuda-libs \
+    && cp -a /usr/local/cuda/lib64/libcudart.so* /usr/local/cuda/lib64/libcublas.so* \
+             /usr/local/cuda/lib64/libcublasLt.so* /build/cuda-libs/
+
 # ── Stage 2: Build gaia_cpp pybind11 extension ───────────────────────────
 # Uses the gaia-engine-base image (has Python 3.11) with llama.cpp headers
 # from the builder stage. This ensures ABI compatibility: the .so is built
@@ -78,9 +86,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /usr/local/cuda/lib64/libcudart.so* /usr/local/lib/
-COPY --from=builder /usr/local/cuda/lib64/libcublas.so* /usr/local/lib/
-COPY --from=builder /usr/local/cuda/lib64/libcublasLt.so* /usr/local/lib/
+COPY --from=builder /build/cuda-libs/ /usr/local/lib/
 COPY --from=builder /build/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
 COPY --from=builder /build/llama.cpp/build/bin/llama-quantize /usr/local/bin/llama-quantize
 COPY --from=builder /build/llama.cpp/build/bin/lib*.so* /usr/local/lib/
