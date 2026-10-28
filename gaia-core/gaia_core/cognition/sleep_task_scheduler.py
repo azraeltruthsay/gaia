@@ -1360,6 +1360,9 @@ class SleepTaskScheduler:
             result = run_penpal_cycle()
             if result.get("reviewed", 0) > 0:
                 logger.info("Penpal: reviewed %d episodes", result["reviewed"])
+            elif result.get("awaiting_transcript"):
+                logger.info("Penpal: %d episode(s) waiting for a transcript in /shared/penpal/transcripts",
+                            result["awaiting_transcript"])
             else:
                 logger.info("Penpal: no new episodes (last_check now)")
         except Exception as e:
