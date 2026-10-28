@@ -842,6 +842,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             if getattr(df, 'key', '') == 'tool_result':
                 processed_data_field_keys.add('tool_result')
                 tr = getattr(df, 'value', None)
+                if isinstance(tr, str) and tr.strip():
+                    # ecnc: agent_core's deterministic web search stores its
+                    # results pre-formatted as a string. The dict-only check
+                    # dropped them: "who wrote The Name of the Rose" got none
+                    # of its Umberto Eco results, and Core said "Thomas P. K.".
+                    tool_result_content = tr.strip()[:4000]
+                    break
                 if not (tr and isinstance(tr, dict)):
                     break
                 tool_name = tr.get('tool', 'unknown')
@@ -1507,7 +1514,21 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # AFTER the system message but BEFORE the actual user message.
     _grounding_user_message = None
     try:
-        for df in getattr(packet.content, 'data_fields', []) or []:
+        # ecnc: only one web_grounding block is rendered. Prefer the knowledge
+        # router's (searched with the question itself) over the semantic
+        # probe's per-entity fallback, which came first and won: "who wrote
+        # The Name of the Rose" rendered a search for the fragment "The Name"
+        # (Feast of the Holy Name, NameMC) and Core invented an author.
+        _wg_fields = [df for df in getattr(packet.content, 'data_fields', []) or []
+                      if getattr(df, 'key', '') == 'web_grounding' and getattr(df, 'value', None)]
+
+        def _from_router(df) -> bool:
+            v = getattr(df, 'value', None)
+            return isinstance(v, dict) and any(
+                isinstance(i, dict) and str(i.get("source", "")).startswith("knowledge_router")
+                for i in v.values())
+        _wg_fields.sort(key=lambda df: not _from_router(df))  # stable: router first
+        for df in _wg_fields:
             if getattr(df, 'key', '') == 'web_grounding' and getattr(df, 'value', None):
                 web_g = df.value
                 if isinstance(web_g, dict) and web_g:

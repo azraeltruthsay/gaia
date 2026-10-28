@@ -484,11 +484,16 @@ class AgentCore:
         # Legacy fallback
         return not getattr(self.model_pool, '_gpu_released', False)
 
-    def _run_grounding_probes(self, entities: list, session_id: str) -> dict:
+    def _run_grounding_probes(self, entities: list, session_id: str,
+                              external: bool = True) -> dict:
         """Stage 0: Neural Grounding — probe KG and vector for extracted entities.
 
         Follows Hierarchy of Truth: KG → Vector → Web.
         Returns dict with grounded context per entity.
+
+        external=False skips lookup memory and the web (questions about the
+        user: "my favorite color" is in the conversation, not on the web —
+        ecnc smoke 16 answered "Purple." from a remembered search).
         """
         if not entities:
             return {}
@@ -496,7 +501,7 @@ class AgentCore:
         grounding_cfg = self.config.constants.get("GROUNDING", {})
         kg_top_k = grounding_cfg.get("kg_top_k", 3)
         vector_top_k = grounding_cfg.get("vector_top_k", 3)
-        web_fallback = grounding_cfg.get("web_fallback", True)
+        web_fallback = grounding_cfg.get("web_fallback", True) and external
 
         from gaia_core.utils import mcp_client
         results = {}
@@ -536,7 +541,7 @@ class AgentCore:
 
             # 2b. Lookup memory (0vuz) — something she looked up before
             # stands in for the web fallback below (no repeat search).
-            if not entry["sources"]:
+            if external and not entry["sources"]:
                 try:
                     from gaia_core.cognition.knowledge_router import _query_lookup_memory
                     remembered = [r for r in _query_lookup_memory(entity, top_k=2) if not r.stale]
@@ -1729,7 +1734,9 @@ class AgentCore:
                     _max_ents = grounding_cfg.get("max_entities", 5)
                     entities = extract_entities_neural(user_input, max_entities=_max_ents)
                     if entities:
-                        _grounding_context = self._run_grounding_probes(entities, session_id)
+                        from gaia_core.cognition.knowledge_router import _about_the_user
+                        _grounding_context = self._run_grounding_probes(
+                            entities, session_id, external=not _about_the_user(user_input))
                         _g_elapsed = (_gt.perf_counter() - _g0) * 1000
                         logger.info("Stage 0 Grounding: %d entities → %d grounded (%.0fms)",
                                     len(entities), len(_grounding_context), _g_elapsed)
@@ -6038,6 +6045,17 @@ class AgentCore:
         """
         self.logger.info("Epistemic grounding triggered (%s) for: %s", reason, user_input[:80])
 
+        # The web can't answer a question about the user ("What is my favorite
+        # color?" → "Purple." from a search, over "cerulean" said a turn
+        # earlier — ecnc smoke 16); the conversation can. Keep her reply.
+        try:
+            from gaia_core.cognition.knowledge_router import _about_the_user
+            if _about_the_user(user_input):
+                self.logger.info("Epistemic grounding skipped: the question is about the user")
+                return initial_response
+        except Exception:
+            self.logger.debug("about-the-user check failed; grounding as usual", exc_info=True)
+
         # Step 1: Web search for verified data
         grounding_text = ""
         try:
@@ -6494,7 +6512,9 @@ class AgentCore:
         from gaia_common.utils.immune_system import is_system_irritated
         return is_short and not is_system_irritated() and "nano" in self.model_pool.models
 
-    def generate_continuation(self, messages: list, session_id: str = ""):
+    def generate_continuation(self, messages: list, session_id: str = "",
+                              max_tokens: Optional[int] = None,
+                              temperature: Optional[float] = None):
         """
         Generate a continuation response after tool execution.
 
@@ -6516,6 +6536,10 @@ class AgentCore:
         to the next. Core is preferred because the prior turn used Core
         to emit the tool call, so the result→synthesis transition
         benefits from continuity of context and KV cache.
+
+        ecnc: max_tokens / temperature override the config defaults (8192,
+        0.7) — a summary of what a tool returned needs neither: at those
+        settings Core free-wrote pages of invented backstory.
         """
         candidates = ["core", "prime", "cpu_prime"]
         last_err: Exception | None = None
@@ -6532,8 +6556,8 @@ class AgentCore:
                 result = self.model_pool.forward_to_model(
                     cand,
                     messages=messages,
-                    max_tokens=self.config.max_tokens,
-                    temperature=self.config.temperature,
+                    max_tokens=max_tokens or self.config.max_tokens,
+                    temperature=self.config.temperature if temperature is None else temperature,
                     top_p=self.config.top_p,
                 )
                 if isinstance(result, dict):

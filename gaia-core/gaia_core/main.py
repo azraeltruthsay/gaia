@@ -27,6 +27,15 @@ except ImportError:
 
 logger = logging.getLogger("GAIA.Core.API")
 
+# ecnc: a reply grounded on a tool's result. At the config defaults (0.7,
+# 8192 tokens) Core free-wrote pages of invented backstory about a fetched
+# passage; a summary needs a cooler, shorter run.
+_CONT_TEMPERATURE = 0.3
+_CONT_MAX_TOKENS = 1024
+# A continuation that writes less than this before calling a tool again
+# only announced what it was about to do; the clean-slate retry answers.
+_CONT_PREAMBLE_CHARS = 120
+
 try:
     from gaia_common.utils.error_logging import log_gaia_error
 except ImportError:
@@ -1402,7 +1411,7 @@ async def process_packet(packet_data: Dict[str, Any]):
             # and can trigger a continuation generation with the result.
             try:
                 from gaia_common.utils.tool_call_parser import (
-                    ToolCallParser, ParseEventType, format_tool_result,
+                    ToolCallParser, ParseEventType, format_tool_result, tool_result_text,
                     TOOL_CALL_OPEN, TOOL_CALL_CLOSE,
                 )
                 _tc_parser = ToolCallParser()
@@ -1684,7 +1693,6 @@ async def process_packet(packet_data: Dict[str, Any]):
                     try:
                         # Execute via MCP JSON-RPC
                         from gaia_core.utils.mcp_client import call_jsonrpc
-                        from gaia_common.utils.tool_call_parser import META_TOOL_OPEN, META_TOOL_CLOSE, META_RESULT_OPEN, META_RESULT_CLOSE
                         _META_VERBS = {"search", "do", "learn", "remember", "ask"}
                         _is_meta = tc.tool_name in _META_VERBS
 
@@ -1829,15 +1837,20 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # ── Continuation generation ──────────────────────
                         # Build messages: original prompt + model's first output
                         # (including tool_call) + tool_result, then generate again.
-                        first_output = "".join(response_pieces)
-                        if _is_meta:
-                            # Meta-verb format: <|tool>verb(params)<tool|> ... <|tool_response>result<tool_response|>
-                            _param_str = ", ".join(f'{k}="{v}"' if isinstance(v, str) else f'{k}={v}' for k, v in (tc.tool_params or {}).items())
-                            _call_str = f"{META_TOOL_OPEN}{tc.tool_name}({_param_str}){META_TOOL_CLOSE}"
-                            _result_str = f"{META_RESULT_OPEN}{json.dumps(actual_result, default=str)[:500]}{META_RESULT_CLOSE}"
+                        # ecnc: the continuation asks the question again with
+                        # what the tool returned as plain text — the framing
+                        # the clean-slate retry below already used, which
+                        # grounded far better. Replaying her own <tool_call>
+                        # turn plus an XML/JSON <tool_result> gave Core a tool
+                        # protocol to imitate: it re-emitted the call on most
+                        # runs (so the retry ran nearly every time) and
+                        # summarised the page loosely ("a fable, folks").
+                        if rpc_result.get("ok"):
+                            _tool_text = tool_result_text(actual_result)
                         else:
-                            _call_str = f"{TOOL_CALL_OPEN}{json.dumps({'tool': tc.tool_name, 'action': tc.tool_action, **(tc.tool_params or {})})}{TOOL_CALL_CLOSE}"
-                            _result_str = result_xml
+                            import re as _re
+                            _tool_text = _re.sub(r"</?tool_result>", "", result_xml).strip()
+                        _tool_label = f"{tc.tool_name}({tc.tool_action})" if tc.tool_action else tc.tool_name
                         # Continuation system prompt: the previous turn's
                         # full system prompt is NOT carried into this second
                         # generation. Without explicit guidance, the model
@@ -1846,28 +1859,46 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # fail. This focused system message keeps the
                         # continuation grounded.
                         _cont_system = (
-                            "You are GAIA. A tool call just executed and its "
-                            "result is in the next user-role message. "
-                            "Continue your reply to the user using that "
-                            "result.\n"
-                            "- If the result is success: integrate the data "
-                            "naturally and answer the user's question.\n"
-                            "- If the result is an error: acknowledge the "
-                            "failure in one short sentence and pivot back to "
-                            "the conversation. Do NOT invent error-report "
-                            "URLs, web forms, support emails, ticket-filing "
-                            "instructions, or technical-team contact info — "
-                            "none of those exist. Don't suggest the user "
-                            "report the error anywhere; the error is logged "
-                            "internally already.\n"
-                            "- Do not emit another <tool_call> unless the "
-                            "user explicitly asked for a retry."
+                            "You are GAIA. You already used a tool for this "
+                            "request; what it returned is in the user's "
+                            "message. Answer the request from it, in plain "
+                            "text.\n"
+                            "- If it returned what was asked for: answer "
+                            "from it, and name where it came from.\n"
+                            "- If it failed: say so in one short sentence and "
+                            "pivot back to the conversation. Do NOT invent "
+                            "error-report URLs, web forms, support emails, "
+                            "ticket-filing instructions, or technical-team "
+                            "contact info — none of those exist. The error is "
+                            "logged internally already."
+                        )
+                        # Result first, then the request as something already
+                        # done. With the question first and ~4k chars of page
+                        # after it, Core carried on writing the page (or
+                        # answered the page as if the user had written it);
+                        # with the bare request last, an imperative one
+                        # ("Check your memory palace") made her call the tool
+                        # again. A/B on the live engine, 2026-10-28: this
+                        # framing named Moby-Dick 2/4 and summarised the page
+                        # correctly otherwise.
+                        _grounded_user_turn = (
+                            f"{_tool_label} returned the following.\n\n{_tool_text}\n\n---\n\n"
+                            f'They asked: "{user_input}" You already did that, and it returned '
+                            f"the above. Your reply to them:"
+                        )
+                        # The clean-slate retry (only when the continuation
+                        # called a tool again) quotes the request up front and
+                        # ends on a plain reply cue — no request left to act
+                        # on: 4/5 answered where the framing above re-called
+                        # palace(recall) 3/4.
+                        _retry_user_turn = (
+                            f'The user asked: "{user_input}"\n\nYou already did that: '
+                            f"{_tool_label} returned the following.\n\n{_tool_text}\n\n---\n\n"
+                            f"Your reply to them, from what it returned:"
                         )
                         continuation_messages = [
                             {"role": "system", "content": _cont_system},
-                            {"role": "user", "content": user_input},
-                            {"role": "assistant", "content": first_output + f"\n{_call_str}"},
-                            {"role": "user", "content": _result_str},
+                            {"role": "user", "content": _grounded_user_turn},
                         ]
 
                         # Generate continuation using the same model
@@ -1875,6 +1906,8 @@ async def process_packet(packet_data: Dict[str, Any]):
                             cont_gen = _agent_core.generate_continuation(
                                 messages=continuation_messages,
                                 session_id=session_id,
+                                max_tokens=_CONT_MAX_TOKENS,
+                                temperature=_CONT_TEMPERATURE,
                             )
                             if cont_gen:
                                 def _next_cont():
@@ -1895,6 +1928,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 # it emits instead.
                                 _cont_tc_parser = ToolCallParser() if _tc_enabled else None
                                 _cont_produced_text = False
+                                _cont_chars = 0  # visible text, for the preamble check below
                                 _cont_hallucinated_again = False
 
                                 while True:
@@ -1911,6 +1945,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                                                 if cpe.type == ParseEventType.TEXT:
                                                     if cpe.text.strip():
                                                         _cont_produced_text = True
+                                                        _cont_chars += len(cpe.text.strip())
                                                     response_pieces.append(cpe.text)
                                                     yield json.dumps({"type": "token", "value": cpe.text}) + "\n"
                                                 elif cpe.type in (ParseEventType.TOOL_CALL_DETECTED, ParseEventType.TOOL_ERROR):
@@ -1937,6 +1972,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                                                 _cont_hallucinated_again = True
                                             elif cpe.text.strip():
                                                 _cont_produced_text = True
+                                                _cont_chars += len(cpe.text.strip())
                                                 response_pieces.append(cpe.text)
                                                 yield json.dumps({"type": "token", "value": cpe.text}) + "\n"
                                             else:
@@ -1960,13 +1996,14 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 # returned, as plain text in the user turn —
                                 # without it Core answered "what's on this
                                 # page?" with an invented book.
-                                if _cont_hallucinated_again and not _cont_produced_text:
+                                # ecnc: a lead-in alone ("I'll search my palace.")
+                                # before the repeated call counts as nothing —
+                                # live, that was the whole reply.
+                                if _cont_hallucinated_again and (
+                                        not _cont_produced_text or _cont_chars < _CONT_PREAMBLE_CHARS):
                                     logger.info("Attempting one clean-slate corrective retry (no tool-call precedent in history)")
-                                    if rpc_result.get("ok") and isinstance(actual_result, dict) and actual_result.get("content"):
-                                        _tool_text = str(actual_result["content"])[:4000]
-                                    else:
-                                        import re as _re
-                                        _tool_text = _re.sub(r"</?tool_result>", "", result_xml).strip()
+                                    # Same plain-text tool result as the
+                                    # continuation (_tool_text, above).
                                     _retry_messages = [
                                         {"role": "system", "content": (
                                             "You are GAIA, a direct and capable writer. You do not have "
@@ -1974,16 +2011,14 @@ async def process_packet(packet_data: Dict[str, Any]):
                                             "this — just answer the user's request directly, in plain "
                                             "natural-language text, right now."
                                         )},
-                                        {"role": "user", "content": (
-                                            f"{user_input}\n\n"
-                                            f"(Already done: {tc.tool_name} returned the following.)\n\n"
-                                            f"{_tool_text}"
-                                        )},
+                                        {"role": "user", "content": _retry_user_turn},
                                     ]
                                     try:
                                         _retry_gen = _agent_core.generate_continuation(
                                             messages=_retry_messages,
                                             session_id=session_id,
+                                            max_tokens=_CONT_MAX_TOKENS,
+                                            temperature=_CONT_TEMPERATURE,
                                         )
                                         _retry_parser = ToolCallParser() if _tc_enabled else None
                                         _retry_hallucinated = False

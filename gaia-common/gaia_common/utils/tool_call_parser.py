@@ -425,6 +425,66 @@ def format_tool_result(result: Any) -> str:
     return f"{TOOL_RESULT_OPEN}{result_str}{TOOL_RESULT_CLOSE}"
 
 
+def _result_line(row: dict) -> str:
+    """One row of a list-shaped result as a readable line with its source."""
+    body = (row.get("fact") or row.get("snippet") or row.get("content")
+            or row.get("text") or row.get("summary") or "")
+    title = row.get("source") or row.get("title") or row.get("name") or ""
+    url = row.get("url") or row.get("link") or row.get("href") or ""
+    when = row.get("looked_up") or ""
+    where = ", ".join(x for x in (title, f"looked up {when}" if when else "", url) if x)
+    flags = [f for f in ("stale", "disputed") if row.get(f)]
+    line = f"- {' '.join(str(body).split())}" if body else f"- {title}"
+    if where and (body or url):
+        line += f" ({where})"
+    if flags:
+        line += f" [{', '.join(flags)}]"
+    return line
+
+
+def tool_result_text(result: Any, limit: int = 4000) -> str:
+    """A tool result as plain text for the model to answer from (ecnc).
+
+    format_tool_result's XML-wrapped JSON reads as more protocol to imitate,
+    and buries a fetched page or a list of facts under keys and escapes. Here:
+    a page is its title/url then its text; a list of results is one line each
+    with its source; palace recall shows the lookups (facts with sources),
+    not the AAAK codes; a failure is the error and its hint; anything else is
+    compact JSON.
+    """
+    if result is None:
+        return "(no result)"
+    if isinstance(result, str):
+        text = result
+    elif isinstance(result, list):
+        text = "\n".join(_result_line(r) if isinstance(r, dict) else f"- {r}" for r in result) or "(no results)"
+    elif isinstance(result, dict):
+        if result.get("ok") is False and (result.get("error") or result.get("hint")):
+            text = f"Failed: {result.get('error', 'unknown error')}"
+            if result.get("hint"):
+                text += f"\n{result['hint']}"
+        elif isinstance(result.get("content") or result.get("text"), str):
+            head = [x for x in (result.get("title"), result.get("url")) if x]
+            text = "\n".join(head + [result.get("content") or result.get("text")])
+        else:
+            rows = result.get("lookups") or result.get("results")
+            if isinstance(rows, list) and rows and all(isinstance(r, dict) for r in rows):
+                text = "\n".join(_result_line(r) for r in rows)
+                if result.get("note"):
+                    text = f"{result['note']}\n{text}"
+            elif isinstance(rows, list) and not rows:
+                text = result.get("note") or "(no results)"
+            else:
+                text = json.dumps({k: v for k, v in result.items() if k != "ok"},
+                                  default=str, ensure_ascii=False)
+    else:
+        text = str(result)
+    text = text.strip() or "(empty result)"
+    if len(text) > limit:
+        text = text[:limit] + "\n... (truncated)"
+    return text
+
+
 def build_tool_schema_injection() -> str:
     """
     Build the tool schema string to inject in the system prompt.

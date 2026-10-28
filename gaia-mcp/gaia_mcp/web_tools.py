@@ -523,7 +523,7 @@ def _extract_content(html: str, url: str) -> Tuple[str, str]:
     try:
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, "html.parser")
-        title = soup.title.string.strip() if soup.title and soup.title.string else ""
+        title = _extract_title_bs4(html)
         # Remove script/style elements
         for tag in soup(["script", "style", "nav", "header", "footer"]):
             tag.decompose()
@@ -536,8 +536,7 @@ def _extract_content(html: str, url: str) -> Tuple[str, str]:
         logger.debug("BeautifulSoup extraction failed: %s", e)
 
     # Regex fallback (last resort)
-    title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
-    title = title_match.group(1).strip() if title_match else ""
+    title = _title_regex(html)
     # Strip all tags
     text = re.sub(r"<[^>]+>", " ", html)
     text = re.sub(r"\s+", " ", text).strip()
@@ -546,14 +545,36 @@ def _extract_content(html: str, url: str) -> Tuple[str, str]:
 
 
 def _extract_title_bs4(html: str) -> str:
-    """Extract just the title via BeautifulSoup."""
+    """The page's title: <title>, else og:title, else the first <h1>.
+
+    ecnc: httpbin's /html has no <title>; its name is the <h1> "Herman
+    Melville - Moby-Dick", which trafilatura drops from the text. Without
+    it Core was asked to name the work from the prose alone."""
     try:
         from bs4 import BeautifulSoup
         soup = BeautifulSoup(html, "html.parser")
-        return soup.title.string.strip() if soup.title and soup.title.string else ""
-    except Exception:
-        title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
-        return title_match.group(1).strip() if title_match else ""
+        if soup.title and soup.title.string and soup.title.string.strip():
+            return soup.title.string.strip()
+        og = soup.find("meta", attrs={"property": "og:title"})
+        if og and (og.get("content") or "").strip():
+            return og["content"].strip()
+        h1 = soup.find("h1")
+        return " ".join(h1.get_text(" ", strip=True).split()) if h1 else ""
+    except Exception as e:
+        logger.debug("BeautifulSoup title extraction failed (%s); using regex", e)
+        return _title_regex(html)
+
+
+def _title_regex(html: str) -> str:
+    """Regex fallback for _extract_title_bs4: <title>, else the first <h1>."""
+    for pattern in (r"<title[^>]*>(.*?)</title>", r"<h1[^>]*>(.*?)</h1>"):
+        m = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+        if m:
+            text = re.sub(r"<[^>]+>", " ", m.group(1))
+            text = " ".join(text.split())
+            if text:
+                return text
+    return ""
 
 
 # ---------------------------------------------------------------------------

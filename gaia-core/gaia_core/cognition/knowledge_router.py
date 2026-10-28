@@ -645,6 +645,21 @@ def followup_query(question: str, earlier_turns: List[str], max_chars: int = 120
     return query
 
 
+# Questions about the user ("What is my favorite color?") are answered by the
+# conversation, not by anything she looked up. ecnc smoke test 16: an earlier
+# hedge-triggered web search for that question was kept in lookup memory, so
+# the next ask counted as "looked up before" (6afh), searched the web again,
+# and the results crowded out "my favorite color is cerulean" said a turn ago.
+# First person as owner or subject only: "tell me" / "show us" are how
+# knowledge questions are asked ("Can you tell me the name of King Arthur's
+# sword?"), not questions about the user.
+_ABOUT_THE_USER_RE = re.compile(r"\b(my|mine|i|i'm|i've|i'd|myself|our|ours|we)\b", re.IGNORECASE)
+
+
+def _about_the_user(question: str) -> bool:
+    return bool(_ABOUT_THE_USER_RE.search(question or ""))
+
+
 def recall_answer(question: str) -> Optional[GroundingContext]:
     """Grounding for turns the router otherwise skips (intent 'chat' covers
     plenty of factual questions), if she looked much the same question up
@@ -654,6 +669,9 @@ def recall_answer(question: str) -> Optional[GroundingContext]:
       - asked before but not confirmed (6afh): it's a knowledge question
         her memory hasn't answered yet — search again, memory after.
     """
+    if _about_the_user(question):
+        logger.debug("KnowledgeRouter: %r is about the user; lookup memory skipped", question[:80])
+        return None
     t0 = time.time()
     memory = _query_lookup_memory(question)
     if _strong_memory(memory):

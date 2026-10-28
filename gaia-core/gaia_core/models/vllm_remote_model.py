@@ -216,7 +216,17 @@ class VLLMRemoteModel:
         "guided_grammar", "guided_decoding_backend",
         "response_format", "stop", "chat_template_kwargs",
         "skip_prefix",  # GAIA Engine: skip KV prefix/awareness/clock injection
+        "include_stop_str_in_output",
     })
+
+    # ecnc: an automatic stop at "</tool_call>" (on turns whose system
+    # prompt teaches the syntax) was tried and removed: deliberation teaches
+    # it on every turn, and on tool-free intents main.py suppresses the call
+    # and keeps the text Core writes AFTER it — the stop left those replies
+    # empty ("What is the current date?" → "[Core]"). main.py already drops
+    # whatever follows an executed call. Callers that know their turn will
+    # execute a tool can pass stop=["</tool_call>"] with
+    # include_stop_str_in_output=True (the GAIA Engine honours both).
 
     def create_chat_completion(
         self,

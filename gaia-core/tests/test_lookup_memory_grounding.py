@@ -323,3 +323,32 @@ def test_answer_feedback_goes_to_lookup_memory_under_the_recall_question():
 
 def test_no_feedback_for_semantic_probe_grounding():
     assert _run_feedback(_feedback_packet(source="web_search")) == []
+
+
+def test_recall_answer_leaves_questions_about_the_user_to_the_conversation():
+    # ecnc smoke 16: "What is my favorite color?" was web-searched once (a
+    # hedge), then re-searched as "looked up before", burying "cerulean".
+    with patch.object(kr, "_query_lookup_memory", return_value=[_mem(confirmed=0.0)]) as qm, \
+            patch.object(kr, "_query_web") as qw:
+        assert kr.recall_answer("What is my favorite color?") is None
+        assert kr.recall_answer("Where did I park, do we know?") is None
+    qm.assert_not_called()
+    qw.assert_not_called()
+    assert not kr._about_the_user("Where did King Arthur get Excalibur?")
+    assert not kr._about_the_user("Who is Imelda Marcos?")  # 'i' only as a word
+    assert not kr._about_the_user("Can you tell me the name of King Arthur's sword?")
+    assert not kr._about_the_user("Show us where Excalibur came from.")
+
+
+def test_epistemic_grounding_does_not_web_search_questions_about_the_user():
+    # ecnc smoke 16: a hedge on "What is my favorite color?" searched the web
+    # and regenerated "Purple." over "cerulean" from the turn before.
+    from gaia_core.cognition.agent_core import AgentCore
+    core = object.__new__(AgentCore)
+    import logging
+    core.logger = logging.getLogger("test")
+    with patch("gaia_core.utils.mcp_client.call_jsonrpc") as rpc:
+        out = AgentCore._ground_and_regenerate(core, "core", "What is my favorite color?",
+                                               "Your favorite color is cerulean, I think.", "hedging_detected")
+    rpc.assert_not_called()
+    assert out == "Your favorite color is cerulean, I think."
