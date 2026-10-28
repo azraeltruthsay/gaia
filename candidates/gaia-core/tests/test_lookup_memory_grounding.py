@@ -171,11 +171,14 @@ def _probe_rpc(recall_hits):
     return fake, calls
 
 
+PROBE_HIT = {"id": "a", "title": "Excalibur - Wikipedia", "snippet": "Excalibur is the legendary sword of King Arthur.",
+             "url": "https://en.wikipedia.org/wiki/Excalibur", "retrieved_at": "2026-10-27T12:00:00+00:00",
+             "stale": False, "score": 1.0, "question_match": 1.0}
+
+
 def test_semantic_fallback_uses_memory_instead_of_searching():
     from gaia_core.cognition import semantic_probe
-    hit = {"id": "a", "title": "Excalibur - Wikipedia", "snippet": "Excalibur is the legendary sword of King Arthur.",
-           "url": "https://en.wikipedia.org/wiki/Excalibur", "retrieved_at": "2026-10-27T12:00:00+00:00",
-           "stale": False, "score": 1.0}
+    hit = PROBE_HIT  # looked up for this very entity: a cached search
     fake, calls = _probe_rpc([hit])
     with patch("urllib.request.urlopen", side_effect=fake):
         out = semantic_probe._web_search_fallback(["Excalibur"])
@@ -191,6 +194,47 @@ def test_semantic_fallback_searches_when_nothing_is_remembered():
         out = semantic_probe._web_search_fallback(["Excalibur"])
     assert calls == ["palace_recall_lookup", "web_search"]
     assert out["Excalibur"]["source"] == "web_search"
+
+
+def test_semantic_fallback_searches_when_memory_was_for_another_question():
+    # 76hb: pages kept for "Where did King Arthur get Excalibur?" recalled
+    # for the entity "Excalibur" are another search's results — search.
+    from gaia_core.cognition import semantic_probe
+    fake, calls = _probe_rpc([dict(PROBE_HIT, question_match=0.2)])
+    with patch("urllib.request.urlopen", side_effect=fake):
+        out = semantic_probe._web_search_fallback(["Excalibur"])
+    assert calls == ["palace_recall_lookup", "web_search"]
+    assert out["Excalibur"]["source"] == "web_search"
+
+
+def test_semantic_fallback_confirmed_memory_stands_in():
+    from gaia_core.cognition import semantic_probe
+    fake, calls = _probe_rpc([dict(PROBE_HIT, question_match=0.2, times_confirmed=2)])
+    with patch("urllib.request.urlopen", side_effect=fake):
+        out = semantic_probe._web_search_fallback(["Excalibur"])
+    assert calls == ["palace_recall_lookup"] and out["Excalibur"]["source"] == "lookup_memory"
+
+
+def test_semantic_fallback_never_stands_in_with_memory_that_failed():
+    from gaia_core.cognition import semantic_probe
+    fake, calls = _probe_rpc([dict(PROBE_HIT, times_confirmed=2, unhelpful_match=0.8)])
+    with patch("urllib.request.urlopen", side_effect=fake):
+        semantic_probe._web_search_fallback(["Excalibur"])
+    assert calls == ["palace_recall_lookup", "web_search"]
+
+
+def test_semantic_fallback_uses_other_memory_when_web_is_empty():
+    import json
+    from gaia_core.cognition import semantic_probe
+
+    def fake(req, timeout=None):
+        if json.loads(req.data)["method"] == "palace_recall_lookup":
+            return _Resp({"result": {"results": [dict(PROBE_HIT, question_match=0.2)]}})
+        return _Resp({"result": {"results": []}})
+    with patch("urllib.request.urlopen", side_effect=fake):
+        out = semantic_probe._web_search_fallback(["Excalibur"])
+    assert out["Excalibur"]["source"] == "lookup_memory"
+    assert out["Excalibur"]["results"][0]["remembered"] is True
 
 
 def test_recall_answer_needs_a_strong_question_match():

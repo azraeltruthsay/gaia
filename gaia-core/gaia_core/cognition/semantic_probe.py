@@ -860,10 +860,25 @@ def _web_search_fallback(entities: List[str]) -> Dict[str, Dict]:
     MCP_ENDPOINT = "http://gaia-mcp:8765/jsonrpc"
     results = {}
 
-    def _recall(entity: str) -> List[Dict]:
-        """0vuz: what she looked up before about this entity. A fresh,
-        relevant memory stands in for the search (no repeat lookup); the
-        hits keep their provenance so the prompt can cite them."""
+    # 76hb: which remembered hits may stand in for this entity's search.
+    # A record retrieved FOR this entity (question_match) is a cached copy
+    # of that very search; one confirmed by an earlier answer proved useful.
+    # Others — e.g. pages kept for "Where did King Arthur get Excalibur?",
+    # recalled for the entity "Excalibur" — are a different search's results
+    # and only fill in when the web returns nothing. Records that failed
+    # this query before (unhelpful_match) never stand in. Same thresholds
+    # as knowledge_router (6afh).
+    _MATCH = 0.6
+
+    def _stands_in(h: Dict) -> bool:
+        return (float(h.get("unhelpful_match") or 0.0) < _MATCH
+                and (float(h.get("question_match") or 0.0) >= _MATCH
+                     or bool(h.get("times_confirmed"))))
+
+    def _recall(entity: str) -> Tuple[List[Dict], List[Dict]]:
+        """0vuz: what she looked up before about this entity, split into
+        (hits that can replace the search, hits that are only a fallback).
+        The hits keep their provenance so the prompt can cite them."""
         try:
             payload = _json.dumps({
                 "jsonrpc": "2.0",
@@ -875,26 +890,35 @@ def _web_search_fallback(entities: List[str]) -> Dict[str, Dict]:
                           headers={"Content-Type": "application/json"})
             with urlopen(req, timeout=2) as resp:
                 data = _json.loads(resp.read())
-            hits = (data.get("result") or {}).get("results", [])
-            return [{
+            hits = [h for h in (data.get("result") or {}).get("results", [])
+                    if isinstance(h, dict) and h.get("snippet") and not h.get("stale")]
+        except Exception:
+            logger.debug("Lookup memory recall failed for '%s'", entity, exc_info=True)
+            return [], []
+
+        def _fmt(h: Dict) -> Dict:
+            return {
                 "title": h.get("title") or h.get("domain", ""),
                 "snippet": (h.get("snippet") or "")[:200],
                 "url": h.get("url", ""),
                 "remembered": True,
                 "retrieved_at": h.get("retrieved_at", ""),
                 "stale": False,
-            } for h in hits if isinstance(h, dict) and h.get("snippet") and not h.get("stale")]
-        except Exception:
-            logger.debug("Lookup memory recall failed for '%s'", entity, exc_info=True)
-            return []
+            }
+        strong = [_fmt(h) for h in hits if _stands_in(h)]
+        weak = [_fmt(h) for h in hits if not _stands_in(h)]
+        return strong, weak
 
     for entity in entities:
-        remembered = _recall(entity)
+        remembered, fallback = _recall(entity)
         if remembered:
             results[entity] = {"results": remembered, "source": "lookup_memory", "query": entity}
             logger.info("Web fallback for '%s': answered from %d remembered lookup(s), no search",
                         entity, len(remembered))
             continue
+        if fallback:
+            logger.info("Web fallback for '%s': %d remembered lookup(s) were for other questions; searching",
+                        entity, len(fallback))
         try:
             payload = _json.dumps({
                 "jsonrpc": "2.0",
@@ -931,6 +955,12 @@ def _web_search_fallback(entities: List[str]) -> Dict[str, Dict]:
             logger.debug("Web fallback timed out for '%s'", entity)
         except Exception:
             logger.debug("Web fallback failed for '%s'", entity, exc_info=True)
+        if entity not in results and fallback:
+            # The web gave nothing (empty, down, or over budget): what she
+            # looked up for other questions still beats no context.
+            results[entity] = {"results": fallback, "source": "lookup_memory", "query": entity}
+            logger.info("Web fallback for '%s': search empty; using %d remembered lookup(s) instead",
+                        entity, len(fallback))
 
     return results
 
