@@ -1645,8 +1645,22 @@ async def process_packet(packet_data: Dict[str, Any]):
                         logger.debug(f"Yielding unknown event type: {event.get('type', 'unknown')}")
                         yield json.dumps(event) + "\n"
 
-            # Flush any remaining parser buffer
-            if _tc_enabled and _tc_parser:
+            # Flush any remaining parser buffer — unless generation was cut
+            # off for a tool call. Then the buffer is the tail of output the
+            # model kept writing past the call (a made-up <tool_result>, the
+            # call again), and flushing it leaked 'l"}</tool_call>' (r4p6).
+            if _pending_tool_calls and _tc_parser:
+                try:
+                    _discarded = "".join(pe.text or "" for pe in _tc_parser.flush())
+                    if _discarded.strip():
+                        logger.info(
+                            "Discarded %d chars the model wrote past its tool call: %r",
+                            len(_discarded), _discarded[:120],
+                        )
+                except Exception:
+                    # Dropping the tail is best-effort; never fail the turn over it.
+                    logger.debug("Tool-call tail discard failed", exc_info=True)
+            elif _tc_enabled and _tc_parser:
                 for pe in _tc_parser.flush():
                     if pe.type == ParseEventType.TEXT and pe.text:
                         if _is_repetition_garbage(pe.text):
