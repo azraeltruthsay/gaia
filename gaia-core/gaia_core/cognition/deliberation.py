@@ -508,6 +508,7 @@ def deliberate(
     user_message_id: Optional[str] = None,
     session_id: Optional[str] = None,
     casual: bool = False,
+    offer_tools: bool = True,
 ) -> DeliberationResult:
     """Run a single-call deliberation pass: thinking phase + final response.
 
@@ -522,6 +523,11 @@ def deliberate(
     `casual`, when True, appends the lean anti-confab-only block instead of
     the full analytical scaffolding (7n3) — keeps the no-confabulation guard
     but drops the observe/quote/critique frame that diluted the felt line.
+
+    `offer_tools`, False on turns the prompt builder answers without tools
+    (prompt_builder.offers_tools), leaves out the tool schema: offering tools
+    the runtime then suppresses left Core's reply as a bare, discarded call
+    (1ha9).
     """
     t0 = time.time()
 
@@ -542,7 +548,7 @@ def deliberate(
     # here — this path had never injected the schema at all (GAIA_Project-pfdw).
     try:
         from gaia_common.utils.tool_call_parser import build_tool_schema_injection
-        _tool_schema = build_tool_schema_injection()
+        _tool_schema = build_tool_schema_injection() if offer_tools else ""
         if _tool_schema:
             messages[0] = {
                 **messages[0],
@@ -644,6 +650,7 @@ def run_deliberated_turn(
     model_role: str = "core",
     casual: bool = False,
     use_adapter: bool = True,
+    offer_tools: bool = True,
 ) -> DeliberationResult:
     """Full deliberated-turn orchestration with confabulation safety net.
 
@@ -716,6 +723,7 @@ def run_deliberated_turn(
         user_message_id=user_message_id,
         session_id=session_id,
         casual=casual,
+        offer_tools=offer_tools,
     )
 
     # 2. If clean, return as-is
@@ -744,6 +752,7 @@ def run_deliberated_turn(
                 user_message_id=user_message_id,
                 session_id=session_id,
                 casual=casual,
+                offer_tools=offer_tools,
             )
             retry.retried = True
             # Use the retry only if Prime tripped fewer flags than Core

@@ -16,7 +16,7 @@ from gaia_core.cognition.external_voice import ExternalVoice
 from gaia_core.cognition.self_reflection import reflect_and_refine
 from gaia_core.cognition.cognitive_audit import run_cognitive_self_audit
 from gaia_core.cognition.history_review import review_history
-from gaia_core.utils.prompt_builder import build_from_packet
+from gaia_core.utils.prompt_builder import build_from_packet, offers_tools
 from gaia_core.utils.output_router import route_output, _strip_think_tags_robust
 # TODO: [GAIA-REFACTOR] chat_logger.py module not yet migrated.
 # from app.utils.chat_logger import log_chat_entry, log_chat_entry_structured
@@ -3555,6 +3555,7 @@ class AgentCore:
                         model_role=_delib_role,
                         casual=_delib_casual,
                         use_adapter=_delib_adapter,
+                        offer_tools=offers_tools(_delib_intent),
                     )
                     # Strip any residual <think> tags from the deliberation
                     # output before yielding. _split_think_and_response already
@@ -4271,6 +4272,7 @@ class AgentCore:
                             user_message_id=getattr(packet.header, "packet_id", None),
                             session_id=session_id,
                             casual=_delib_intent2 in _CASUAL_DELIB_INTENTS,
+                            offer_tools=offers_tools(_delib_intent2),
                         )
                         if _delib_result and _delib_result.final_response:
                             logger.info(

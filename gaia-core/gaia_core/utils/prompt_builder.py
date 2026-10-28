@@ -82,6 +82,28 @@ def _content_token_count(content) -> int:
         return total
     return 0
 
+# Social turns get the lean casual prompt (no capability block); "time" is
+# answered from world state.
+_CHITCHAT_INTENTS = frozenset({"chat", "greeting", "farewell", "gratitude", "smalltalk",
+                               "social", "chitchat", "acknowledgment", "affirmation"})
+_WORLD_ANSWERABLE_INTENTS = frozenset({"time"})
+
+# Intents whose tool calls the runtime suppresses (main.py): social talk and
+# questions the prompt already answers. Deliberation leaves the tool schema
+# out for exactly these, so it never offers what will be refused — 1ha9: it
+# taught tools on every turn, Core answered "what's the date and your
+# uptime?" with only a tool call, main.py suppressed it, and the reply was
+# empty. Narrower than _CHITCHAT_INTENTS on purpose: "chat" is the router's
+# catch-all and covers "Fetch the page at …" and "Update my knowledge base".
+TOOL_FREE_INTENTS = frozenset({"greeting", "farewell", "gratitude", "smalltalk", "social",
+                               "chitchat", "acknowledgment", "affirmation", "time"})
+
+
+def offers_tools(intent: str) -> bool:
+    """Whether a turn with this intent may call tools (see TOOL_FREE_INTENTS)."""
+    return (intent or "").lower() not in TOOL_FREE_INTENTS
+
+
 # Slim mode (rlx8): recent turns only, trimmed — it exists to keep the prompt
 # small for the fast-reflex path.
 _SLIM_HISTORY_TURNS = 6
@@ -344,8 +366,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         # the block itself says chitchat needs no tool. Any non-conversational
         # intent keeps it so tool use is unaffected.
         _li = (getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
-        _chitchat = _li in {"chat", "greeting", "farewell", "gratitude", "smalltalk",
-                            "social", "chitchat", "acknowledgment", "affirmation"}
+        _chitchat = _li in _CHITCHAT_INTENTS
         # tr7f: prompt mode was chosen solely by the CURRENT message's intent —
         # but a CFR-admitted history snippet can carry a technical/system
         # question a stale greeting-intent turn shouldn't be allowed to
@@ -378,7 +399,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         # already injected via world_state_snapshot, so a tool is redundant.
         # Skip the capability block so Core answers from context instead of
         # emitting a (noisy, redundant) worldstate call.
-        _world_answerable = _li in {"time"}
+        _world_answerable = _li in _WORLD_ANSWERABLE_INTENTS
         if not (_chitchat or _world_answerable):
             persona_anchor = persona_anchor + _capability_block
         elif _chitchat:

@@ -1478,13 +1478,13 @@ async def process_packet(packet_data: Dict[str, Any]):
                     _embed_intent_cfg = getattr(_get_config_h3ds(), 'constants', {}).get("EMBED_INTENT", {}) or {}
                     _suppress_thr = float(_embed_intent_cfg.get("confidence_threshold", 0.42))
                     _intent_lbl, _ = _eic.classify(user_input or "", confidence_threshold=_suppress_thr)
-                    _suppress_tools = _intent_lbl in {
-                        "greeting", "farewell", "gratitude", "smalltalk",
-                        "social", "chitchat", "acknowledgment", "affirmation",
-                        # 'time' is world-state-answerable: the clock is already
-                        # injected in the prompt, so drop the redundant (noisy)
-                        # worldstate tool call and let Core answer from context.
-                        "time"}
+                    # 'time' is world-state-answerable: the clock is already
+                    # injected in the prompt, so drop the redundant (noisy)
+                    # worldstate tool call and let Core answer from context.
+                    # Shared with deliberation, which leaves the tool schema
+                    # out for the same intents (1ha9).
+                    from gaia_core.utils.prompt_builder import TOOL_FREE_INTENTS
+                    _suppress_tools = _intent_lbl in TOOL_FREE_INTENTS
                     if _suppress_tools:
                         logger.info("Chat: tool-free intent '%s' — suppressing tool calls", _intent_lbl)
             except Exception:
