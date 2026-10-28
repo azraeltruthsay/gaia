@@ -30,6 +30,12 @@ automatically once confirmed PIN_AFTER_CONFIRMATIONS times). sweep() moves
 idle, never-used or long-stale records into <root>/archive/, which recall
 skips unless include_archive=True — searchable, but not in her way. A record
 the web returns again, or one she pins, comes back out of the archive.
+
+Consolidation (prip), run during sleep: consolidate() merges records that
+say the same thing (one page's lead seen by many searches, a mirror copying
+Wikipedia verbatim) into one, keeping every source url; revalidation_candidates()
+picks the stale or disputed records she actually uses for a fresh look-up;
+bake_candidates() lists facts proven often enough to be curriculum material.
 """
 
 from __future__ import annotations
@@ -72,6 +78,19 @@ ARCHIVE_CONFIRMED_DAYS = 365    # proved useful, then fell out of use
 ARCHIVE_STALE_GRACE_DAYS = 30   # stale/disputed this long with no refresh
 MAX_ACTIVE_RECORDS = 5000       # beyond this, the least-recently-active go
 ARCHIVE_DIRNAME = "archive"
+
+# Ranking bonus for records that answered well before (confirmed or pinned):
+# rummaging "Excalibur" should surface the card that says where Arthur got
+# it before an article about divers looking for it (prip live). Small
+# enough not to outrank a clearly more relevant record.
+PROVEN_BONUS = 0.25
+
+# Consolidation (prip).
+MERGE_SIMILARITY = 0.85         # same-url snippets this alike are one record
+RECHECK_COOLDOWN_DAYS = 7       # don't re-search a record more often than this
+BAKE_MIN_CONFIRMATIONS = 2      # confirmed this often → bake/curriculum candidate
+# Beside the lookups dir, not in it: everything in it is read as a record.
+BAKE_CANDIDATES_FILE = "lookup_bake_candidates.json"
 
 # An answer that says, in effect, "my sources don't say".
 _HEDGE_RE = re.compile(
@@ -205,9 +224,37 @@ def _parse(ts: str) -> Optional[datetime]:
         return None
 
 
+def _parse_ts(ts: Optional[str]) -> float:
+    dt = _parse(ts) if ts else None
+    return dt.timestamp() if dt else 0.0
+
+
 def _days_since(ts: Optional[str], now: datetime) -> Optional[float]:
     dt = _parse(ts) if ts else None
     return (now - dt).total_seconds() / 86400 if dt else None
+
+
+def compact_lookup(rec: dict) -> dict:
+    """A record as GAIA reads it when she rummages: the fact, where it came
+    from and how much to trust it — not the bookkeeping."""
+    out = {
+        "id": rec.get("id"),
+        "fact": rec.get("snippet", ""),
+        "source": rec.get("title") or rec.get("domain", ""),
+        "url": rec.get("url", ""),
+        "looked_up": (rec.get("retrieved_at") or "")[:10],
+        "asked_for": (rec.get("queries") or [""])[-1],
+    }
+    for flag in ("stale", "archived", "pinned"):
+        if rec.get(flag):
+            out[flag] = True
+    if rec.get("disputed_at"):
+        out["disputed"] = True
+    if rec.get("times_confirmed"):
+        out["answered_well"] = rec["times_confirmed"]
+    if rec.get("also_at"):
+        out["also_at"] = rec["also_at"]
+    return out
 
 
 class LookupMemory:
@@ -266,7 +313,7 @@ class LookupMemory:
                 continue
             for path in d.glob("*.json"):
                 rec = self._load(path)
-                if rec:
+                if isinstance(rec, dict) and rec.get("id"):
                     yield path, rec, archived
 
     def remember(self, query: str, results: Iterable[dict], kind: str = "search",
@@ -520,8 +567,11 @@ class LookupMemory:
         # Rank by relevance + question match: many records mention the
         # subject equally ("Excalibur is the sword of King Arthur" scores 1.0
         # for any Excalibur question); the one looked up for THIS question
-        # (the Lady of the Lake, for "where did he get it") should lead.
-        scored.sort(key=lambda t: (t[0] + t[1], t[2].get("retrieved_at", "")), reverse=True)
+        # (the Lady of the Lake, for "where did he get it") should lead, and
+        # one that answered well before gets a small edge (PROVEN_BONUS).
+        scored.sort(key=lambda t: (
+            t[0] + t[1] + (PROVEN_BONUS if t[2].get("times_confirmed") or t[2].get("pinned") else 0.0),
+            t[2].get("retrieved_at", "")), reverse=True)
         hits = []
         for score, qmatch, rec, archived in scored[:top_k]:
             revalidate = _parse(rec.get("revalidate_after", ""))
@@ -546,6 +596,15 @@ class LookupMemory:
                         hits[0]["score"], ", stale" if hits[0]["stale"] else "",
                         ", from archive" if hits[0]["archived"] else "")
         return hits
+
+    def recent(self, limit: int = 10, include_archive: bool = False) -> List[dict]:
+        """Browse: the most recently used lookups (retrieved, recalled or
+        confirmed), for rummaging without a particular query in mind."""
+        recs = [{**rec, "archived": archived}
+                for _p, rec, archived in self._records(include_archive)]
+        recs.sort(key=lambda r: max(r.get(k) or "" for k in (
+            "retrieved_at", "last_recalled_at", "last_confirmed_at")), reverse=True)
+        return recs[:limit]
 
     # ── lifecycle ─────────────────────────────────────────────────────
 
@@ -617,6 +676,171 @@ class LookupMemory:
             self._save(rec, archived=True)
         except OSError as e:
             logger.warning("LookupMemory: could not archive %s: %s", rec.get("id"), e)
+
+    # ── consolidation (prip) ──────────────────────────────────────────
+
+    @staticmethod
+    def _norm_text(rec: dict) -> str:
+        return " ".join((rec.get("snippet") or "").split()).lower()
+
+    @staticmethod
+    def _rank(rec: dict) -> tuple:
+        """Which of two duplicates survives: pinned, then proven, then used,
+        then the older (it has the longer history)."""
+        return (bool(rec.get("pinned")), rec.get("times_confirmed", 0),
+                rec.get("times_recalled", 0), -_parse_ts(rec.get("first_retrieved_at")))
+
+    def _merge_into(self, keep: dict, dup: dict) -> None:
+        """Fold `dup`'s history into `keep` (queries, verdicts, usage, sources)."""
+        for key in ("queries", "confirmed_queries", "unhelpful_queries"):
+            merged = list(keep.get(key, []))
+            merged += [q for q in dup.get(key, []) if q not in merged]
+            if merged:
+                keep[key] = merged[-MAX_QUERIES_PER_RECORD:]
+        for key in ("times_recalled", "times_confirmed"):
+            keep[key] = keep.get(key, 0) + dup.get(key, 0)
+        for key in ("retrieved_at", "last_recalled_at", "last_confirmed_at", "revalidate_after"):
+            keep[key] = max(filter(None, (keep.get(key), dup.get(key))), default=keep.get(key))
+        keep["first_retrieved_at"] = min(filter(None, (keep.get("first_retrieved_at"),
+                                                       dup.get("first_retrieved_at"))), default=None)
+        if dup.get("pinned"):
+            keep["pinned"] = True
+        # A newer refresh of either clears an older dispute (as remember() does).
+        if keep.get("disputed_at") and keep["disputed_at"] < keep.get("retrieved_at", ""):
+            keep.pop("disputed_at")
+        if dup.get("url") and dup["url"] != keep.get("url"):
+            also = keep.setdefault("also_at", [])
+            for u in [dup["url"]] + dup.get("also_at", []):
+                if u not in also and u != keep.get("url"):
+                    also.append(u)
+        keep.setdefault("merged_ids", []).append(dup["id"])
+
+    def consolidate(self, now: Optional[datetime] = None, dry_run: bool = False) -> Dict[str, object]:
+        """Merge active records that say the same thing:
+          - the same text at different urls (mirrors, syndication), and
+          - near-identical text at the same url (a page's lead as returned
+            by different searches; a search snippet vs the fetched opening).
+        The survivor keeps every url (`also_at`) and the combined history;
+        each duplicate is archived with reason "merged into <id>", not
+        deleted, so the trail stays inspectable."""
+        now = now or _now()
+        recs = [rec for _p, rec, _a in self._records()]
+        # Union-find, so duplication is transitive: a mirror of A and a
+        # same-page variant of A all end up in A's group.
+        parent = {r["id"]: r["id"] for r in recs}
+
+        def find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        by_text: Dict[str, str] = {}
+        by_url: Dict[str, List[dict]] = {}
+        for rec in recs:
+            text = self._norm_text(rec)
+            if text in by_text:
+                parent[find(rec["id"])] = find(by_text[text])
+            else:
+                by_text[text] = rec["id"]
+            if rec.get("url"):
+                by_url.setdefault(rec["url"], []).append(rec)
+        for same_url in by_url.values():
+            # Pages yield a handful of records each; pairwise is cheap here.
+            terms = [(r["id"], content_terms(self._norm_text(r))) for r in same_url]
+            for i, (rid_a, ta) in enumerate(terms):
+                for rid_b, tb in terms[i + 1:]:
+                    union = ta | tb
+                    if union and len(ta & tb) / len(union) >= MERGE_SIMILARITY:
+                        parent[find(rid_b)] = find(rid_a)
+        by_root: Dict[str, List[dict]] = {}
+        for rec in recs:
+            by_root.setdefault(find(rec["id"]), []).append(rec)
+        groups = [g for g in by_root.values() if len(g) > 1]
+        merged = []
+        for group in groups:
+            group.sort(key=self._rank, reverse=True)
+            keep, dups = group[0], group[1:]
+            for dup in dups:
+                merged.append({"id": dup["id"], "into": keep["id"], "title": dup.get("title", "")})
+                if dry_run:
+                    continue
+                self._merge_into(keep, dup)
+                self._archive(dup, f"merged into {keep['id']}", now)
+            if not dry_run:
+                try:
+                    self._save(keep)
+                except OSError as e:
+                    logger.warning("LookupMemory: could not save merged %s: %s", keep["id"], e)
+        if merged:
+            logger.info("LookupMemory: consolidation %s %d duplicate record(s) into %d",
+                        "would merge" if dry_run else "merged", len(merged), len(groups))
+        return {"merged": merged, "dry_run": dry_run}
+
+    def revalidation_candidates(self, limit: int = 5, now: Optional[datetime] = None) -> List[dict]:
+        """Stale or disputed records worth a fresh look-up: ones she uses
+        (pinned, confirmed or recalled), not re-checked in the last
+        RECHECK_COOLDOWN_DAYS, most used first. Each carries the `query` to
+        search — the latest question it was retrieved or confirmed for."""
+        now = now or _now()
+        out = []
+        for _p, rec, _a in self._records():
+            revalidate = _parse(rec.get("revalidate_after", ""))
+            stale = bool(rec.get("disputed_at")) or (revalidate is not None and now > revalidate)
+            used = rec.get("pinned") or rec.get("times_confirmed") or rec.get("times_recalled")
+            since = _days_since(rec.get("recheck_attempted_at"), now)
+            if not stale or not used or (since is not None and since < RECHECK_COOLDOWN_DAYS):
+                continue
+            query = ((rec.get("confirmed_queries") or [None])[-1]
+                     or (rec.get("queries") or [None])[-1] or rec.get("title"))
+            if query:
+                out.append({"id": rec["id"], "query": query, "title": rec.get("title", ""),
+                            "_rank": self._rank(rec)})
+        out.sort(key=lambda c: c.pop("_rank"), reverse=True)
+        return out[:limit]
+
+    def note_recheck(self, ids: Iterable[str], now: Optional[datetime] = None) -> int:
+        """Record a re-check attempt (whatever came of it) so the cooldown
+        holds; a record the search returned again was refreshed by remember()."""
+        stamp = _iso(now or _now())
+
+        def change(rec):
+            rec["recheck_attempted_at"] = stamp
+
+        return self._update(ids, change, "note recheck for")
+
+    def bake_candidates(self, write: bool = True) -> List[dict]:
+        """Facts proven often enough to be worth learning outright: pinned or
+        confirmed BAKE_MIN_CONFIRMATIONS+ times, not disputed. Each lists the
+        questions it answered, the text and its sources — material for a
+        curriculum, which stays a human/training decision (nothing trains
+        from this automatically). Written beside the lookups directory
+        (<palace>/knowledge/lookup_bake_candidates.json)."""
+        out = []
+        for _p, rec, _a in self._records():
+            if rec.get("disputed_at"):
+                continue
+            if not (rec.get("pinned") or rec.get("times_confirmed", 0) >= BAKE_MIN_CONFIRMATIONS):
+                continue
+            out.append({"id": rec["id"], "questions": rec.get("confirmed_queries", []),
+                        "fact": rec.get("snippet", ""), "title": rec.get("title", ""),
+                        "sources": [rec.get("url", "")] + rec.get("also_at", []),
+                        "times_confirmed": rec.get("times_confirmed", 0),
+                        "times_recalled": rec.get("times_recalled", 0),
+                        "retrieved_at": rec.get("retrieved_at")})
+        out.sort(key=lambda c: (c["times_confirmed"], c["times_recalled"]), reverse=True)
+        if write:
+            try:
+                path = self.root.parent / BAKE_CANDIDATES_FILE
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(out, ensure_ascii=False, indent=1), encoding="utf-8")
+                tmp.replace(path)
+            except OSError as e:
+                logger.warning("LookupMemory: could not write bake candidates: %s", e)
+        if out:
+            logger.info("LookupMemory: %d bake candidate(s)", len(out))
+        return out
 
     def stats(self) -> Dict[str, int]:
         n = disputed = pinned = confirmed = archived = 0

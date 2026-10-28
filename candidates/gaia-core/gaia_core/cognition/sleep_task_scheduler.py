@@ -421,7 +421,9 @@ class SleepTaskScheduler:
         # GAIA_Project-6afh: memory palace lifecycle. Pinned memories and
         # permanent wings stay forever; the rest move to the palace archive
         # once unused (still searchable on request, not in everyday recall).
-        # Disk-only work in gaia-mcp — cheap, but once a day is plenty.
+        # prip: also merges duplicate lookups, re-checks a few stale ones
+        # she uses (≤5 web searches, leaving budget for conversation) and
+        # refreshes the bake-candidate list. Once a day is plenty.
         self.register_task(SleepTask(
             task_id="memory_lifecycle",
             task_type="MEMORY",
@@ -1383,10 +1385,25 @@ class SleepTaskScheduler:
             logger.warning("Penpal review failed: %s", e)
 
     def _run_memory_lifecycle(self, **kwargs) -> None:
-        """Archive unused palace memories and lookups (6afh). The palace
-        lives in gaia-mcp, so the sweep runs there."""
+        """Maintain the memory palace (6afh, prip). The palace lives in
+        gaia-mcp, so the work runs there:
+          1. re-check stale/disputed lookups she uses (a few web searches,
+             within the search budget),
+          2. sweep: merge duplicate lookups, archive unused memories, refresh
+             the bake-candidate list."""
+        from gaia_core.utils import mcp_client
         try:
-            from gaia_core.utils import mcp_client
+            raw = mcp_client.call_jsonrpc("palace_lookup_revalidate", {"limit": 5})
+            inner = raw.get("response", raw) if isinstance(raw, dict) else {}
+            res = inner.get("result", inner) if isinstance(inner, dict) else {}
+            if isinstance(res, dict) and res.get("candidates"):
+                logger.info("Memory lifecycle: re-checked %d stale lookup(s), %d refreshed, %d deferred",
+                            len(res.get("checked") or []), len(res.get("refreshed") or []),
+                            len(res.get("deferred") or []))
+        except Exception as e:
+            # Re-checking is optional; the sweep still runs.
+            logger.warning("Memory lifecycle re-check failed: %s", e)
+        try:
             raw = mcp_client.call_jsonrpc("palace_lifecycle_sweep", {})
             inner = raw.get("response", raw) if isinstance(raw, dict) else {}
             res = inner.get("result", inner) if isinstance(inner, dict) else {}
@@ -1395,9 +1412,12 @@ class SleepTaskScheduler:
                 return
             lookups = res.get("lookups") or {}
             logger.info("Memory lifecycle: archived %d palace memorie(s) and %d lookup(s); "
-                        "%s lookups active (%s pinned)%s",
+                        "merged %d duplicate lookup(s); %s lookups active (%s pinned); "
+                        "%s bake candidate(s)%s",
                         len(res.get("archived") or []), len(lookups.get("archived") or []),
+                        len(lookups.get("merged") or []),
                         lookups.get("active", "?"), lookups.get("pinned", "?"),
+                        lookups.get("bake_candidates", "?"),
                         f"; errors: {res['errors']}" if res.get("errors") else "")
         except Exception as e:
             logger.warning("Memory lifecycle sweep failed: %s", e)

@@ -223,7 +223,7 @@ class SkillGateway:
 
                 # MemPalace recall
                 try:
-                    palace_result = await execute_limb("palace_recall", {"query": query, "top_k": 2}, _store, pre_approved=True)
+                    palace_result = await execute_limb("palace_recall", {"query": query, "top_k": 2, "include_lookups": False}, _store, pre_approved=True)
                     if isinstance(palace_result, dict):
                         for mem in palace_result.get("results", []):
                             content = mem.get("content", "") if isinstance(mem, dict) else str(mem)

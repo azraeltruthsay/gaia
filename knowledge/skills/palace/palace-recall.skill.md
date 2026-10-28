@@ -17,4 +17,5 @@ parameters:
     description: Maximum number of results (default 3)
 ---
 Search the MemPalace for stored memories. Returns matches ranked by relevance
-with cross-references to the Knowledge Graph.
+with cross-references to the Knowledge Graph, plus `lookups`: what you looked
+up before that bears on the query, with sources (see palace-lookups).

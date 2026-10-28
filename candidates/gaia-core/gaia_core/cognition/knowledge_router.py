@@ -195,7 +195,9 @@ def _query_mempalace(query: str, timeout: float = 2.0) -> List[GroundingResult]:
     try:
         from gaia_core.utils import mcp_client
         raw = mcp_client.call_jsonrpc("palace_recall", {
-            "query": query, "top_k": 2  # palace_recall reads top_k (was max_results)
+            "query": query, "top_k": 2,  # palace_recall reads top_k (was max_results)
+            # Lookup memory is queried on its own step (1a); don't count it twice.
+            "include_lookups": False,
         })
         # Parse MCP response
         inner = raw

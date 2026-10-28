@@ -152,7 +152,7 @@ DOMAIN_TOOLS: Dict[str, dict] = {
 
     # ── MemPalace ──────────────────────────────────────────────────────
     "palace": {
-        "description": "Structured memory palace — store, recall, navigate GAIA's long-term memories",
+        "description": "Structured memory palace — store, recall, navigate GAIA's long-term memories; lookups = what you looked up before, with sources",
         "actions": {
             "store": {
                 "params": {"text": "string", "source": "string?", "date": "string?"},
@@ -169,6 +169,16 @@ DOMAIN_TOOLS: Dict[str, dict] = {
             "status": {
                 "params": {},
                 "maps_to": "palace_status",
+            },
+            # prip: rummage what she looked up before (no query = recent;
+            # archive=true also searches the archive).
+            "lookups": {
+                "params": {"query": "string?", "top_k": "integer?", "archive": "boolean?"},
+                "maps_to": "palace_lookups",
+            },
+            "pin": {
+                "params": {"ids": "list?", "palace_id": "string?", "pinned": "boolean?"},
+                "maps_to": "palace_pin",
             },
         },
     },
@@ -429,6 +439,13 @@ def _build_mappings():
         ("study", "unload"): ("study", "adapter_unload"),
         ("study", "info"): ("study", "adapter_info"),
         ("study", "list"): ("study", "adapter_list"),
+        # palace lookups (prip): verbs she reaches for when remembering
+        # what she looked up (76hb live: she tried "recall" unprompted)
+        ("knowledge", "recall"): ("palace", "lookups"),
+        ("memory", "recall"): ("palace", "lookups"),
+        ("palace", "lookup"): ("palace", "lookups"),
+        ("palace", "remembered"): ("palace", "lookups"),
+        ("palace", "search"): ("palace", "recall"),
         # recall/introspect
         ("recall", "events"): ("introspect", "recall"),
         ("introspect", "events"): ("introspect", "recall"),

@@ -326,6 +326,9 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "palace_pin": lambda p: _palace_pin_impl(p),
         "palace_restore": lambda p: _palace_restore_impl(p),
         "palace_lifecycle_sweep": lambda p: _palace_lifecycle_sweep_impl(p),
+        # prip: rummage her lookups (model-facing) + re-check stale ones
+        "palace_lookups": lambda p: _palace_lookups_impl(p),
+        "palace_lookup_revalidate": lambda p: _palace_lookup_revalidate_impl(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
         "replace": lambda p: _replace_impl(p),
@@ -1123,14 +1126,32 @@ def _palace_store_impl(params: dict) -> dict:
     return palace.store(text, source=source, date_str=date_str)
 
 
+# prip live: asked to check her memory palace, Core sent palace(recall,
+# topic="Excalibur") and got "query parameter required". Accept the words
+# she reaches for.
+_QUERY_SYNONYMS = ("query", "topic", "about", "subject", "entity", "q", "text", "search")
+
+
+def _query_param(params: dict) -> str:
+    for key in _QUERY_SYNONYMS:
+        val = (params or {}).get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return ""
+
+
 def _palace_recall_impl(params: dict) -> dict:
-    """Recall memories by text search with KG enrichment."""
+    """Recall memories by text search with KG enrichment. With no query,
+    browse the most recent lookups instead of failing."""
     palace = _get_palace()
-    query = params.get("query", "")
+    query = _query_param(params)
     if not query:
-        return {"ok": False, "error": "query parameter required"}
+        out = _palace_lookups_impl({**params, "query": ""})
+        out["note"] = "No query given; showing what you looked up most recently."
+        return out
     top_k = int(params.get("top_k", 5))
-    return palace.recall(query, top_k=top_k, include_archive=bool(params.get("include_archive")))
+    return palace.recall(query, top_k=top_k, include_archive=bool(params.get("include_archive")),
+                         include_lookups=params.get("include_lookups", True) is not False)
 
 
 def _palace_store_lookup_impl(params: dict) -> dict:
@@ -1212,6 +1233,68 @@ def _palace_lifecycle_sweep_impl(params: dict) -> dict:
     """Archive idle / unused / long-stale memories (pinned and permanent
     ones are never moved). dry_run=True reports without moving."""
     return _get_palace().sweep(dry_run=bool(params.get("dry_run")))
+
+
+def _palace_lookups_impl(params: dict) -> dict:
+    """prip: what GAIA has looked up before, as she reads it — the fact, its
+    source and date, and flags (stale, disputed, archived, answered_well).
+    With a query: the most relevant lookups. Without: the most recently
+    used, for browsing. archive=True also searches the archive."""
+    from gaia_common.utils.lookup_memory import compact_lookup
+    lookups = _get_palace().lookups
+    try:
+        top_k = max(1, min(int(params.get("top_k", 5)), 20))
+    except (TypeError, ValueError):
+        top_k = 5
+    include_archive = bool(params.get("archive") or params.get("include_archive"))
+    query = _query_param(params)
+    if query:
+        hits = lookups.recall(query, top_k=top_k, include_archive=include_archive)
+    else:
+        hits = lookups.recent(limit=top_k, include_archive=include_archive)
+    results = [compact_lookup(h) for h in hits]
+    out: dict = {"ok": True, "query": query, "results": results}
+    if not results:
+        out["note"] = ("Nothing remembered about that." if not include_archive
+                       else "Nothing remembered about that, archive included.")
+    return out
+
+
+# Searches the background re-check leaves for her conversations.
+REVALIDATE_SEARCH_RESERVE = 20
+
+
+def _palace_lookup_revalidate_impl(params: dict) -> dict:
+    """prip: re-check stale or disputed lookups she actually uses, one web
+    search each (its results are remembered as usual, which refreshes a
+    record the web still returns). Stops while REVALIDATE_SEARCH_RESERVE
+    searches remain in the hourly budget, so it never starves conversation."""
+    from gaia_mcp import web_tools
+    lookups = _get_palace().lookups
+    try:
+        limit = max(1, min(int(params.get("limit", 5)), 20))
+    except (TypeError, ValueError):
+        limit = 5
+    candidates = lookups.revalidation_candidates(limit=limit)
+    checked, refreshed, skipped = [], [], []
+    for cand in candidates:
+        try:
+            _trust, search_limiter, _fetch = web_tools._get_config()
+            if search_limiter.remaining <= REVALIDATE_SEARCH_RESERVE:
+                skipped.append(cand["id"])
+                continue
+            res = web_tools.web_search({"query": cand["query"], "max_results": 5})
+        except Exception as e:
+            logger.warning("Lookup re-check for %s (%r) failed: %s", cand["id"], cand["query"][:80], e)
+            continue
+        checked.append(cand["id"])
+        if any(r.get("memory_id") == cand["id"] for r in (res or {}).get("results", [])):
+            refreshed.append(cand["id"])
+    lookups.note_recheck(checked)
+    logger.info("Lookup re-check: %d candidate(s), %d searched, %d still on the web (refreshed), "
+                "%d deferred for the search budget", len(candidates), len(checked), len(refreshed), len(skipped))
+    return {"ok": True, "candidates": len(candidates), "checked": checked,
+            "refreshed": refreshed, "deferred": skipped}
 
 
 def _palace_navigate_impl(params: dict) -> dict:

@@ -292,3 +292,88 @@ def test_only_records_that_carry_the_answer_are_confirmed(tmp_path):
     hits = {h["id"]: h for h in m.recall(Q, now=T0)}
     assert hits[card_id]["confirmed_match"] >= 0.6
     assert hits[lead_id]["confirmed_match"] == 0.0 and hits[lead_id]["unhelpful_match"] == 0.0
+
+
+# ── prip: consolidation, re-checks, bake candidates, browsing ────────
+
+def test_consolidate_merges_mirrors_and_same_page_variants(tmp_path):
+    m = _mem(tmp_path)
+    a = m.remember("Who gave Arthur Excalibur?", [LADY], now=T0)[0]
+    mirror = m.remember("Lady of the Lake", [dict(LADY, url="https://mirror.example/lady")],
+                        now=T0 + timedelta(days=1))[0]
+    variant = m.remember("Excalibur lake", [dict(LADY, snippet=LADY["snippet"] + " ...")],
+                         now=T0 + timedelta(days=2))[0]
+    m.feedback("Who gave Arthur Excalibur?", "The Lady of the Lake.", [{"memory_id": a}], now=T0)
+    assert len(m.consolidate(now=T0, dry_run=True)["merged"]) == 2
+    out = m.consolidate(now=T0)
+    assert {d["into"] for d in out["merged"]} == {a}  # the confirmed one survives
+    rec = json.loads((tmp_path / "lookups" / f"{a}.json").read_text())
+    assert rec["also_at"] == ["https://mirror.example/lady"]
+    assert set(rec["queries"]) == {"Who gave Arthur Excalibur?", "Lady of the Lake", "Excalibur lake"}
+    assert rec["retrieved_at"].startswith("2026-10-29")  # newest refresh kept
+    assert sorted(rec["merged_ids"]) == sorted([mirror, variant])
+    # Duplicates are archived with the reason, not deleted.
+    dup = json.loads((tmp_path / "lookups" / "archive" / f"{mirror}.json").read_text())
+    assert dup["archived_reason"] == f"merged into {a}"
+    assert m.stats()["lookups"] == 1
+
+
+def test_consolidate_leaves_different_facts_alone(tmp_path):
+    m = _mem(tmp_path)
+    m.remember("Arthur", [LADY, LEAD, ONIMUSHA], now=T0)
+    assert m.consolidate(now=T0)["merged"] == []
+
+
+def test_revalidation_picks_used_stale_records_with_cooldown(tmp_path):
+    m = _mem(tmp_path)
+    news = dict(ONIMUSHA, snippet="The latest Onimusha release date was announced today for next spring.")
+    used = m.remember("latest Onimusha release date", [news], now=T0)[0]
+    m.remember("latest Onimusha trailer", [dict(news, url="https://y", snippet=news["snippet"] + " Trailer.")], now=T0)
+    later = T0 + timedelta(days=VOLATILE_DAYS + 1)
+    m.recall("Onimusha release date", top_k=1, now=T0)  # only the first is used
+    cands = m.revalidation_candidates(now=later)
+    assert [c["id"] for c in cands] == [used]
+    assert cands[0]["query"] == "latest Onimusha release date"
+    m.note_recheck([used], now=later)
+    assert m.revalidation_candidates(now=later + timedelta(days=1)) == []
+    assert m.revalidation_candidates(now=later + timedelta(days=8))[0]["id"] == used
+
+
+def test_bake_candidates_are_proven_facts_written_beside_the_records(tmp_path):
+    m = _mem(tmp_path)
+    rid = m.remember(Q, [LADY], now=T0)[0]
+    m.remember("Onimusha", [ONIMUSHA], now=T0)
+    for q in (Q, "Who gave Arthur Excalibur?"):
+        m.feedback(q, "The Lady of the Lake.", [{"memory_id": rid}], now=T0)
+    out = m.bake_candidates()
+    assert [c["id"] for c in out] == [rid]
+    assert out[0]["questions"] == [Q, "Who gave Arthur Excalibur?"]
+    path = tmp_path / "lookup_bake_candidates.json"
+    assert json.loads(path.read_text())[0]["fact"] == LADY["snippet"]
+    # The file is not inside the record dir, so it is never read as a record.
+    assert m.stats()["lookups"] == 2
+
+
+def test_recent_and_compact_view(tmp_path):
+    from gaia_common.utils.lookup_memory import compact_lookup
+    m = _mem(tmp_path)
+    m.remember("Onimusha", [ONIMUSHA], now=T0)
+    rid = m.remember(Q, [LADY], now=T0 + timedelta(hours=1))[0]
+    m.pin([rid])
+    first = m.recent(limit=1)[0]
+    assert first["id"] == rid
+    view = compact_lookup(first)
+    assert view["fact"] == LADY["snippet"] and view["source"] == LADY["title"]
+    assert view["looked_up"] == "2026-10-27" and view["asked_for"] == Q and view["pinned"] is True
+    assert "queries" not in view and "stale" not in view
+
+
+def test_proven_records_rank_first_when_rummaging(tmp_path):
+    m = _mem(tmp_path)
+    divers = {"title": "Map reveals where Excalibur could be", "url": "https://metro.example/x",
+              "snippet": "Excalibur: possible locations for King Arthur's sword, searched by divers and magnet fishers."}
+    m.remember(Q, [divers], now=T0 + timedelta(hours=1))  # newer, equally relevant
+    card = m.remember(Q, [LADY], now=T0)[0]
+    assert m.recall("Excalibur", now=T0)[0]["url"] == divers["url"]
+    m.feedback(Q, "The Lady of the Lake.", [{"memory_id": card}], now=T0)
+    assert m.recall("Excalibur", now=T0)[0]["id"] == card

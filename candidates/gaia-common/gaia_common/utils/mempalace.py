@@ -48,7 +48,7 @@ from typing import Dict, List, Optional, Tuple
 from gaia_common.utils.aaak_dialect import AAKDialect
 from gaia_common.utils.general_extractor import extract_memories
 from gaia_common.utils.knowledge_graph import KnowledgeGraph
-from gaia_common.utils.lookup_memory import LookupMemory
+from gaia_common.utils.lookup_memory import LookupMemory, compact_lookup
 
 logger = logging.getLogger("GAIA.MemPalace")
 
@@ -382,7 +382,8 @@ class MemPalace:
 
     # ── Recall ───────────────────────────────────────────────────────────
 
-    def recall(self, query: str, top_k: int = 5, include_archive: bool = False) -> dict:
+    def recall(self, query: str, top_k: int = 5, include_archive: bool = False,
+               include_lookups: bool = True) -> dict:
         """Semantic recall with KG enrichment.
 
         1. Search stored memories for query matches (text search across AAAK
@@ -458,9 +459,24 @@ class MemPalace:
                     except Exception:
                         pass
 
+        # prip: what she has looked up is memory too, and the part that
+        # holds facts (AAAK results are compressed codes). Recalling the
+        # palace rummages both, with where each lookup came from.
+        # (Internal callers that recall lookups themselves pass
+        # include_lookups=False, so one question isn't counted twice.)
+        try:
+            lookups = [compact_lookup(h) for h in self.lookups.recall(
+                query, top_k=top_k, include_archive=include_archive)] if include_lookups else []
+        except Exception as e:
+            logger.warning("MemPalace: lookup recall failed for %r: %s", query[:80], e)
+            lookups = []
+
+        # Lookups first: they hold the facts, and a truncated tool result
+        # (what the model sees) should cut the AAAK codes, not them.
         return {
             "ok": True,
             "query": query,
+            "lookups": lookups,
             "results": results,
             "result_count": len(results),
             "kg_context": kg_context[:15],
@@ -667,11 +683,18 @@ class MemPalace:
                 except OSError as e:
                     errors.append(f"{rel}: {e}")
                     logger.warning("MemPalace: could not archive %s: %s", rel, e)
-        try:
-            lookups = self.lookups.sweep(dry_run=dry_run)
-        except Exception as e:
-            logger.warning("MemPalace: lookup memory sweep failed: %s", e)
-            lookups = {"error": str(e)}
+        # Lookups: merge duplicates first (so the sweep judges the combined
+        # history), then archive, then refresh the bake-candidate list.
+        lookups: dict = {}
+        for step, run in (("consolidate", lambda: self.lookups.consolidate(dry_run=dry_run)),
+                          ("sweep", lambda: self.lookups.sweep(dry_run=dry_run)),
+                          ("bake", lambda: {"bake_candidates": len(
+                              self.lookups.bake_candidates(write=not dry_run))})):
+            try:
+                lookups.update(run())
+            except Exception as e:
+                logger.warning("MemPalace: lookup memory %s failed: %s", step, e)
+                lookups[f"{step}_error"] = str(e)
         logger.info("MemPalace: sweep %s %d memorie(s) to the archive (unused > %.0fd)",
                     "would move" if dry_run else "moved", len(moved), self._archive_after_days)
         return {"ok": not errors, "archived": moved, "errors": errors,
