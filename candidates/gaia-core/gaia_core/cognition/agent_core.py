@@ -3290,10 +3290,23 @@ class AgentCore:
             _followup = not _pushback and is_knowledge_followup(user_input, history)
             try:
                 if _pushback:
-                    from gaia_core.cognition.knowledge_router import ground_conversation
-                    _user_turns = [h.get("content") or "" for h in history
-                                   if isinstance(h, dict) and h.get("role") == "user"][-2:]
-                    _grounding_ctx = ground_conversation(_user_turns + [user_input], reason="pushback")
+                    from gaia_core.cognition.knowledge_router import (
+                        disputed_exchange, ground_conversation)
+                    _disputed_q, _disputed = disputed_exchange(history, user_input)
+                    # The disputed question and the turn before it carry the
+                    # subject ("Who forged it?" alone searched "forged Avalon").
+                    _uturns = [h.get("content") or "" for h in history
+                               if isinstance(h, dict) and h.get("role") == "user"]
+                    _k = (max(i for i, t in enumerate(_uturns) if t.strip() == _disputed_q)
+                          if _disputed_q and any(t.strip() == _disputed_q for t in _uturns)
+                          else len(_uturns) - 1)
+                    _grounding_ctx = ground_conversation(
+                        _uturns[max(0, _k - 1):_k + 1] + [user_input], reason="pushback")
+                    if not _grounding_ctx.has_grounding:
+                        # 8xr4.25: an empty search used to leave Prime with
+                        # nothing but the user's claim. One retry, asked as-is.
+                        _grounding_ctx = ground_conversation(
+                            [user_input], reason="pushback retry", context_turns=[_disputed_q])
                 elif _followup:
                     # Her last answer names the subject ("Excalibur") and isn't
                     # in dispute, so its names join the earlier user turns.
@@ -3316,12 +3329,18 @@ class AgentCore:
                         intent=plan.intent if plan else "other",
                     )
                 if _grounding_ctx and _grounding_ctx.has_grounding:
-                    _disputed = ""
-                    if _pushback:
-                        _disputed = next((
-                            (h.get("content") or "").strip() for h in reversed(history)
-                            if isinstance(h, dict) and h.get("role") == "assistant"
-                            and (h.get("content") or "").strip()), "")
+                    if not _pushback:
+                        _disputed = ""
+                    if _pushback or _followup:
+                        # The semantic probe's per-entity search ("Avalon")
+                        # came first and prompt_builder renders only the first
+                        # web_grounding, so these results were dropped.
+                        _before = len(packet.content.data_fields)
+                        packet.content.data_fields = [
+                            df for df in packet.content.data_fields
+                            if getattr(df, "key", "") != "web_grounding"]
+                        if len(packet.content.data_fields) < _before:
+                            logger.info("KnowledgeRouter: conversation grounding replaces the per-entity web fallback")
                     packet.content.data_fields.append(DataField(
                         key="web_grounding",
                         value={user_input[:50]: {

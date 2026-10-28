@@ -19,7 +19,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("GAIA.KnowledgeRouter")
 
@@ -539,6 +539,35 @@ def ground_conversation(user_turns: List[str], reason: str = "follow-up",
     logger.info("KnowledgeRouter: %s grounding %r → %d web results in %.0fms",
                 reason, query, len(ctx.results), ctx.elapsed_ms)
     return ctx
+
+
+def disputed_exchange(history: List[Dict[str, Any]], text: str, lookback: int = 3) -> Tuple[str, str]:
+    """The (question, answer) pair a pushback is about, from the last few.
+
+    The most recent answer sharing a content word with the pushback wins,
+    else the most recent answer. "Wasn't it Lancelot who threw it back?" after
+    a "how are you?" detour is about "…Bedivere threw it back", not the
+    health reply; taking the last turn disputed the wrong answer and searched
+    "feeling today" (8xr4.25).
+    """
+    pairs: List[Tuple[str, str]] = []
+    question = ""
+    for h in history or []:
+        if not isinstance(h, dict):
+            continue
+        content = (h.get("content") or "").strip()
+        if h.get("role") == "user":
+            question = content
+        elif h.get("role") == "assistant" and content:
+            pairs.append((question, content))
+    if not pairs:
+        return "", ""
+    words = {w for w in re.findall(r"[\w'-]+", (text or "").lower())
+             if w not in _CONVERSATION_QUERY_STOPWORDS and len(w) > 2}
+    for q, a in reversed(pairs[-lookback:]):
+        if words & set(re.findall(r"[\w'-]+", f"{q} {a}".lower())):
+            return q, a
+    return pairs[-1]
 
 
 def ground_pushback(user_turns: List[str]) -> GroundingContext:

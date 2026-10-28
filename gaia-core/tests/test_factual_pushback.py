@@ -124,11 +124,13 @@ def _joined(messages):
     return " ".join(str(m.get("content", "")) for m in messages)
 
 
-def test_disputed_grounding_states_the_dispute():
+def test_disputed_grounding_is_framed_neutrally():
+    # 8xr4.25: naming the dispute made Prime concede to false corrections.
     from gaia_core.utils import prompt_builder
     text = _joined(prompt_builder.build_from_packet(_grounded_packet("From the wizard Oberon.")))
-    assert 'disputing your previous answer: "From the wizard Oberon."' in text
+    assert "Search results for the point the user raised" in text
     assert "Lady of the Lake gives Arthur Excalibur." in text
+    assert "disputing" not in text
     assert "Candidate context" not in text
 
 
@@ -148,3 +150,23 @@ def test_ordinary_grounding_keeps_candidate_hedge():
 def test_mind_tag_stripped_from_history(raw, clean):
     from gaia_core.memory.session_manager import _strip_mind_tag
     assert _strip_mind_tag(raw) == clean
+
+
+DETOUR = [
+    {"role": "user", "content": "Who threw it back into the lake when he died?"},
+    {"role": "assistant", "content": "The sword was thrown back into the lake by Arthur's servant Bedivere."},
+    {"role": "user", "content": "How are you feeling today?"},
+    {"role": "assistant", "content": "Let me see. What's the current system health?"},
+]
+
+
+def test_disputed_exchange_skips_an_unrelated_detour():
+    q, a = knowledge_router.disputed_exchange(DETOUR, "Wasn't it Lancelot who threw it back?")
+    assert q == "Who threw it back into the lake when he died?"
+    assert "Bedivere" in a
+
+
+def test_disputed_exchange_defaults_to_the_last_answer():
+    q, a = knowledge_router.disputed_exchange(DETOUR, "Are you sure?")
+    assert q == "How are you feeling today?"
+    assert knowledge_router.disputed_exchange([], "Are you sure?") == ("", "")

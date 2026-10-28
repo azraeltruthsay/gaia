@@ -175,7 +175,7 @@ def _get_config() -> Tuple[SourceTrustConfig, _RateLimiter, _RateLimiter]:
 
         rate = web_cfg.get("rate_limits", {})
         _search_limiter = _RateLimiter(
-            max_calls=rate.get("search_per_hour", 20),
+            max_calls=rate.get("search_per_hour", 100),
             window_seconds=3600,
         )
         _fetch_limiter = _RateLimiter(

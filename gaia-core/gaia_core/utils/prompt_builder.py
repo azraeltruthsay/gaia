@@ -1539,16 +1539,14 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                         # sensor read), so keep firm framing for that branch only.
                         parts.insert(0, "The following is VERIFIED system sensor data. Use it directly in your answer — do NOT say you lack access to this information:")
                     elif disputed:
-                        # 8xr4.19: the user is disputing her last answer. A
-                        # plain statement of that, without the "may be wrong,
-                        # verify with tools" hedge, let Prime weigh its own
-                        # answer against the sources (3/3 vs 2/3 in probes)
-                        # instead of defending it or going off to call tools.
-                        parts.insert(
-                            0,
-                            f"[The user is disputing your previous answer: \"{disputed}\" "
-                            "Search results for the disputed point:]",
-                        )
+                        # 8xr4.19/.25: the user is pushing back on an answer.
+                        # Without the eu9 "verify with tools" hedge Prime weighs
+                        # its answer against the sources. Naming the dispute
+                        # ("The user is disputing your previous answer") made
+                        # it concede: 4/4 to a false "Wasn't it Lancelot?" with
+                        # no results, 1/4 wrong even with them. This neutral
+                        # header went 4/4 on both a false and a true correction.
+                        parts.insert(0, "[Search results for the point the user raised:]")
                     elif followup:
                         # 8xr4.20: the query was built from this question plus
                         # the exchange it follows on from, so the results are

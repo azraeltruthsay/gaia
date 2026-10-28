@@ -113,7 +113,7 @@
       ]
     },
     "rate_limits": {
-      "search_per_hour": 20,
+      "search_per_hour": 100,
       "fetch_per_hour": 50
     },
     "fetch_timeout_seconds": 15,
