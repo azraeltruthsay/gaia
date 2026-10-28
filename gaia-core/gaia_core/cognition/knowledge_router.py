@@ -628,6 +628,50 @@ def proper_nouns(text: str) -> str:
     return " ".join(out)
 
 
+def _name_key(word: str) -> str:
+    return re.sub(r"'s$", "", word.lower())
+
+
+def followup_context(turns: List[Dict[str, Any]], strip=lambda t: t) -> List[str]:
+    """Context for a follow-up's search query, from the recent turns: the
+    user's turns as they were, and from GAIA's answers only the names the
+    conversation returns to — said in at least two of these turns, by
+    either side. Those name the subject ("Excalibur", "Arthur"); a name
+    said once is a particular of one answer, possibly a wrong one (2vei:
+    a confabulated "…Merlin … Malory's Le Morte … Pellinore" answer sent
+    "Who threw it back into the lake?" to Pellinore pages; with only the
+    subject names the top result was Bedivere). When the user's turns name
+    nothing and no name recurs, the latest answer is the only subject
+    available, so its names are used.
+
+    `strip` cleans an answer's text (think tags, mind tag) first.
+    """
+    texts = [(t.get("role"), (t.get("content") or "") if t.get("role") == "user"
+              else strip(t.get("content") or "")) for t in turns
+             if isinstance(t, dict) and t.get("role") in ("user", "assistant")]
+    turn_names = [{_name_key(w) for w in proper_nouns(text).split()} for _, text in texts]
+    seen_in = {}
+    for names in turn_names:
+        for n in names:
+            seen_in[n] = seen_in.get(n, 0) + 1
+    user_named = any(names for (role, _), names in zip(texts, turn_names) if role == "user")
+    context: List[str] = []
+    recurring_any = False
+    for (role, text), names in zip(texts, turn_names):
+        if role == "user":
+            context.append(text)
+            continue
+        keep = [w for w in proper_nouns(text).split() if seen_in.get(_name_key(w), 0) >= 2]
+        recurring_any = recurring_any or bool(keep)
+        context.append(" ".join(keep))
+    if not user_named and not recurring_any:
+        for i in range(len(texts) - 1, -1, -1):
+            if texts[i][0] == "assistant":
+                context[i] = proper_nouns(texts[i][1])
+                break
+    return context
+
+
 def followup_query(question: str, earlier_turns: List[str], max_chars: int = 120) -> str:
     """The follow-up question as asked, plus the subject words from the turns
     before it: "Where did he get the sword? King Arthur's Excalibur". A keyword

@@ -146,3 +146,45 @@ def test_followup_grounding_header_and_snippet_budget():
 ])
 def test_proper_nouns_keep_names_drop_prose(answer, names):
     assert knowledge_router.proper_nouns(answer) == names
+
+
+# 2vei: names from GAIA's own answers steer a follow-up's search only when the
+# conversation keeps returning to them.
+WRONG_ANSWER_WINDOW = [
+    {"role": "assistant", "content": "The name of King Arthur's sword is Excalibur."},
+    {"role": "user", "content": "Where did he get the sword?"},
+    {"role": "assistant", "content": "In Malory's Le Morte, Arthur got Excalibur after Pellinore broke "
+                                     "his first sword, with Merlin's help."},
+]
+
+
+def test_followup_context_keeps_recurring_names_and_drops_one_answer_particulars():
+    ctx = knowledge_router.followup_context(WRONG_ANSWER_WINDOW)
+    q = knowledge_router.followup_query("Who threw it back into the lake when he died?", ctx)
+    assert "Excalibur" in q and "Arthur" in q
+    for particular in ("Pellinore", "Merlin", "Malory"):
+        assert particular not in q
+    assert ctx[1] == "Where did he get the sword?"  # user turns verbatim
+
+
+def test_followup_context_falls_back_to_the_answer_when_nothing_else_names_the_subject():
+    ctx = knowledge_router.followup_context([
+        {"role": "user", "content": "Tell me about the sword in the stone."},
+        {"role": "assistant", "content": "That would be Excalibur, in most tellings."},
+    ])
+    assert ctx == ["Tell me about the sword in the stone.", "Excalibur"]
+
+
+def test_followup_context_user_named_subject_needs_no_answer_names():
+    # "Excalibur" said once is not needed: the user's "King Arthur's sword"
+    # finds the same pages (checked live, 2026-10-28).
+    ctx = knowledge_router.followup_context(HIST)
+    assert ctx[0] == HIST[0]["content"] and "King" in ctx[1] and "Excalibur" not in ctx[1]
+
+
+def test_followup_context_strips_answers_first():
+    ctx = knowledge_router.followup_context(
+        [{"role": "user", "content": "Tell me about the sword."},
+         {"role": "assistant", "content": "<think>Merlin?</think>Excalibur."}],
+        strip=lambda t: t.split("</think>")[-1])
+    assert ctx[1] == "Excalibur"

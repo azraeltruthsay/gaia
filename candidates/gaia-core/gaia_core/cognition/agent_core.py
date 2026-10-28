@@ -3394,17 +3394,16 @@ class AgentCore:
                         _grounding_ctx = ground_conversation(
                             [user_input], reason="pushback retry", context_turns=[_disputed_q])
                 elif _followup:
-                    # Her last answer names the subject ("Excalibur") and isn't
-                    # in dispute, so its names join the earlier user turns.
-                    from gaia_core.cognition.knowledge_router import ground_conversation
+                    # The subject comes from the earlier turns: the user's
+                    # words, plus the names the conversation keeps returning
+                    # to in her answers — not every name of her last answer
+                    # (2vei: those may be a wrong answer's particulars).
+                    from gaia_core.cognition.knowledge_router import followup_context, ground_conversation
                     from gaia_core.memory.session_manager import _strip_mind_tag as _smt
                     _recent = [h for h in history if isinstance(h, dict)
                                and h.get("role") in ("user", "assistant")][-3:]
-                    from gaia_core.cognition.knowledge_router import proper_nouns
-                    _context = [
-                        (h.get("content") or "") if h.get("role") == "user"
-                        else proper_nouns(_smt(strip_think_tags(h.get("content") or "")))
-                        for h in _recent]
+                    _context = followup_context(
+                        _recent, strip=lambda t: _smt(strip_think_tags(t)))
                     _grounding_ctx = ground_conversation(
                         [user_input], reason="follow-up", context_turns=_context)
                 elif _kr_skip:
