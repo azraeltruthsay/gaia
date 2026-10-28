@@ -493,6 +493,93 @@ def _strip_leading_input_echo(final_response: str, user_input: str) -> str:
     return rest[0].upper() + rest[1:]
 
 
+# h1ok: when Core skips the <think> block (most turns — see the bead), pieces
+# of the instructions it was given surface in the reply: "Verify before
+# claiming specifics.", or a bracketed header like "[Candidate context — …]".
+# Text copied out of GAIA's own prompt scaffolding is not speech to the user,
+# so it is dropped by provenance, not by vocabulary: a sentence or bracketed
+# span is an echo when most of its word trigrams occur in the scaffold and not
+# in what the user wrote. Grounding facts are deliberately NOT part of the
+# scaffold — quoting a search result is legitimate.
+_WORD_RE = re.compile(r"[a-z0-9']+")
+_BRACKET_SPAN_RE = re.compile(r"\[[^\[\]\n]{3,400}\]")
+# Prompt headers are lines that open with "[" — only the header itself (up to
+# its first "]" or ":") counts as scaffold; facts that follow it are content.
+_PROMPT_HEADER_RE = re.compile(r"^\s*(\[[^\]\n:]{4,160})", re.MULTILINE)
+_ECHO_MIN_WORDS = 4
+_ECHO_OVERLAP = 0.6
+
+
+def _trigrams(text: str) -> set:
+    words = _WORD_RE.findall(text.lower())
+    return {tuple(words[i:i + 3]) for i in range(len(words) - 2)}
+
+
+def _scaffold_text(system_content: str, instructions: str) -> str:
+    """The instruction-like part of the prompt: the deliberation block plus
+    the bracketed section headers prompt_builder wraps context in."""
+    headers = _PROMPT_HEADER_RE.findall(system_content or "")
+    return instructions + "\n" + "\n".join(headers)
+
+
+def _is_echo(piece: str, scaffold_grams: set, user_grams: set) -> bool:
+    words = _WORD_RE.findall(piece.lower())
+    if len(words) < _ECHO_MIN_WORDS:
+        return False
+    grams = _trigrams(piece) - user_grams
+    if not grams:
+        return False
+    # A short piece must be copied whole: "What's the source of truth?" shares
+    # a phrase with the instructions but is a fair question on its own.
+    need = 1.0 if len(grams) < 4 else _ECHO_OVERLAP
+    return len(grams & scaffold_grams) / len(grams) >= need
+
+
+def _strip_scaffold_echo(final_response: str, scaffold: str, user_input: str) -> Tuple[str, List[str]]:
+    """Drop sentences / bracketed spans of the reply copied from the scaffold.
+
+    Returns (text, dropped). Fail-safe like the voice gate: if nothing
+    substantive would remain, the reply is returned unchanged — an odd reply
+    is better than an empty one.
+    """
+    if not final_response or not scaffold:
+        return final_response, []
+    try:
+        scaffold_grams = _trigrams(scaffold)
+        user_grams = _trigrams(user_input or "")
+        dropped: List[str] = []
+
+        def _span(m: re.Match) -> str:
+            if _is_echo(m.group(0), scaffold_grams, user_grams):
+                dropped.append(m.group(0))
+                return ""
+            return m.group(0)
+
+        text = _BRACKET_SPAN_RE.sub(_span, final_response)
+        kept_lines = []
+        for line in text.split("\n"):
+            parts = re.split(r"(?<=[.!?])\s+", line)
+            kept = []
+            for p in parts:
+                if p.strip() and _is_echo(p, scaffold_grams, user_grams):
+                    dropped.append(p.strip())
+                else:
+                    kept.append(p)
+            kept_lines.append(" ".join(kept).rstrip())
+        out = re.sub(r"\n{3,}", "\n\n", "\n".join(kept_lines)).strip()
+        if not dropped:
+            return final_response, []
+        if len(_WORD_RE.findall(out.lower())) < 2:
+            logger.info("Deliberation: reply is all scaffold echo; kept as-is (%d pieces)", len(dropped))
+            return final_response, []
+        logger.info("Deliberation: dropped %d scaffold-echo piece(s): %s",
+                    len(dropped), [d[:80] for d in dropped])
+        return out, dropped
+    except Exception:
+        logger.debug("Deliberation: scaffold-echo strip failed (non-fatal)", exc_info=True)
+        return final_response, []
+
+
 # ── Orchestrator ────────────────────────────────────────────────────────
 
 def deliberate(
@@ -599,6 +686,8 @@ def deliberate(
 
     thinking, final_response, fallback_used = _split_think_and_response(raw)
     final_response = _strip_leading_input_echo(final_response, user_input)
+    final_response, _echo_dropped = _strip_scaffold_echo(
+        final_response, _scaffold_text(messages[0].get("content", ""), _instructions), user_input)
     voice_evidence = _detect_voice_evidence(thinking)
     forbidden_hits = _detect_forbidden_phrases(final_response)
     confabulation_flags = _detect_confabulation(final_response)
