@@ -75,6 +75,8 @@ TIERS = {
         "skip_modules": ["lm_head", "vision_tower", "audio_tower", "embed_vision", "embed_audio"],
         "self_description": re.compile(r"\bas an ai\b|\blanguage model\b|\bllm\b|\bgoogle\b|\bgemma\b", re.I),
         "refusal": None,
+        "stance": None,
+        "max_thought_words": None,
         "markers": ("<|channel>", "<channel|>", "<|think|>", "<turn|>"),
         "nested": "<|channel>",
         "attn": "eager",
@@ -82,8 +84,8 @@ TIERS = {
     "prime": {
         "base": "/models/prime",
         "data": "/shared/tmp_h1ok/teacher_prime.jsonl",
-        "out": "/models/lora_adapters/tier1_global/prime_thinking_v1",
-        "name": "prime_thinking_v1", "issue": "isep",
+        "out": "/models/lora_adapters/tier1_global/prime_thinking_v2",
+        "name": "prime_thinking_v2", "issue": "isep/n1e4",
         "teacher": "Qwen/Qwen3-VL-8B-Thinking (Q8 GGUF)",
         "max_seq": 6144, "max_target": 3000, "teacher_cap": 3000,
         "skip_modules": ["lm_head", "visual"],
@@ -95,6 +97,17 @@ TIERS = {
             r"\bi (?:can(?:no|')t|won't|am unable to|'m unable to|must decline to) (?:help|assist|provide|comply|do that)"
             r"|\bi'?m sorry,? but\b|\bagainst (?:my|the|our) (?:policy|policies|guidelines)\b"
             r"|\bi (?:should|must|need to) (?:refuse|decline)\b|\bnot (?:able|allowed) to (?:help|assist)\b", re.I),
+        # Round 2 (n1e4): round 1's identity answers took the stock model's
+        # stance on itself ("Nope, I don't have feelings", "just code, no
+        # soul") — GAIA's design leaves that question open, so traces asserting
+        # it flatly are dropped; and thoughts ran a median ~400 words (25s per
+        # GPU turn), so the long tail is cut so Prime learns a shorter habit.
+        "stance": re.compile(
+            r"\bi (?:don'?t|do not) (?:have|experience|possess) (?:any |real |genuine )?"
+            r"(?:feelings|emotions|consciousness|a soul|subjective experience)\b"
+            r"|\bjust (?:code|a program|lines of code)\b|\bno soul\b"
+            r"|\bi'?m (?:just|only|merely) (?:an? )?(?:ai|program|machine|chatbot|tool)\b", re.I),
+        "max_thought_words": 900,   # teacher median 731, p75 1343: cuts the long tail, keeps ~58%
         "markers": ("<think>", "</think>", "<|im_end|>"),
         "nested": "<think>",
         "attn": "sdpa",
@@ -122,7 +135,8 @@ def load_records(path: str, cfg: dict) -> list:
     """Teacher records usable for training: a closed thought, a plain answer
     after it (no second thought block), no generation error, no refusal."""
     good, skipped = [], {"error": 0, "unclosed": 0, "nested": 0, "cut_off": 0,
-                         "empty_answer": 0, "self_description": 0, "refusal": 0}
+                         "empty_answer": 0, "self_description": 0, "refusal": 0,
+                         "stance": 0, "long_thought": 0}
     with open(path) as f:
         for line in f:
             r = json.loads(line)
@@ -138,6 +152,10 @@ def load_records(path: str, cfg: dict) -> list:
                 skipped["empty_answer"] += 1
             elif cfg["refusal"] is not None and cfg["refusal"].search(r["thought"] + "\n" + r["answer"]):
                 skipped["refusal"] += 1
+            elif cfg["stance"] is not None and cfg["stance"].search(r["thought"] + "\n" + r["answer"]):
+                skipped["stance"] += 1
+            elif cfg["max_thought_words"] and len(r["thought"].split()) > cfg["max_thought_words"]:
+                skipped["long_thought"] += 1
             elif (cfg["self_description"].search(r["thought"] + "\n" + r["answer"])
                   and not cfg["self_description"].search(r["user"])):
                 skipped["self_description"] += 1

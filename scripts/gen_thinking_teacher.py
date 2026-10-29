@@ -15,7 +15,11 @@ answer after it (both are trained on — see train_core_thinking.py).
       Teacher: stock Qwen/Qwen3-VL-8B-Thinking (Q8 GGUF). Packets are named
       'prime' so prompt_builder emits Prime's real prompt; ChatML turns; the
       assistant turn is prefilled with <think>\\n as Qwen's Thinking template
-      does, and the thought ends at </think>.
+      does, and the thought ends at </think>. Intents come from the live
+      classifier (embedding stage, as agent_core runs it), so identity
+      questions get identity prompts — the keyword heuristic labelled nearly
+      everything 'chat', and casual prompts dropped Prime's architecture fact
+      before 6rfx (round 1's teacher answered identity questions without it).
 
 Teacher server: llama-server on :8199 inside gaia-core with the teacher GGUF on
 the GPU (GAIA in maintenance + deep-sleep), e.g.
@@ -39,6 +43,7 @@ TIERS = {
     "core": {
         "out": "/shared/tmp_h1ok/teacher.jsonl",
         "header_name": None,            # default header, as core_thinking_v1 was trained
+        "live_intents": False,          # keyword heuristic, as core_thinking_v1 was trained
         "think_in_system": "<|think|>\n",
         "prefill": "",
         "thought_re": re.compile(r"\s*<\|channel>thought\n(.*?)<channel\|>(.*)", re.S),
@@ -48,6 +53,7 @@ TIERS = {
     "prime": {
         "out": "/shared/tmp_h1ok/teacher_prime.jsonl",
         "header_name": "prime",
+        "live_intents": True,
         "think_in_system": "",
         "prefill": "<think>\n",
         "thought_re": re.compile(r"(.*?)</think>(.*)", re.S),
@@ -62,6 +68,24 @@ def intent_for(text):
     return "greeting" if GREET.search(text) and len(text) < 80 else "chat"
 
 
+_LIVE = {}
+
+
+def live_intent_for(text):
+    """agent_core's intent detection without an LLM: the embedding classifier
+    (the same MiniLM the model pool serves) plus its heuristics."""
+    if not _LIVE:
+        from sentence_transformers import SentenceTransformer
+        from gaia_core.config import Config
+        from gaia_core.cognition.nlu.intent_detection import detect_intent
+        _LIVE.update(embed=SentenceTransformer("/models/all-MiniLM-L6-v2", device="cpu"),
+                     config=Config(), detect=detect_intent)
+    try:
+        return _LIVE["detect"](text, _LIVE["config"], embed_model=_LIVE["embed"]).intent or "chat"
+    except Exception:
+        return intent_for(text)
+
+
 def render(tier, messages):
     """The engine's turn format for the tier (ChatFormatter / gaia_cpp)."""
     if tier == "core":
@@ -73,7 +97,7 @@ def render(tier, messages):
 
 def build(tier, text):
     cfg = TIERS[tier]
-    intent = intent_for(text)
+    intent = live_intent_for(text) if cfg["live_intents"] else intent_for(text)
     pkt = CognitionPacket(content=Content(original_prompt=text), intent=Intent(user_intent=intent))
     if cfg["header_name"]:
         pkt.header.model.name = cfg["header_name"]
