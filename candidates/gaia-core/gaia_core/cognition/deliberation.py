@@ -775,9 +775,13 @@ def _flag(value) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-def _native_thinking_on(cfg: Dict[str, Any], prime: bool) -> bool:
+def _native_thinking_on(cfg: Dict[str, Any], prime: bool, deep_focus: bool = False) -> bool:
+    # Prime's thinking is deep focus, not a default: ~20 s a turn on GPU
+    # against ~3 s without. A person asking for focus turns it on for that
+    # turn; DELIBERATION_NATIVE_THINKING_PRIME=1 turns it on for every turn.
     if prime:
-        return _flag(cfg.get("prime_native_thinking", os.environ.get("DELIBERATION_NATIVE_THINKING_PRIME", "0")))
+        return deep_focus or _flag(cfg.get("prime_native_thinking",
+                                           os.environ.get("DELIBERATION_NATIVE_THINKING_PRIME", "0")))
     return _flag(cfg.get("native_thinking", os.environ.get("DELIBERATION_NATIVE_THINKING", "0")))
 
 
@@ -799,12 +803,16 @@ def run_deliberated_turn(
     casual: bool = False,
     use_adapter: bool = True,
     offer_tools: bool = True,
+    deep_focus: bool = False,
 ) -> DeliberationResult:
     """Full deliberated-turn orchestration with confabulation safety net.
 
     ``use_adapter=False`` deliberates on the bare tier. Turns carrying
     on-subject search results use it: the deliberation adapter recites the
     snippet's lead instead of answering from it (8xr4.20).
+
+    ``deep_focus=True`` (a person asked her to focus / think hard) lets Prime
+    think natively for this turn, whatever the Prime switch says.
 
     Flow:
       1. Deliberate on Core with the deliberation adapter active.
@@ -843,7 +851,9 @@ def run_deliberated_turn(
     # different model. The thought needs room: Core's traces run ~100–1000
     # tokens before the answer, Prime's ~300–2500.
     native_think_token = "" if _is_prime_tier else NATIVE_THINK_TOKEN
-    native_thinking = use_adapter and _native_thinking_on(cfg, _is_prime_tier)
+    native_thinking = use_adapter and _native_thinking_on(cfg, _is_prime_tier, deep_focus)
+    if native_thinking and _is_prime_tier and deep_focus:
+        logger.info("[DELIBERATION] deep focus: Prime thinks natively this turn")
     if native_thinking:
         adapter_name = _native_thinking_adapter(cfg, _is_prime_tier)
         max_tokens = int(cfg.get("prime_native_max_tokens" if _is_prime_tier else "native_max_tokens",
@@ -902,7 +912,7 @@ def run_deliberated_turn(
     # escalation, not Prime→Prime.
     if retry_strategy == "prime" and not _is_prime_tier:
         try:
-            _prime_native = use_adapter and _native_thinking_on(cfg, True)
+            _prime_native = use_adapter and _native_thinking_on(cfg, True, deep_focus)
             retry = deliberate(
                 user_input=user_input,
                 assembled_messages=assembled_messages,

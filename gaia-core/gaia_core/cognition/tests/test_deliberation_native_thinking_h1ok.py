@@ -129,3 +129,21 @@ def test_instruction_mode_sends_no_thinking_opt_in():
     pool = Pool({"content": "<think>easy</think>Four."})
     d.deliberate("2+2?", MSGS, pool, persist=False, offer_tools=False)
     assert "chat_template_kwargs" not in pool.calls[0]
+
+
+# ── Deep focus: Prime thinks when a person asks for focus ──
+
+def test_deep_focus_turns_on_prime_thinking_with_switch_off():
+    seen = _turn_kwargs({"DELIBERATION_NATIVE_THINKING_PRIME": "0"}, model_role="prime", deep_focus=True)
+    assert seen["native_thinking"] is True
+    assert seen["adapter_name"] == "prime_thinking_v1"
+
+
+def test_prime_stays_fast_without_deep_focus():
+    seen = _turn_kwargs({"DELIBERATION_NATIVE_THINKING_PRIME": "0"}, model_role="prime")
+    assert seen["native_thinking"] is False and seen["adapter_name"] is None
+
+
+def test_deep_focus_does_not_change_core():
+    seen = _turn_kwargs({"DELIBERATION_NATIVE_THINKING": "0"}, model_role="core", deep_focus=True)
+    assert seen["native_thinking"] is False and seen["adapter_name"] == "core_deliberation_v1"

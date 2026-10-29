@@ -173,6 +173,7 @@ Runtime toggles (docker-compose `gaia-core` env):
 | `VOICE_GATE_ENABLED` | 1 | Post-generation meta-commentary strip (`voice_gate.py`; the Observer's remediation tool). |
 | `OBSERVER_ON_STREAM` | 1 | Run the conscience on the `/process_packet` user path in fast mode (`stream_observer.observe_user_path`). |
 | `AFFECT_APPRAISAL_ENABLED` | 0 | Feed the affect organ from real subsystems (`affect_appraiser.py`); coherence derives from Samvega. |
+| `DELIBERATION_NATIVE_THINKING_PRIME` | 0 | Prime thinks natively (prime_thinking_v1) on every deliberation. Off: Prime's thinking is **deep focus** — on only for a turn where a person asks her to focus / think hard (~20–40 s on GPU vs ~3 s). |
 | `THOUGHT_SEED_MAX_PENDING` | 2000 | Cap the thought-seed backlog (was an 11k landfill); planters back off, heartbeat prunes. |
 | `GAIA_USER_TZ` | America/Los_Angeles | Operator timezone for world-state local-time (zoneinfo, OS-portable). |
 | `GAIA_LOCALE_CITY` / `_LAT` / `_LON` | unset | Locality organ (`locality.py`): place + live environment in the `[Here & Now]` block. City defaults to a name derived from the tz; lat+lon enable open-meteo weather (cached 15m, degrades to season+daylight offline). |

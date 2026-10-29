@@ -1929,21 +1929,22 @@ class AgentCore:
                         yield {"type": "token", "value": "[(i) Shifting consciousness...]\n"}
                         yield {"type": "flush"}
 
-                        # Poll until FOCUSING state is active or timeout
+                        # Poll until FOCUSING state is active or timeout.
+                        # The lifecycle state is the authority: it turns
+                        # FOCUSING only once Prime is loaded on the GPU.
+                        # /status's gpu_state is the legacy watch manager's
+                        # and can read "focusing" with Prime in standby, so
+                        # the turn ran before Prime existed and fell to Groq.
+                        # The full shift (Core GPU→CPU, then Prime's GPU
+                        # load) takes ~3–4 minutes.
                         import time as _focus_time
-                        _focus_deadline = _focus_time.time() + 120.0
+                        _focus_deadline = _focus_time.time() + 300.0
                         while _focus_time.time() < _focus_deadline:
-                            _focus_time.sleep(2)
+                            _focus_time.sleep(3)
                             try:
-                                _state_resp = _httpx_focus.get(f"{_orch_url}/status", timeout=5)
+                                _state_resp = _httpx_focus.get(f"{_orch_url}/lifecycle/state", timeout=8)
                                 if _state_resp.status_code == 200:
-                                    _state = _state_resp.json()
-                                    # Check both field names (orchestrator uses gpu_state)
-                                    _lstate = str(
-                                        _state.get("gpu_state") or
-                                        _state.get("lifecycle_state") or
-                                        _state.get("consciousness_state") or ""
-                                    ).lower()
+                                    _lstate = str(_state_resp.json().get("state") or "").lower()
                                     if _lstate == "focusing":
                                         _focus_success = True
                                         break
@@ -3554,6 +3555,10 @@ class AgentCore:
                         casual=_delib_casual,
                         use_adapter=_delib_adapter,
                         offer_tools=offers_tools(_delib_intent),
+                        # Deep focus: the person asked her to focus / think
+                        # hard, so Prime thinks natively on this turn only.
+                        deep_focus=_delib_role == "prime" and _wants_focus_transition(
+                            packet.content.original_prompt or user_input or "", source),
                     )
                     # Strip any residual <think> tags from the deliberation
                     # output before yielding. _split_think_and_response already
@@ -4810,7 +4815,7 @@ class AgentCore:
 
                             # Poll lifecycle state until FOCUSING or timeout
                             import time as _esc_time
-                            _focus_deadline = _esc_time.time() + 120.0
+                            _focus_deadline = _esc_time.time() + 300.0  # a full gear shift runs ~3–4 min
                             _focusing_ready = False
                             while _esc_time.time() < _focus_deadline:
                                 try:
