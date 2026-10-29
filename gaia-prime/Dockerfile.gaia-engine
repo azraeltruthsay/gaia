@@ -8,7 +8,7 @@
 #   cpp_builder — builds gaia_cpp pybind11 extension against Python 3.11 + llama headers
 #   runtime     — gaia-engine-base + artifacts from both build stages
 
-ARG LLAMA_CPP_TAG=b8250
+ARG LLAMA_CPP_TAG=b8770
 ARG CUDA_VERSION=12.8.1
 
 # ── Stage 1: Build llama.cpp (CUDA + CPU) ────────────────────────────────

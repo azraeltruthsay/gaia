@@ -126,14 +126,10 @@ services:
       - ${GAIA_WARM_POOL_HOST:-/mnt/gaia_warm_pool}:/warm_pool:ro
       - ./gaia-common:/gaia-common:ro
       # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
-      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
-      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
-      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
-      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
-      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
-      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
-      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
-      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # The whole engine package, Python and gaia_cpp native build (gaia-engine/
+      # scripts/build_native.sh), as one directory: every engine module, the same
+      # build in every container, and edits visible on restart (no --force-recreate).
+      - ./gaia-engine/gaia_engine:/usr/local/lib/python3.11/site-packages/gaia_engine:ro
       - gaia-shared:/shared:rw
       # Logs (activation stream for Neural Mind Map)
       - ../gaia-instance/logs:/logs:rw
@@ -204,14 +200,10 @@ services:
       # Shared library (development mode - mount for live reload)
       - ./gaia-common:/gaia-common:ro
       # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
-      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
-      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
-      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
-      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
-      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
-      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
-      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
-      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # The whole engine package, Python and gaia_cpp native build (gaia-engine/
+      # scripts/build_native.sh), as one directory: every engine module, the same
+      # build in every container, and edits visible on restart (no --force-recreate).
+      - ./gaia-engine/gaia_engine:/usr/local/lib/python3.11/site-packages/gaia_engine:ro
       # Knowledge base (instance = runtime data: vector_store, logs, personal)
       - ../gaia-instance/knowledge:/knowledge:rw
       # Source-tracked knowledge (overlays instance — blueprints, identity, etc.)
@@ -234,6 +226,10 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      # The engine's awareness injection and CogPacket compression shape prompts;
+      # never installed here before the engine became one shared mount — keep off.
+      - GAIA_ENGINE_AWARENESS=${GAIA_ENGINE_AWARENESS:-0}
+      - GAIA_ENGINE_COGPACKET_COMPRESS=${GAIA_ENGINE_COGPACKET_COMPRESS:-0}
       - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/cuda/lib64
       - VLLM_GPU_MEMORY_UTILIZATION=0.3
       # Voice gear (heo): when the consciousness matrix loads Core as the GGUF on
@@ -407,14 +403,10 @@ services:
       # Shared library (development mode)
       - ./gaia-common:/gaia-common:ro
       # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
-      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
-      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
-      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
-      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
-      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
-      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
-      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
-      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # The whole engine package, Python and gaia_cpp native build (gaia-engine/
+      # scripts/build_native.sh), as one directory: every engine module, the same
+      # build in every container, and edits visible on restart (no --force-recreate).
+      - ./gaia-engine/gaia_engine:/usr/local/lib/python3.11/site-packages/gaia_engine:ro
       # Knowledge base (instance = runtime data)
       - ../gaia-instance/knowledge:/knowledge:ro
       # Source-tracked knowledge overlays
@@ -433,6 +425,10 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      # The engine's awareness injection and CogPacket compression shape prompts;
+      # never installed here before the engine became one shared mount — keep off.
+      - GAIA_ENGINE_AWARENESS=${GAIA_ENGINE_AWARENESS:-0}
+      - GAIA_ENGINE_COGPACKET_COMPRESS=${GAIA_ENGINE_COGPACKET_COMPRESS:-0}
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=web
       - GAIA_ENV=${GAIA_ENV:-development}
@@ -516,14 +512,10 @@ services:
       # Shared library (development mode)
       - ./gaia-common:/gaia-common:ro
       # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
-      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
-      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
-      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
-      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
-      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
-      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
-      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
-      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # The whole engine package, Python and gaia_cpp native build (gaia-engine/
+      # scripts/build_native.sh), as one directory: every engine module, the same
+      # build in every container, and edits visible on restart (no --force-recreate).
+      - ./gaia-engine/gaia_engine:/usr/local/lib/python3.11/site-packages/gaia_engine:ro
       # Knowledge base (instance = runtime data, FULL ACCESS for indexing)
       - ../gaia-instance/knowledge:/knowledge:rw
       # Source-tracked knowledge overlays
@@ -545,6 +537,10 @@ services:
       - gaia-shared:/shared:rw
 
     environment:
+      # The engine's awareness injection and CogPacket compression shape prompts;
+      # never installed here before the engine became one shared mount — keep off.
+      - GAIA_ENGINE_AWARENESS=${GAIA_ENGINE_AWARENESS:-0}
+      - GAIA_ENGINE_COGPACKET_COMPRESS=${GAIA_ENGINE_COGPACKET_COMPRESS:-0}
       - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/cuda/lib64
       - VLLM_GPU_MEMORY_UTILIZATION=0.3
       - HOME=/tmp
@@ -618,14 +614,10 @@ services:
       # Shared library (development mode)
       - ./gaia-common:/gaia-common:ro
       # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
-      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
-      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
-      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
-      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
-      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
-      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
-      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
-      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # The whole engine package, Python and gaia_cpp native build (gaia-engine/
+      # scripts/build_native.sh), as one directory: every engine module, the same
+      # build in every container, and edits visible on restart (no --force-recreate).
+      - ./gaia-engine/gaia_engine:/usr/local/lib/python3.11/site-packages/gaia_engine:ro
       # Knowledge base (instance = runtime data)
       - ../gaia-instance/knowledge:/knowledge:rw
       # Source-tracked knowledge overlays
@@ -650,6 +642,10 @@ services:
       - /home/azrael/.notebooklm:/auth/notebooklm:ro
 
     environment:
+      # The engine's awareness injection and CogPacket compression shape prompts;
+      # never installed here before the engine became one shared mount — keep off.
+      - GAIA_ENGINE_AWARENESS=${GAIA_ENGINE_AWARENESS:-0}
+      - GAIA_ENGINE_COGPACKET_COMPRESS=${GAIA_ENGINE_COGPACKET_COMPRESS:-0}
       - HOME=/tmp
       - TRANSFORMERS_CACHE=/tmp/.cache
       - GAIA_SERVICE=mcp
@@ -719,18 +715,18 @@ services:
       - ./gaia-audio:/app:rw
       - ./gaia-common:/gaia-common:ro
       # GAIA Engine Python overlay (preserves compiled cpp .so from docker build)
-      - ./gaia-engine/gaia_engine/core.py:/usr/local/lib/python3.11/site-packages/gaia_engine/core.py:ro
-      - ./gaia-engine/gaia_engine/manager.py:/usr/local/lib/python3.11/site-packages/gaia_engine/manager.py:ro
-      - ./gaia-engine/gaia_engine/config.py:/usr/local/lib/python3.11/site-packages/gaia_engine/config.py:ro
-      - ./gaia-engine/gaia_engine/sae_trainer.py:/usr/local/lib/python3.11/site-packages/gaia_engine/sae_trainer.py:ro
-      - ./gaia-engine/gaia_engine/moe_offload.py:/usr/local/lib/python3.11/site-packages/gaia_engine/moe_offload.py:ro
-      - ./gaia-engine/gaia_engine/__main__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__main__.py:ro
-      - ./gaia-engine/gaia_engine/__init__.py:/usr/local/lib/python3.11/site-packages/gaia_engine/__init__.py:ro
-      - ./gaia-engine/gaia_engine/cpp/backend.py:/usr/local/lib/python3.11/site-packages/gaia_engine/cpp/backend.py:ro
+      # The whole engine package, Python and gaia_cpp native build (gaia-engine/
+      # scripts/build_native.sh), as one directory: every engine module, the same
+      # build in every container, and edits visible on restart (no --force-recreate).
+      - ./gaia-engine/gaia_engine:/usr/local/lib/python3.11/site-packages/gaia_engine:ro
       - ${GAIA_MODELS_HOST:-../gaia-instance/gaia-models}:/models:ro
       - gaia-shared:/shared:rw
 
     environment:
+      # The engine's awareness injection and CogPacket compression shape prompts;
+      # never installed here before the engine became one shared mount — keep off.
+      - GAIA_ENGINE_AWARENESS=${GAIA_ENGINE_AWARENESS:-0}
+      - GAIA_ENGINE_COGPACKET_COMPRESS=${GAIA_ENGINE_COGPACKET_COMPRESS:-0}
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=audio
       - GAIA_ENV=${GAIA_ENV:-production}

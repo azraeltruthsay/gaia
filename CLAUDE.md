@@ -87,7 +87,9 @@ Both tiers run the **GAIA Engine** — a standalone library in its own GitHub re
 
 The Engine Manager provides **dual-backend** inference:
 - **Safetensors** (GPU): Native PyTorch + torch.compile + FlashAttention via GAIAEngine worker
-- **GGUF** (CPU): llama-server (llama.cpp b8770) via subprocess
+- **GGUF** (CPU): gaia_cpp — in-process llama.cpp (b8770) extension with LoRA, KV reuse (d12t) and the house turn format; llama-server subprocess only as fallback
+
+The engine reaches every container as **one directory mount** of `gaia-engine/gaia_engine` (incl. the git-ignored gaia_cpp build from `gaia-engine/scripts/build_native.sh`); a restart picks up edits.
 
 **Important**: Engine code lives in `gaia-engine/` (separate git repo), NOT `gaia-common/gaia_common/engine/`. The latter is a backward-compat **shim** that delegates to the `gaia_engine` package. When working on engine issues, use the `/engine` skill which knows the correct workflow (work in gaia-engine/, commit/push to the separate repo, update shim if API changes).
 
