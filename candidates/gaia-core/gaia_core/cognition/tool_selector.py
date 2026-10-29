@@ -78,6 +78,36 @@ def _structured_json_kwargs(model: Any, schema: Dict[str, Any]) -> Dict[str, Any
 #                     "param_descriptions": {str: str}, "requires_approval": bool } }
 
 from gaia_common.utils.tools_registry import TOOLS as _REGISTRY_TOOLS
+from gaia_core.cognition import outcome_ledger
+
+
+_LLM_CONFIDENCE_CAP = 0.85
+
+
+def _invalid_selection(tool: str, params: Dict[str, Any]) -> str:
+    """Why an LLM pick can't run ("" when it can): a domain tool needs a known
+    action; otherwise the name must be a registered tool."""
+    try:
+        from gaia_common.utils.domain_tools import DOMAIN_TOOLS, DOMAIN_ACTIONS, validate_domain_call
+    except ImportError:
+        return "" if tool in AVAILABLE_TOOLS else f"unknown tool '{tool}'"
+    if tool in DOMAIN_TOOLS or tool in DOMAIN_ACTIONS:
+        try:
+            validate_domain_call(tool, str(params.get("action", "")))
+            return ""
+        except ValueError as e:
+            return str(e)[:200]
+    return "" if tool in AVAILABLE_TOOLS else f"unknown tool '{tool}'"
+
+
+def _ledger(packet: CognitionPacket, **fields: Any) -> None:
+    """One tool_selection record in the outcome ledger (gjuh.2)."""
+    try:
+        outcome_ledger.record(
+            "tool_selection", packet.header.session_id, packet.header.packet_id,
+            intent=getattr(packet.intent, "user_intent", "") or "", **fields)
+    except Exception:
+        logger.debug("Tool selector: ledger record failed (non-fatal)", exc_info=True)
 
 # Tools requiring approval (mirrors gaia-mcp SENSITIVE_TOOLS)
 _SENSITIVE_TOOLS = {"ai_write", "write_file", "run_shell", "memory_rebuild_index"}
@@ -445,6 +475,9 @@ def select_tool(
     shortcut = _deterministic_tool_match(lowered, user_input)
     if shortcut:
         logger.info("Tool selector: deterministic match → %s", shortcut.tool_name)
+        _ledger(packet, path="deterministic", parsed=True, tool=shortcut.tool_name,
+                param_keys=outcome_ledger.param_keys(shortcut.params),
+                confidence=shortcut.selection_confidence)
         return shortcut, []
 
     # Build tool catalog for prompt
@@ -514,6 +547,7 @@ If NO tool is appropriate, set selected_tool to empty string:
             # same model instance (llama-cpp is not thread-safe and the hung
             # thread may still be using it).  Bail out gracefully.
             logger.warning("Tool selection timed out; skipping tool routing for this turn")
+            _ledger(packet, path="llm", parsed=False, error="timeout")
             return None, []
 
         # Extract response content
@@ -530,6 +564,8 @@ If NO tool is appropriate, set selected_tool to empty string:
         selected = selection.get("selected_tool")
         if selected is None or selected == "":
             logger.info(f"Tool selector determined no tool needed: {selection.get('reasoning')}")
+            _ledger(packet, path="llm", parsed=True, tool="",
+                    reasoning=outcome_ledger.clip(selection.get("reasoning")))
             return None, []
 
         # Parse params — may be a JSON string or an object (depending on
@@ -545,11 +581,27 @@ If NO tool is appropriate, set selected_tool to empty string:
         if not isinstance(raw_params, dict):
             raw_params = {}
 
+        # A pick that names no real tool/action never reaches MCP (it crashed
+        # there: "Tool 'review' not found"). It's evidence for the ledger.
+        invalid = _invalid_selection(selected, raw_params)
+        if invalid:
+            logger.warning("Tool selector picked an invalid tool: %s", invalid)
+            _ledger(packet, path="llm", parsed=True, valid=False, tool=selected,
+                    param_keys=outcome_ledger.param_keys(raw_params), error=invalid)
+            return None, []
+
+        # The model's own confidence is capped under the review-skip threshold
+        # (agent_core skips review at >= 0.9, meant for deterministic matches):
+        # a self-reported 0.9 sent an invalid pick straight to execution.
+        try:
+            llm_conf = min(float(selection.get("confidence", 0.5)), _LLM_CONFIDENCE_CAP)
+        except (TypeError, ValueError):
+            llm_conf = 0.5
         primary = SelectedTool(
             tool_name=selected,
             params=raw_params,
             selection_reasoning=selection.get("reasoning", ""),
-            selection_confidence=selection.get("confidence", 0.5)
+            selection_confidence=llm_conf
         )
 
         # Parse alternatives if present (from unconstrained fallback responses)
@@ -569,13 +621,21 @@ If NO tool is appropriate, set selected_tool to empty string:
             ))
 
         logger.info(f"Tool selected: {primary.tool_name} (confidence={primary.selection_confidence})")
+        _ledger(packet, path="llm", parsed=True, valid=True, tool=primary.tool_name,
+                param_keys=outcome_ledger.param_keys(raw_params),
+                confidence=primary.selection_confidence,
+                reasoning=outcome_ledger.clip(primary.selection_reasoning))
         return primary, alternatives
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse tool selection JSON: {e}")
+        # The raw output is the evidence: what shape the model wrote.
+        _ledger(packet, path="llm", parsed=False, error=str(e),
+                raw=outcome_ledger.clip(content, outcome_ledger.RAW_CHARS))
         return None, []
     except Exception as e:
         logger.error(f"Tool selection failed: {e}")
+        _ledger(packet, path="llm", parsed=False, error=outcome_ledger.clip(e))
         return None, []
 
 
@@ -725,16 +785,21 @@ def _extract_json_from_response(content: str) -> str:
     if matches:
         return matches[0].strip()
 
-    # Try to find raw JSON object (non-greedy to avoid merging multiple objects)
-    json_pattern = r'\{[\s\S]*?\}'
-    matches = re.findall(json_pattern, content)
-    if matches:
-        # If multiple matches, try them one by one or take the most complete one
-        # For tool selection, the first one is usually the intended one
-        return matches[0]
+    # Decode the first complete JSON object. A non-greedy regex stopped at the
+    # first '}', which sits inside the nested params ("{\"action\": ...}"),
+    # so every LLM selection failed to parse (gjuh.1). raw_decode respects
+    # strings and nesting and ignores any trailing text.
+    stripped = content.strip()
+    start = stripped.find("{")
+    if start >= 0:
+        try:
+            obj, end = json.JSONDecoder().raw_decode(stripped, start)
+            return stripped[start:end]
+        except json.JSONDecodeError:
+            return stripped[start:]
 
     # Return as-is and let JSON parser handle it
-    return content.strip()
+    return stripped
 
 
 def initialize_tool_routing(packet: CognitionPacket) -> CognitionPacket:

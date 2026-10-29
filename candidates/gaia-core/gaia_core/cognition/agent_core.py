@@ -36,6 +36,7 @@ from gaia_core.behavior.persona_switcher import get_persona_for_request, get_per
 # Pre-cognition semantic probe (vector lookup before intent detection)
 from gaia_core.cognition.semantic_probe import run_semantic_probe, get_session_probe_stats
 from gaia_core.cognition.cognitive_dispatcher import process_execution_results
+from gaia_core.cognition import outcome_ledger
 from gaia_core.cognition.knowledge_enhancer import enhance_packet
 from gaia_core.cognition.knowledge_ingestion import run_explicit_save, run_auto_detect, run_update_detect, run_attachment_ingestion
 from gaia_core.cognition import kb_approval
@@ -2412,6 +2413,10 @@ class AgentCore:
                 source=source, destination=destination, metadata=_metadata,
                 attachments=attachments,
             )
+            # Outcome ledger (gjuh.2): this turn's id, so every record of the
+            # turn (main.py's inline tool calls too) and a later pushback on
+            # it share one packet_id.
+            outcome_ledger.note_turn(session_id, packet.header.packet_id)
             if not _user_msg_persisted:
                 self.session_manager.add_message(session_id, "user", user_input)
                 self._emit_timeline_message(session_id, "user", source)
@@ -3373,6 +3378,10 @@ class AgentCore:
                 is_factual_pushback, is_knowledge_followup)
             _pushback = is_factual_pushback(user_input, history)
             _followup = not _pushback and is_knowledge_followup(user_input, history)
+            # Outcome ledger (gjuh.2): a dispute is the strongest signal the
+            # last answer went wrong; the miner joins it to that turn's records.
+            if _pushback:
+                outcome_ledger.record_pushback(session_id, packet.header.packet_id, user_input)
             _memory_answer = False
             try:
                 if _pushback:
@@ -3419,6 +3428,12 @@ class AgentCore:
                         query=user_input,
                         intent=plan.intent if plan else "other",
                     )
+                outcome_ledger.record_lookup(
+                    session_id, packet.header.packet_id,
+                    mode=("pushback" if _pushback else "follow-up" if _followup
+                          else "recall" if _kr_skip else "ground"),
+                    query=getattr(_grounding_ctx, "query", "") or user_input,
+                    ctx=_grounding_ctx)
                 if _grounding_ctx and _grounding_ctx.has_grounding:
                     if not _pushback:
                         _disputed = ""
@@ -7011,7 +7026,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                     "2) If output is long, save full tree to a file and show a preview."
                 ]}, session_id, source=source, destination_context=_meta)
                 ts_write({"type": "mcp_call", "intent": "list_tree"}, session_id, source=source, destination_context=_meta)
-                return self._run_mcp_list_tree()
+                return self._ledger_direct(session_id, "list_tree", self._run_mcp_list_tree)
             except Exception as exc:
                 self.logger.exception("list_tree MCP call failed")
                 return f"I couldn't retrieve the directory tree: {exc}"
@@ -7025,7 +7040,7 @@ RESULT: COMPLEX (reason: <brief reason>)
                     "2) Return the list to the operator."
                 ]}, session_id, source=source, destination_context=_meta)
                 ts_write({"type": "mcp_call", "intent": "list_files"}, session_id, source=source, destination_context=_meta)
-                return self._run_mcp_list_files()
+                return self._ledger_direct(session_id, "list_files", self._run_mcp_list_files)
             except Exception as exc:
                 self.logger.exception("list_files MCP call failed")
                 return f"I couldn't retrieve the file list: {exc}"
@@ -8321,6 +8336,24 @@ Assembled response:"""
             if isinstance(inner, dict) and inner.get("ok") and "tree" in inner:
                 return _handle_tree_result(inner)
         return f"list_tree execution returned unexpected payload: {result}"
+
+    # The direct helpers report failure as text; these are its openings.
+    _DIRECT_FAILURE_RE = re.compile(
+        r"(Could not|Approval|Unable|I couldn't|list_\w+ (error|failed|execution returned))")
+
+    def _ledger_direct(self, session_id: str, tool: str, run) -> str:
+        """Run a direct-MCP reflex helper and record its outcome (gjuh.2)."""
+        import time
+        t0 = time.time()
+        text = run()
+        failed = bool(self._DIRECT_FAILURE_RE.match(text or ""))
+        outcome_ledger.record(
+            "tool_execution", session_id, outcome_ledger.current_packet(session_id),
+            path="direct", tool=tool, ok=not failed,
+            error=outcome_ledger.clip(text) if failed else "",
+            empty=not failed and (text or "").strip() == "No files found.",
+            latency_ms=round((time.time() - t0) * 1000, 1))
+        return text
 
     def _run_mcp_list_files(self) -> str:
         """Call MCP sidecar to list files in a directory with approval."""
@@ -9743,6 +9776,12 @@ Start your response with the first line of the file."""
                 "confidence": confidence,
                 "threshold": confidence_threshold
             }, session_id, source=source, destination_context=_meta)
+            outcome_ledger.record(
+                "tool_execution", session_id, packet.header.packet_id,
+                path="routing", tool=primary_tool.tool_name,
+                action=(primary_tool.params or {}).get("action", ""),
+                param_keys=outcome_ledger.param_keys(primary_tool.params),
+                confidence=confidence, gate="rejected", ok=False)
             return packet
 
         # Step 4: Execute Tool
@@ -9816,6 +9855,19 @@ Start your response with the first line of the file."""
                     )
             except Exception:
                 logger.debug("Loop detection: failed to record tool error", exc_info=True)
+
+        # Outcome ledger (gjuh.2): what the chosen tool actually did.
+        _res = packet.tool_routing.execution_result
+        outcome_ledger.record(
+            "tool_execution", session_id, packet.header.packet_id,
+            path="routing", tool=primary_tool.tool_name,
+            action=(primary_tool.params or {}).get("action", ""),
+            param_keys=outcome_ledger.param_keys(primary_tool.params),
+            confidence=confidence, gate="passed",
+            ok=bool(getattr(_res, "success", False)),
+            error=outcome_ledger.clip(getattr(_res, "error", "") or ""),
+            empty=not bool(getattr(_res, "output", None)),
+            latency_ms=getattr(_res, "execution_time_ms", None))
 
         # Step 5: Inject result into packet context
         packet = inject_tool_result_into_packet(packet)

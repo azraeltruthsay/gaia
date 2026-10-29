@@ -1690,6 +1690,7 @@ async def process_packet(packet_data: Dict[str, Any]):
             if _pending_tool_calls:
                 for tc in _pending_tool_calls:
                     _is_invalid_tool = id(tc) in _invalid_tool_ids
+                    _tc_t0 = _time.time()
                     try:
                         # Execute via MCP JSON-RPC
                         from gaia_core.utils.mcp_client import call_jsonrpc
@@ -1731,6 +1732,18 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 method=tc.tool_name,
                                 params=tool_params,
                             ))
+                        # Outcome ledger (gjuh.2): what the model's own call did.
+                        from gaia_core.cognition import outcome_ledger as _ol
+                        _ol.record(
+                            # agent_core's id for this turn, not the inbound packet's
+                            "tool_execution", session_id,
+                            _ol.current_packet(session_id) or getattr(packet.header, "packet_id", ""),
+                            path="inline", tool=tc.tool_name, action=tc.tool_action or "",
+                            param_keys=_ol.param_keys(tc.tool_params),
+                            ok=bool(rpc_result.get("ok")), hallucinated=_is_invalid_tool,
+                            error="" if rpc_result.get("ok") else _ol.clip(rpc_result.get("error")),
+                            empty=bool(rpc_result.get("ok")) and not (rpc_result.get("response") or {}).get("result", rpc_result.get("response")),
+                            latency_ms=round((_time.time() - _tc_t0) * 1000, 1))
                         if rpc_result.get("ok"):
                             actual_result = rpc_result.get("response", {}).get("result", rpc_result.get("response", {}))
                             result_xml = format_tool_result(actual_result)

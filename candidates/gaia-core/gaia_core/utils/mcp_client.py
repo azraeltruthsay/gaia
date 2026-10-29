@@ -380,6 +380,17 @@ def request_approval_via_mcp(method: str, params: Dict) -> Dict:
         return {"ok": False, "error": str(e)}
 
 
+def _signed(method: str, path: str) -> Dict[str, str]:
+    """Inter-service HMAC headers for an MCP path outside its _PUBLIC_PATHS
+    ({} when auth is off). Unsigned, MCP's AuthMiddleware answers 401."""
+    try:
+        from gaia_common.utils.service_auth import auth_headers as _auth_h
+        return _auth_h(method, path)
+    except Exception:
+        logger.debug("MCP auth headers unavailable; sending unsigned", exc_info=True)
+        return {}
+
+
 def approve_action_via_mcp(action_id: str, approval: str) -> Dict:
     """Submit approval string to the MCP server to execute a pending action.
 
@@ -393,7 +404,10 @@ def approve_action_via_mcp(action_id: str, approval: str) -> Dict:
     url = endpoint.replace('/jsonrpc', '/approve_action')
     try:
         logger.info(f"Submitting MCP approval: url={url} action_id={action_id}")
-        r = requests.post(url, json={"action_id": action_id, "approval": approval}, timeout=10)
+        # Signed like /request_approval: unsigned, every approval-gated call
+        # (the reflex list_files/list_tree, ai_write) failed with 401.
+        r = requests.post(url, json={"action_id": action_id, "approval": approval},
+                          headers=_signed("POST", "/approve_action"), timeout=10)
         r.raise_for_status()
         return {"ok": True, "result": r.json()}
     except Exception as e:
@@ -410,7 +424,8 @@ def get_pending_action(action_id: str) -> Dict:
 
     url = endpoint.replace('/jsonrpc', '/pending_approvals')
     try:
-        r = requests.get(url, timeout=int(config.get_timeout("HTTP_QUICK", 5)))
+        r = requests.get(url, headers=_signed("GET", "/pending_approvals"),
+                         timeout=int(config.get_timeout("HTTP_QUICK", 5)))
         r.raise_for_status()
         data = r.json()
         pending = data.get("pending") or []
