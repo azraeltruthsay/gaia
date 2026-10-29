@@ -3118,6 +3118,7 @@ class AgentCore:
             # search directly. This injects results into the packet so the model
             # just needs to format them, not decide to search.
             _lowered_input = (user_input or "").lower()
+            _web_pre_executed = False  # set when results land in the packet below
             _web_request = any(kw in _lowered_input for kw in [
                 "web tool", "web search", "search the web", "search online",
                 "look it up", "look up online", "use your web",
@@ -3183,19 +3184,25 @@ class AgentCore:
                                 except Exception as _fetch_err:
                                     logger.warning("Page fetch failed: %s", _fetch_err)
 
+                            # gwrg: the snippets always go in, first — they're
+                            # the query-focused text (ethanol's 78.37 °C was in
+                            # one). The fetched page used to REPLACE them, and
+                            # its first 4000 chars were Wikipedia's infobox,
+                            # one token per line; Core answered with nothing.
+                            # The page now follows as an excerpt, whitespace
+                            # collapsed so the budget holds prose, not newlines.
+                            _formatted = f"--- Web Search Results (query: {_query}) ---\n"
+                            for _r in _results[:3]:
+                                _formatted += f"  Title: {_r.get('title', '?')}\n"
+                                _formatted += f"  URL: {_r.get('href', _r.get('url', '?'))}\n"
+                                _formatted += f"  {_r.get('body', _r.get('snippet', ''))[:500]}\n\n"
+                            _formatted += "--- End of Web Search Results ---\n"
                             if _page_content:
-                                _formatted = f"--- Web Page Content (from {_first_url}) ---\n"
-                                _formatted += _page_content
-                                _formatted += "\n--- End of Web Page Content ---\n"
-                                _formatted += "Use this content to fulfill the user's request directly."
-                            else:
-                                _formatted = f"--- Web Search Results (query: {_query}) ---\n"
-                                for _r in _results[:3]:
-                                    _formatted += f"  Title: {_r.get('title', '?')}\n"
-                                    _formatted += f"  URL: {_r.get('href', _r.get('url', '?'))}\n"
-                                    _formatted += f"  {_r.get('body', _r.get('snippet', ''))[:300]}\n\n"
-                                _formatted += "--- End of Web Search Results ---\n"
-                                _formatted += "Use these results to answer the user's request."
+                                _excerpt = " ".join(str(_page_content).split())[:2500]
+                                _formatted += f"--- Excerpt of the first result ({_first_url}) ---\n"
+                                _formatted += _excerpt
+                                _formatted += "\n--- End of Excerpt ---\n"
+                            _formatted += "Use these results to answer the user's request."
 
                             packet.content.data_fields.append(DataField(
                                 key='tool_result',
@@ -3204,6 +3211,11 @@ class AgentCore:
                                 source='deterministic_web_search',
                             ))
                             logger.info("Web search pre-executed: %d results injected", len(_results))
+                            _web_pre_executed = True
+                            outcome_ledger.record(
+                                "tool_execution", session_id, packet.header.packet_id,
+                                path="pre", tool="web", action="search", param_keys=["query"],
+                                ok=True, page_excerpt=bool(_page_content), results=len(_results))
 
                             # Emit status to user
                             yield {"type": "token", "value": f"*[Searched the web for: {_query[:60]}]*\n\n"}
@@ -3211,7 +3223,11 @@ class AgentCore:
                 except Exception as _web_err:
                     logger.warning("Deterministic web search failed: %s", _web_err)
 
-            if self._should_use_tool_routing(plan, user_input):
+            # gwrg: the pre-executed search already answered the tool need; a
+            # routing pass would run the same search a second time.
+            if _web_pre_executed:
+                logger.info("Tool routing skipped: web search already pre-executed this turn")
+            elif self._should_use_tool_routing(plan, user_input):
                 logger.info(f"Tool routing triggered for intent: {plan.intent}")
                 packet = self._run_tool_routing_loop(
                     packet=packet,
@@ -3427,6 +3443,8 @@ class AgentCore:
                     _grounding_ctx = ground_query(
                         query=user_input,
                         intent=plan.intent if plan else "other",
+                        # gwrg: a third search of the same question added nothing
+                        skip_web=_web_pre_executed,
                     )
                 outcome_ledger.record_lookup(
                     session_id, packet.header.packet_id,
@@ -3569,7 +3587,7 @@ class AgentCore:
                         model_role=_delib_role,
                         casual=_delib_casual,
                         use_adapter=_delib_adapter,
-                        offer_tools=offers_tools(_delib_intent),
+                        offer_tools=offers_tools(_delib_intent, packet),
                         # Deep focus: the person asked her to focus / think
                         # hard, so Prime thinks natively on this turn only.
                         deep_focus=_delib_role == "prime" and _wants_focus_transition(
@@ -4290,7 +4308,7 @@ class AgentCore:
                             user_message_id=getattr(packet.header, "packet_id", None),
                             session_id=session_id,
                             casual=_delib_intent2 in _CASUAL_DELIB_INTENTS,
-                            offer_tools=offers_tools(_delib_intent2),
+                            offer_tools=offers_tools(_delib_intent2, packet),
                         )
                         if _delib_result and _delib_result.final_response:
                             logger.info(

@@ -15,6 +15,7 @@ from gaia_core.config import Config
 from gaia_common.utils.tokenizer import count_tokens
 from gaia_common.utils.packet_templates import render_gaia_packet_template
 from gaia_common.utils.world_state import format_world_state_snapshot
+from gaia_common.utils.tool_call_parser import tool_answer_messages, tool_result_text
 from gaia_core.utils import gaia_rescue_helper
 
 logger = logging.getLogger("GAIA.PromptBuilder")
@@ -99,9 +100,36 @@ TOOL_FREE_INTENTS = frozenset({"greeting", "farewell", "gratitude", "smalltalk",
                                "chitchat", "acknowledgment", "affirmation", "time"})
 
 
-def offers_tools(intent: str) -> bool:
-    """Whether a turn with this intent may call tools (see TOOL_FREE_INTENTS)."""
-    return (intent or "").lower() not in TOOL_FREE_INTENTS
+def offers_tools(intent: str, packet=None) -> bool:
+    """Whether a turn with this intent may call tools (see TOOL_FREE_INTENTS).
+
+    With a packet: not once tool routing has executed this turn's tool — its
+    result is already in the prompt, and offering the schema again had the
+    deliberated answer call the same tool a second time (gjuh.7).
+    """
+    if (intent or "").lower() in TOOL_FREE_INTENTS:
+        return False
+    return not (packet is not None and tool_already_executed(packet))
+
+
+def tool_already_executed(packet) -> bool:
+    """This turn's tool already ran and its result is in the packet: tool
+    routing executed it, or agent_core's deterministic web search injected
+    its results (a string tool_result). A failed result doesn't count — the
+    turn may still try another way."""
+    if (getattr(packet, 'tool_routing', None)
+            and getattr(packet.tool_routing, 'execution_status', None) == ToolExecutionStatus.EXECUTED):
+        return True
+    try:
+        for df in getattr(packet.content, 'data_fields', None) or []:
+            if getattr(df, 'key', '') != 'tool_result':
+                continue
+            val = getattr(df, 'value', None)
+            if (isinstance(val, str) and val.strip()) or (isinstance(val, dict) and val.get('success')):
+                return True
+    except Exception:
+        logger.debug("tool_already_executed: data_fields unreadable", exc_info=True)
+    return False
 
 
 # Slim mode (rlx8): recent turns only, trimmed — it exists to keep the prompt
@@ -904,6 +932,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
 
     # Tool execution results (web_search, web_fetch, etc.)
     tool_result_content = ""
+    _routed_answer = None  # (label, text) when routing's tool already answered
     try:
         for df in getattr(packet.content, 'data_fields', []) or []:
             if getattr(df, 'key', '') == 'tool_result':
@@ -947,41 +976,23 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                         "information, suggest they retry or ask differently."
                     )
                     break
-                # Success path: format the tool output for the model.
-                # Lowercase section markers (not ALL-CAPS "--- Web Search
-                # Results ---") to avoid the label-leakage pattern fixed in
-                # 04c906e where the model quotes structural headers back to
-                # the user as if they were nameable sources.
+                # Success path (gjuh.7): answer in the continuation's shape —
+                # the result in the user turn, the request as already done.
+                # Rendered inside GAIA's full system prompt, Core re-called the
+                # tool on every live try (4/4) instead of answering from it.
                 output = tr.get('output', {})
-                if tool_name == 'web_search' and isinstance(output, dict):
-                    results = output.get('results', [])
-                    if results:
-                        lines = [f"Web search results (query: {output.get('query', '?')}):"]
-                        for r in results[:5]:
-                            lines.append(f"  [{r.get('trust_tier', '?')}] {r.get('title', 'Untitled')}")
-                            lines.append(f"    URL: {r.get('url', '')}")
-                            lines.append(f"    {r.get('snippet', '')}")
-                        tool_result_content = "\n".join(lines)
-                elif tool_name == 'web_fetch' and isinstance(output, dict):
-                    content_text = output.get('content', '')
-                    if content_text:
-                        if len(content_text) > 4000:
-                            content_text = content_text[:4000] + "\n[...truncated...]"
-                        tool_result_content = (
-                            f"Web page content (title: {output.get('title', '?')}, "
-                            f"domain: {output.get('domain', '?')}):\n"
-                            f"{content_text}"
-                        )
-                elif output:
-                    out_str = str(output)
-                    if len(out_str) > 3000:
-                        out_str = out_str[:3000] + "...[truncated]"
-                    tool_result_content = (
-                        f"Tool result ({tool_name}):\n{out_str}"
-                    )
+                if output:
+                    _action = (tr.get('params') or {}).get('action')
+                    _routed_answer = (f"{tool_name}({_action})" if _action and _action not in tool_name
+                                      else tool_name,
+                                      tool_result_text(output))
                 break
     except Exception:
         logger.debug("Could not extract tool_result from packet.content.data_fields")
+    if _routed_answer:
+        logger.info("PromptBuilder: answering from routed %s result (tool-answer shape)", _routed_answer[0])
+        return tool_answer_messages(
+            getattr(packet.content, 'original_prompt', '') or '', *_routed_answer)
 
     system_content_parts = []
 
@@ -1209,7 +1220,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         _use_meta_verbs = config.constants.get("USE_META_VERBS", False)
 
         _tool_line = ""
-        if _use_meta_verbs:
+        # gjuh.7: no catalog once the turn's tool has run — Core re-called it.
+        if _use_meta_verbs and not tool_already_executed(packet):
             from gaia_common.utils.domain_tools import build_meta_verb_catalog
             _tool_line = "\n" + build_meta_verb_catalog()
 
@@ -1307,16 +1319,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             or _model_name.lower() == 'core'
             or 'gemma' in str(getattr(packet, '_model_family', '')).lower()
         )
-        tool_already_executed = (
-            getattr(packet, 'tool_routing', None)
-            and getattr(packet.tool_routing, 'execution_status', None) == ToolExecutionStatus.EXECUTED
-        )
-        if not tool_already_executed and not _is_gemma:
+        _tool_ran = tool_already_executed(packet)
+        if not _tool_ran and not _is_gemma:
             system_content_parts.append(
                 "TOOLS: Use <tool_call>{\"tool\":\"name\",\"action\":\"verb\",...}</tool_call> to call tools. "
                 "System executes and returns <tool_result>. Never fabricate results."
             )
-        elif not tool_already_executed:
+        elif not _tool_ran:
             system_content_parts.append(
                 "You have access to tools when needed. The system will handle tool execution automatically."
             )
@@ -1372,13 +1381,10 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         )
         system_content_parts.append(language_constraint)
 
-        tool_already_executed = (
-            getattr(packet, 'tool_routing', None)
-            and getattr(packet.tool_routing, 'execution_status', None) == ToolExecutionStatus.EXECUTED
-        )
+        _tool_ran = tool_already_executed(packet)
         tool_calling_convention = ""
         try:
-            if not tool_already_executed and (
+            if not _tool_ran and (
                 "MCP tools:" in (world_state_block_content or "") or "Essential MCP tools:" in (world_state_block_content or "")
             ):
                 tool_calling_convention = (
@@ -2164,7 +2170,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # The ChatML template appends "<|im_start|>assistant\n" by default; by adding
     # a partial assistant message here, the model continues from prose instead of
     # starting from a blank generation slate.
-    if tool_result_content and tool_already_executed:
+    if tool_result_content and tool_already_executed(packet):
         # Add a synthesis instruction to the final system prompt block to reinforce synthesis
         recitation_control = (
             "\n\nRECITATION CONTROL: You are synthesizing results from an executed tool. "

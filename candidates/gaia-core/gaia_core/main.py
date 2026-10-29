@@ -1411,7 +1411,7 @@ async def process_packet(packet_data: Dict[str, Any]):
             # and can trigger a continuation generation with the result.
             try:
                 from gaia_common.utils.tool_call_parser import (
-                    ToolCallParser, ParseEventType, format_tool_result, tool_result_text,
+                    ToolCallParser, ParseEventType, format_tool_result, tool_result_text, tool_answer_messages,
                     TOOL_CALL_OPEN, TOOL_CALL_CLOSE,
                 )
                 _tc_parser = ToolCallParser()
@@ -1871,34 +1871,16 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # instructions, and ticket-filing flows when tools
                         # fail. This focused system message keeps the
                         # continuation grounded.
-                        _cont_system = (
-                            "You are GAIA. You already used a tool for this "
-                            "request; what it returned is in the user's "
-                            "message. Answer the request from it, in plain "
-                            "text.\n"
-                            "- If it returned what was asked for: answer "
-                            "from it, and name where it came from.\n"
-                            "- If it failed: say so in one short sentence and "
-                            "pivot back to the conversation. Do NOT invent "
-                            "error-report URLs, web forms, support emails, "
-                            "ticket-filing instructions, or technical-team "
-                            "contact info — none of those exist. The error is "
-                            "logged internally already."
-                        )
-                        # Result first, then the request as something already
-                        # done. With the question first and ~4k chars of page
-                        # after it, Core carried on writing the page (or
-                        # answered the page as if the user had written it);
-                        # with the bare request last, an imperative one
-                        # ("Check your memory palace") made her call the tool
-                        # again. A/B on the live engine, 2026-10-28: this
-                        # framing named Moby-Dick 2/4 and summarised the page
-                        # correctly otherwise.
-                        _grounded_user_turn = (
-                            f"{_tool_label} returned the following.\n\n{_tool_text}\n\n---\n\n"
-                            f'They asked: "{user_input}" You already did that, and it returned '
-                            f"the above. Your reply to them:"
-                        )
+                        # The continuation's system + user turn, shared with
+                        # prompt_builder's routed-tool answer (gjuh.7). The
+                        # previous turn's full system prompt is NOT carried:
+                        # without focused guidance Core confabulated
+                        # IT-helpdesk flows on failures, and with the whole
+                        # prompt it re-called the tool. Result first, then the
+                        # request as already done (A/B 2026-10-28: named
+                        # Moby-Dick 2/4, summarised the page correctly
+                        # otherwise).
+                        continuation_messages = tool_answer_messages(user_input, _tool_label, _tool_text)
                         # The clean-slate retry (only when the continuation
                         # called a tool again) quotes the request up front and
                         # ends on a plain reply cue — no request left to act
@@ -1909,10 +1891,6 @@ async def process_packet(packet_data: Dict[str, Any]):
                             f"{_tool_label} returned the following.\n\n{_tool_text}\n\n---\n\n"
                             f"Your reply to them, from what it returned:"
                         )
-                        continuation_messages = [
-                            {"role": "system", "content": _cont_system},
-                            {"role": "user", "content": _grounded_user_turn},
-                        ]
 
                         # Generate continuation using the same model
                         try:

@@ -442,6 +442,41 @@ def _result_line(row: dict) -> str:
     return line
 
 
+# The turn that answers from a tool's result. The full system prompt is not
+# carried: with GAIA's ~8k-char prompt and the result inside it, Core re-called
+# the tool 4/4 on a live A/B (2026-10-29); this shape answered 5/6 (gjuh.7).
+TOOL_ANSWER_SYSTEM = (
+    "You are GAIA. You already used a tool for this "
+    "request; what it returned is in the user's "
+    "message. Answer the request from it, in plain "
+    "text.\n"
+    "- If it returned what was asked for: answer "
+    "from it, and name where it came from.\n"
+    "- If it failed: say so in one short sentence and "
+    "pivot back to the conversation. Do NOT invent "
+    "error-report URLs, web forms, support emails, "
+    "ticket-filing instructions, or technical-team "
+    "contact info — none of those exist. The error is "
+    "logged internally already."
+)
+
+
+def tool_answer_messages(user_input: str, tool_label: str, tool_text: str) -> list:
+    """System + user messages for answering a request a tool already served.
+
+    Result first, then the request as something already done: with the
+    question first and ~4k chars after it, Core carried on writing the page;
+    with the bare request last, an imperative one made her call the tool again
+    (A/B on the live engine, 2026-10-28)."""
+    return [
+        {"role": "system", "content": TOOL_ANSWER_SYSTEM},
+        {"role": "user", "content": (
+            f"{tool_label} returned the following.\n\n{tool_text}\n\n---\n\n"
+            f'They asked: "{user_input}" You already did that, and it returned '
+            f"the above. Your reply to them:")},
+    ]
+
+
 def tool_result_text(result: Any, limit: int = 4000) -> str:
     """A tool result as plain text for the model to answer from (ecnc).
 
