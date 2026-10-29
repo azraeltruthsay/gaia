@@ -248,6 +248,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # Detect target tier from packet.header.model.name (set by agent_core
     # at model-selection time). Fall back to Core's arch_fact if unknown.
     _arch_fact = ""  # always defined (used again on the casual-anchor swap below)
+    _is_prime_target = False
     try:
         _target = (getattr(getattr(packet.header, "model", None), "name", "") or "").lower()
         _is_prime_target = _target in ("prime", "cpu_prime")
@@ -429,6 +430,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             # the felt Inner-weather line surface; keeping it makes her recite the
             # model spec. The Inner weather felt-fact + lean nudge carry the turn.
             persona_anchor = _CASUAL_PERSONA_ANCHOR
+            # 6rfx: that holds for Core, whose identity is weight-baked. Prime's
+            # weights carry a WRONG base-model fact (Prime-v1 learned "built on
+            # Google's Gemma 4 E4B"), so without the prompt-borne fact any casual
+            # turn that touches identity gets it — verified: with it Prime says
+            # Qwen3-VL-8B, without it Gemma 4 E4B. Keep it for Prime.
+            if _is_prime_target:
+                persona_anchor = persona_anchor + _arch_fact
             _social_block = (
                 "\n\n— This is casual conversation —\n"
                 "Be warm, natural, and plain-spoken — genuine over clever. If "
