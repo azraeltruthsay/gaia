@@ -116,3 +116,16 @@ def test_prime_native_mode_adds_no_token_or_instructions():
                      model_role="prime")
     assert system == "You are GAIA."
     assert r.thinking == "two and two" and r.final_response == "Four."
+
+
+def test_native_mode_opts_in_to_engine_thinking():
+    pool = Pool({"content": "Four.", "reasoning_content": "two and two"})
+    d.deliberate("2+2?", MSGS, pool, persist=False, offer_tools=False, native_thinking=True,
+                 native_think_token="", adapter_name="prime_thinking_v1", model_role="prime")
+    assert pool.calls[0]["chat_template_kwargs"] == {"enable_thinking": True, "native_thinking": True}
+
+
+def test_instruction_mode_sends_no_thinking_opt_in():
+    pool = Pool({"content": "<think>easy</think>Four."})
+    d.deliberate("2+2?", MSGS, pool, persist=False, offer_tools=False)
+    assert "chat_template_kwargs" not in pool.calls[0]

@@ -695,6 +695,11 @@ def deliberate(
             )
             if adapter_name:
                 forward_kwargs["adapter_name"] = adapter_name
+            if native_thinking:
+                # Opt in explicitly: the engine masks Qwen's <think> token
+                # unless asked, and the client sends enable_thinking=True on
+                # every request, so that flag can't carry the intent (isep).
+                forward_kwargs["chat_template_kwargs"] = {"enable_thinking": True, "native_thinking": True}
             res = model_pool.forward_to_model(model_role, **forward_kwargs)
             _msg = res["choices"][0]["message"]
             raw = (_msg["content"] or "").strip()
