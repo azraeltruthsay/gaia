@@ -602,6 +602,7 @@ def deliberate(
     casual: bool = False,
     offer_tools: bool = True,
     native_thinking: bool = False,
+    native_think_token: str = NATIVE_THINK_TOKEN,
 ) -> DeliberationResult:
     """Run a single-call deliberation pass: thinking phase + final response.
 
@@ -627,16 +628,20 @@ def deliberate(
     the system turn and no deliberation text is added. The engine returns the
     thought as reasoning_content, apart from the answer (h1ok — the <think>
     instructions went unfollowed ~94% of the time and leaked into replies).
+    `native_think_token` is what switches the model's thinking on: Gemma 4's
+    <|think|>, or "" for Prime, whose prime_thinking_v1 adapter opens its own
+    <think> block (isep).
     """
     t0 = time.time()
 
     messages = [dict(m) for m in assembled_messages]
     if native_thinking:
         _instructions = ""
-        if messages and messages[0].get("role") == "system":
-            messages[0] = {**messages[0], "content": NATIVE_THINK_TOKEN + "\n" + messages[0].get("content", "")}
-        else:
-            messages.insert(0, {"role": "system", "content": NATIVE_THINK_TOKEN})
+        if native_think_token:
+            if messages and messages[0].get("role") == "system":
+                messages[0] = {**messages[0], "content": native_think_token + "\n" + messages[0].get("content", "")}
+            else:
+                messages.insert(0, {"role": "system", "content": native_think_token})
     else:
         _instructions = _CASUAL_DELIBERATION_INSTRUCTIONS if casual else _DELIBERATION_INSTRUCTIONS
         addendum = "\n\n---\nDELIBERATION:\n" + _instructions
@@ -765,6 +770,18 @@ def _flag(value) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _native_thinking_on(cfg: Dict[str, Any], prime: bool) -> bool:
+    if prime:
+        return _flag(cfg.get("prime_native_thinking", os.environ.get("DELIBERATION_NATIVE_THINKING_PRIME", "0")))
+    return _flag(cfg.get("native_thinking", os.environ.get("DELIBERATION_NATIVE_THINKING", "0")))
+
+
+def _native_thinking_adapter(cfg: Dict[str, Any], prime: bool) -> str:
+    if prime:
+        return cfg.get("prime_thinking_adapter_name", "prime_thinking_v1")
+    return cfg.get("thinking_adapter_name", "core_thinking_v1")
+
+
 def run_deliberated_turn(
     user_input: str,
     assembled_messages: List[Dict[str, str]],
@@ -816,13 +833,16 @@ def run_deliberated_turn(
     max_tokens = int(cfg.get("max_tokens", 900))
     # h1ok: Core thinks in Gemma 4's own thought channel, restored by the
     # core_thinking_v1 adapter, instead of following <think> instructions.
-    # Gemma-only, so never on Prime (Qwen). The thought itself needs room:
-    # traces run ~100–1000 tokens before the answer starts.
-    native_thinking = (not _is_prime_tier and use_adapter and _flag(
-        cfg.get("native_thinking", os.environ.get("DELIBERATION_NATIVE_THINKING", "0"))))
+    # isep: Prime thinks in Qwen's <think> block, learned by prime_thinking_v1
+    # (distilled from Qwen3-VL-8B-Thinking); its own switch, since it is a
+    # different model. The thought needs room: Core's traces run ~100–1000
+    # tokens before the answer, Prime's ~300–2500.
+    native_think_token = "" if _is_prime_tier else NATIVE_THINK_TOKEN
+    native_thinking = use_adapter and _native_thinking_on(cfg, _is_prime_tier)
     if native_thinking:
-        adapter_name = cfg.get("thinking_adapter_name", "core_thinking_v1")
-        max_tokens = int(cfg.get("native_max_tokens", 2048))
+        adapter_name = _native_thinking_adapter(cfg, _is_prime_tier)
+        max_tokens = int(cfg.get("prime_native_max_tokens" if _is_prime_tier else "native_max_tokens",
+                                 3072 if _is_prime_tier else 2048))
     temperature = float(cfg.get("temperature", 0.55))
     # Autonomic affect capacity (3rr): affect shapes HOW the deliberated response
     # is generated — warmer/roomier when eager/curious, cooler/terser when worn or
@@ -860,6 +880,7 @@ def run_deliberated_turn(
         casual=casual,
         offer_tools=offer_tools,
         native_thinking=native_thinking,
+        native_think_token=native_think_token,
     )
 
     # 2. If clean, return as-is
@@ -876,12 +897,16 @@ def run_deliberated_turn(
     # escalation, not Prime→Prime.
     if retry_strategy == "prime" and not _is_prime_tier:
         try:
+            _prime_native = use_adapter and _native_thinking_on(cfg, True)
             retry = deliberate(
                 user_input=user_input,
                 assembled_messages=assembled_messages,
                 model_pool=model_pool,
                 model_role="prime",
-                adapter_name=None,  # Prime has no deliberation adapter
+                # Prime's only deliberation adapter is its thinking adapter
+                adapter_name=_native_thinking_adapter(cfg, True) if _prime_native else None,
+                native_thinking=_prime_native,
+                native_think_token="",
                 max_total_tokens=max_tokens,
                 temperature=temperature,
                 persist=True,

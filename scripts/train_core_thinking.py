@@ -21,9 +21,16 @@ prompt, which carries her voice and identity.
 
 Data: /shared/tmp_h1ok/teacher.jsonl from scripts/gen_thinking_teacher.py.
 
+--tier prime (isep) trains prime_thinking_v1 the same way: Prime (Qwen3-VL-8B
+Instruct lineage, self-abliterated) has no thinking mode, so stock
+Qwen3-VL-8B-Thinking thought on Prime's real prompts and our Prime learns
+<think>...</think>, answer, <|im_end|>. Prime's identity alignment, our
+abliteration and Instruct's stronger tool calling stay in the weights; the
+teacher's refusals (it isn't abliterated) and self-description are filtered.
+
 Usage (from gaia-study container):
-    python /gaia/GAIA_Project/scripts/train_core_thinking.py --dry-run
-    python /gaia/GAIA_Project/scripts/train_core_thinking.py --epochs 1
+    python /gaia/GAIA_Project/scripts/train_core_thinking.py [--tier core|prime] --dry-run
+    python /gaia/GAIA_Project/scripts/train_core_thinking.py [--tier core|prime] --epochs 1
 """
 from __future__ import annotations
 
@@ -40,9 +47,6 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("thinking-train")
 
-BASE_MODEL = "/models/core"
-TRAIN_DATA = "/shared/tmp_h1ok/teacher.jsonl"
-ADAPTER_DIR = "/models/lora_adapters/tier1_global/core_thinking_v1"
 
 LORA_R = 16
 LORA_ALPHA = 32
@@ -51,37 +55,74 @@ LEARNING_RATE = 1e-4
 BATCH_SIZE = 1
 GRAD_ACCUM = 4
 WARMUP_STEPS = 10
-MAX_SEQ_LENGTH = 4096
-MAX_TARGET_TOKENS = 1000    # thought + answer; logits are kept only for these
-TEACHER_CAP = 1100          # the teacher's n_predict — at the cap the answer was cut off
 HOLDOUT = 40                # held back for the post-training think-rate check
 LOGGING_STEPS = 5
 
-SKIP_MODULES = ["lm_head", "vision_tower", "audio_tower",
-                "embed_vision", "embed_audio"]
+# The teachers are stock models: some traces describe themselves as "an AI" /
+# "a large language model" / by vendor, unprompted. GAIA's self-concept is
+# baked (positive, fact-free), so a trace that re-teaches the generic
+# self-description is dropped unless the user's own message raised the topic.
+# A Prime teacher trace that refuses (the teacher isn't abliterated; Prime is)
+# is always dropped, or the adapter would teach the refusals back.
+TIERS = {
+    "core": {
+        "base": "/models/core",
+        "data": "/shared/tmp_h1ok/teacher.jsonl",
+        "out": "/models/lora_adapters/tier1_global/core_thinking_v1",
+        "name": "core_thinking_v1", "issue": "h1ok",
+        "teacher": "google/gemma-4-E4b-it (Q8 GGUF)",
+        "max_seq": 4096, "max_target": 1000, "teacher_cap": 1100,
+        "skip_modules": ["lm_head", "vision_tower", "audio_tower", "embed_vision", "embed_audio"],
+        "self_description": re.compile(r"\bas an ai\b|\blanguage model\b|\bllm\b|\bgoogle\b|\bgemma\b", re.I),
+        "refusal": None,
+        "markers": ("<|channel>", "<channel|>", "<|think|>", "<turn|>"),
+        "nested": "<|channel>",
+        "attn": "eager",
+    },
+    "prime": {
+        "base": "/models/prime",
+        "data": "/shared/tmp_h1ok/teacher_prime.jsonl",
+        "out": "/models/lora_adapters/tier1_global/prime_thinking_v1",
+        "name": "prime_thinking_v1", "issue": "isep",
+        "teacher": "Qwen/Qwen3-VL-8B-Thinking (Q8 GGUF)",
+        "max_seq": 6144, "max_target": 3000, "teacher_cap": 3000,
+        "skip_modules": ["lm_head", "visual"],
+        "self_description": re.compile(
+            r"\bas an ai\b|\blanguage model\b|\bllm\b|\bqwen\b|\balibaba\b|\btongyi\b"
+            # the stock model's own training-cutoff claims ("my knowledge is up to 2023")
+            r"|\bknowledge cutoff\b|\bmy (?:knowledge|training data) (?:is |only )?(?:up to|goes up to|ends)", re.I),
+        "refusal": re.compile(
+            r"\bi (?:can(?:no|')t|won't|am unable to|'m unable to|must decline to) (?:help|assist|provide|comply|do that)"
+            r"|\bi'?m sorry,? but\b|\bagainst (?:my|the|our) (?:policy|policies|guidelines)\b"
+            r"|\bi (?:should|must|need to) (?:refuse|decline)\b|\bnot (?:able|allowed) to (?:help|assist)\b", re.I),
+        "markers": ("<think>", "</think>", "<|im_end|>"),
+        "nested": "<think>",
+        "attn": "sdpa",
+    },
+}
 
-# The teacher is stock Gemma: some traces describe itself as "an AI" / "a
-# large language model" unprompted. V3's self-concept is baked (positive,
-# fact-free), so a trace that re-teaches the generic self-description is
-# dropped unless the user's own message raised the topic.
-SELF_DESCRIPTION = re.compile(r"\bas an ai\b|\blanguage model\b|\bllm\b|\bgoogle\b|\bgemma\b", re.I)
 
-THOUGHT_OPEN = "<|channel>thought\n"
-THOUGHT_CLOSE = "<channel|>"
-END_OF_TURN = "<turn|>"
-
-
-def house_prompt(messages: list) -> str:
-    """The engine's Gemma 4 turn format (ChatFormatter.format_conversation)."""
-    parts = [f"<|turn>{m['role']}<turn|>\n{m['content']}" for m in messages]
-    return "\n".join(parts) + "\n<|turn>assistant<turn|>\n"
+def render_prompt(tier: str, messages: list) -> str:
+    """The engine's turn format for the tier (ChatFormatter / gaia_cpp)."""
+    if tier == "core":
+        parts = [f"<|turn>{m['role']}<turn|>\n{m['content']}" for m in messages]
+        return "\n".join(parts) + "\n<|turn>assistant<turn|>\n"
+    parts = [f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>" for m in messages]
+    return "\n".join(parts) + "\n<|im_start|>assistant\n"
 
 
-def load_records(path: str) -> list:
-    """Teacher records usable for training: a closed thought channel, a
-    plain answer after it (no second thought block), no generation error."""
+def render_target(tier: str, r: dict) -> str:
+    """What the adapter learns to write: thought, answer, end of turn."""
+    if tier == "core":
+        return "<|channel>thought\n" + r["thought"] + "<channel|>" + r["answer"] + "<turn|>"
+    return "<think>\n" + r["thought"] + "\n</think>\n\n" + r["answer"] + "<|im_end|>"
+
+
+def load_records(path: str, cfg: dict) -> list:
+    """Teacher records usable for training: a closed thought, a plain answer
+    after it (no second thought block), no generation error, no refusal."""
     good, skipped = [], {"error": 0, "unclosed": 0, "nested": 0, "cut_off": 0,
-                         "empty_answer": 0, "self_description": 0}
+                         "empty_answer": 0, "self_description": 0, "refusal": 0}
     with open(path) as f:
         for line in f:
             r = json.loads(line)
@@ -89,14 +130,16 @@ def load_records(path: str) -> list:
                 skipped["error"] += 1
             elif not r.get("closed") or not r.get("thought"):
                 skipped["unclosed"] += 1
-            elif "<|channel>" in (r.get("answer") or ""):
+            elif cfg["nested"] in (r.get("answer") or ""):
                 skipped["nested"] += 1
-            elif (r.get("n") or 0) >= TEACHER_CAP:
+            elif (r.get("n") or 0) >= cfg["teacher_cap"]:
                 skipped["cut_off"] += 1
             elif not (r.get("answer") or "").strip():
                 skipped["empty_answer"] += 1
-            elif (SELF_DESCRIPTION.search(r["thought"] + "\n" + r["answer"])
-                  and not SELF_DESCRIPTION.search(r["user"])):
+            elif cfg["refusal"] is not None and cfg["refusal"].search(r["thought"] + "\n" + r["answer"]):
+                skipped["refusal"] += 1
+            elif (cfg["self_description"].search(r["thought"] + "\n" + r["answer"])
+                  and not cfg["self_description"].search(r["user"])):
                 skipped["self_description"] += 1
             else:
                 good.append(r)
@@ -104,15 +147,14 @@ def load_records(path: str) -> list:
     return good
 
 
-def build_samples(records: list, tokenizer) -> list:
+def build_samples(records: list, tokenizer, tier: str, cfg: dict) -> list:
     """Tokenize prompt + thought channel + answer; labels on everything after
     the prompt, ending with the end-of-turn token."""
     samples, dropped = [], 0
     for r in records:
-        prompt_ids = tokenizer(house_prompt(r["messages"]), add_special_tokens=True)["input_ids"]
-        target_ids = tokenizer(THOUGHT_OPEN + r["thought"] + THOUGHT_CLOSE + r["answer"] + END_OF_TURN,
-                               add_special_tokens=False)["input_ids"]
-        if len(target_ids) > MAX_TARGET_TOKENS or len(prompt_ids) + len(target_ids) > MAX_SEQ_LENGTH:
+        prompt_ids = tokenizer(render_prompt(tier, r["messages"]), add_special_tokens=True)["input_ids"]
+        target_ids = tokenizer(render_target(tier, r), add_special_tokens=False)["input_ids"]
+        if len(target_ids) > cfg["max_target"] or len(prompt_ids) + len(target_ids) > cfg["max_seq"]:
             dropped += 1
             continue
         ids = prompt_ids + target_ids
@@ -185,12 +227,17 @@ def unwrap_clippable(model) -> int:
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--tier", choices=sorted(TIERS), default="core")
     ap.add_argument("--epochs", type=float, default=1.0)
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--base-model", default=BASE_MODEL)
-    ap.add_argument("--data", default=TRAIN_DATA)
-    ap.add_argument("--out", default=ADAPTER_DIR)
+    ap.add_argument("--base-model")
+    ap.add_argument("--data")
+    ap.add_argument("--out")
     args = ap.parse_args()
+    cfg = TIERS[args.tier]
+    args.base_model = args.base_model or cfg["base"]
+    args.data = args.data or cfg["data"]
+    args.out = args.out or cfg["out"]
 
     base_model = str(Path(args.base_model).resolve())
     log.info("Base %s | data %s | out %s", base_model, args.data, args.out)
@@ -199,21 +246,21 @@ def main():
     tokenizer = AutoProcessor.from_pretrained(base_model, trust_remote_code=True).tokenizer
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    # The channel markers must be single special tokens, or the adapter would
-    # learn a text imitation the engine can't recognise.
-    for marker in ("<|channel>", "<channel|>", "<|think|>", END_OF_TURN):
+    # The thought markers must be single tokens, or the adapter would learn a
+    # text imitation the engine can't recognise.
+    for marker in cfg["markers"]:
         ids = tokenizer(marker, add_special_tokens=False)["input_ids"]
         if len(ids) != 1:
-            log.error("%s tokenizes to %s, expected one special token", marker, ids)
+            log.error("%s tokenizes to %s, expected one token", marker, ids)
             return 1
 
-    records = load_records(args.data)
+    records = load_records(args.data, cfg)
     random.Random(7).shuffle(records)
     holdout, train = records[:HOLDOUT], records[HOLDOUT:]
     Path(args.out).mkdir(parents=True, exist_ok=True)
     with open(Path(args.out) / "holdout_users.json", "w") as f:
         json.dump([r["user"] for r in holdout], f, indent=1)
-    samples = build_samples(train, tokenizer)
+    samples = build_samples(train, tokenizer, args.tier, cfg)
     if not samples:
         log.error("No training samples")
         return 1
@@ -234,16 +281,20 @@ def main():
         _cml.GLOBAL_WORKERS = 1
     except Exception:
         pass
-    from transformers import AutoModelForCausalLM, BitsAndBytesConfig, Trainer, TrainingArguments
+    from transformers import (AutoModelForCausalLM, AutoModelForImageTextToText, BitsAndBytesConfig,
+                              Trainer, TrainingArguments)
     from peft import LoraConfig, TaskType, get_peft_model
 
-    model = AutoModelForCausalLM.from_pretrained(
+    # Qwen3-VL isn't registered under AutoModelForCausalLM (the engine loads it
+    # as ImageTextToText too).
+    model_cls = AutoModelForCausalLM if args.tier == "core" else AutoModelForImageTextToText
+    model = model_cls.from_pretrained(
         base_model, trust_remote_code=True, device_map="auto", low_cpu_mem_usage=True,
-        attn_implementation="eager",
+        attn_implementation=cfg["attn"],
         quantization_config=BitsAndBytesConfig(
             load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16,
             bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
-            llm_int8_skip_modules=SKIP_MODULES),
+            llm_int8_skip_modules=cfg["skip_modules"]),
     )
     model.config.use_cache = False
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
@@ -280,8 +331,8 @@ def main():
     model.save_pretrained(args.out)
     tokenizer.save_pretrained(args.out)
     with open(Path(args.out) / "manifest.json", "w") as f:
-        json.dump({"name": "core_thinking_v1", "issue": "h1ok", "base_model": base_model,
-                   "teacher": "google/gemma-4-E4b-it (Q8 GGUF)", "training_data": args.data,
+        json.dump({"name": cfg["name"], "issue": cfg["issue"], "base_model": base_model,
+                   "teacher": cfg["teacher"], "training_data": args.data,
                    "samples": len(samples), "holdout": len(holdout), "epochs": args.epochs,
                    "lora_r": LORA_R, "lora_alpha": LORA_ALPHA, "loss": "thought channel + teacher answer + end of turn",
                    "log_history": trainer.state.log_history[-5:]}, f, indent=2)

@@ -91,3 +91,28 @@ def test_flag_never_applies_to_prime():
 def test_flag_off_keeps_deliberation_adapter():
     seen = _turn_kwargs({"DELIBERATION_NATIVE_THINKING": "0"}, model_role="core")
     assert seen["native_thinking"] is False and seen["adapter_name"] == "core_deliberation_v1"
+
+
+# ── isep: Prime's own native thinking ──
+
+def test_prime_switch_selects_prime_adapter_without_think_token():
+    seen = _turn_kwargs({"DELIBERATION_NATIVE_THINKING": "0", "DELIBERATION_NATIVE_THINKING_PRIME": "1"},
+                        model_role="prime")
+    assert seen["native_thinking"] is True
+    assert seen["adapter_name"] == "prime_thinking_v1"
+    assert seen["native_think_token"] == ""
+    assert seen["max_total_tokens"] >= 3072
+
+
+def test_core_switch_alone_leaves_prime_unchanged():
+    seen = _turn_kwargs({"DELIBERATION_NATIVE_THINKING": "1", "DELIBERATION_NATIVE_THINKING_PRIME": "0"},
+                        model_role="prime")
+    assert seen["native_thinking"] is False and seen["adapter_name"] is None
+
+
+def test_prime_native_mode_adds_no_token_or_instructions():
+    r, system = _run({"content": "Four.", "reasoning_content": "two and two"},
+                     native_thinking=True, native_think_token="", adapter_name="prime_thinking_v1",
+                     model_role="prime")
+    assert system == "You are GAIA."
+    assert r.thinking == "two and two" and r.final_response == "Four."
