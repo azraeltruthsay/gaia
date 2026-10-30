@@ -346,12 +346,21 @@ def _deterministic_tool_match(lowered: str, user_input: str = "") -> Optional[Se
             selection_confidence=0.95,
         )
 
-    # File read — "read /path/to/file"
-    path_match = re.search(r'\bread\s+(/[\w/._-]+)', lowered)
+    # File read — "read /path/to/file", "read the file /path …", "open /path".
+    # kixf: only a path right after "read" matched; "Read the file /path and
+    # tell me …" went to the LLM selector, which twice declined it (a made-up
+    # knowledge(review); Prime's review at 0.42), and the turn fell back to a
+    # raw preview that never answered. Filler words between verb and path are
+    # allowed; a sentence's closing period is not part of the path. Matched on
+    # the original text: paths are case-sensitive (COGNITIVE_ARCHITECTURE.md).
+    path_match = re.search(
+        r'\b(?:read|open|summari[sz]e|look\s+(?:at|over|through))\s+'
+        r'(?:(?:the|this|that|my|me|file|doc|document|contents\s+of)\s+){0,3}(/[\w/._-]+)',
+        user_input or lowered, re.IGNORECASE)
     if path_match:
         return SelectedTool(
             tool_name="file",
-            params={"action": "read", "path": path_match.group(1)},
+            params={"action": "read", "path": path_match.group(1).rstrip(".")},
             selection_reasoning="Deterministic match: explicit file read request",
             selection_confidence=0.95,
         )
