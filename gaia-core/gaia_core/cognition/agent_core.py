@@ -285,6 +285,15 @@ def _parse_iso_timestamp(raw) -> Optional[datetime]:
         return None
 
 
+def _conversation_count(session_id: str) -> Optional[int]:
+    """Exchanges on record for this session (6qzb); None if unknown."""
+    try:
+        from gaia_common.utils.conversation_memory import ConversationMemory
+        return ConversationMemory().count(session_id)
+    except Exception:
+        return None
+
+
 def _format_retrieved_session_context(results: dict) -> str:
     """Format RAG-retrieved session turns and topics into a readable context block."""
     parts = []
@@ -3391,9 +3400,15 @@ class AgentCore:
             # 8xr4.20: so is a follow-up that takes its subject from the last
             # exchange ("Where did he get the sword?"), which reads as chat.
             from gaia_core.cognition.nlu.intent_detection import (
-                is_factual_pushback, is_knowledge_followup)
+                conversation_topic, is_conversation_recall, is_factual_pushback,
+                is_knowledge_followup)
             _pushback = is_factual_pushback(user_input, history)
-            _followup = not _pushback and is_knowledge_followup(user_input, history)
+            # 6qzb: "What did we talk about regarding X?" is answered from the
+            # palace's record of this conversation — read as chat, it was
+            # skipped and Core promised a lookup that never ran.
+            _conv_recall = not _pushback and is_conversation_recall(user_input)
+            _followup = (not _pushback and not _conv_recall
+                         and is_knowledge_followup(user_input, history))
             # Outcome ledger (gjuh.2): a dispute is the strongest signal the
             # last answer went wrong; the miner joins it to that turn's records.
             if _pushback:
@@ -3418,6 +3433,9 @@ class AgentCore:
                         # nothing but the user's claim. One retry, asked as-is.
                         _grounding_ctx = ground_conversation(
                             [user_input], reason="pushback retry", context_turns=[_disputed_q])
+                elif _conv_recall:
+                    from gaia_core.cognition.knowledge_router import recall_conversation
+                    _grounding_ctx = recall_conversation(session_id, user_input, history)
                 elif _followup:
                     # The subject comes from the earlier turns: the user's
                     # words, plus the names the conversation keeps returning
@@ -3448,14 +3466,15 @@ class AgentCore:
                     )
                 outcome_ledger.record_lookup(
                     session_id, packet.header.packet_id,
-                    mode=("pushback" if _pushback else "follow-up" if _followup
+                    mode=("pushback" if _pushback else "conversation" if _conv_recall
+                          else "follow-up" if _followup
                           else "recall" if _kr_skip else "ground"),
                     query=getattr(_grounding_ctx, "query", "") or user_input,
                     ctx=_grounding_ctx)
                 if _grounding_ctx and _grounding_ctx.has_grounding:
                     if not _pushback:
                         _disputed = ""
-                    if _pushback or _followup or _memory_answer:
+                    if _pushback or _followup or _memory_answer or _conv_recall:
                         # The semantic probe's per-entity search ("Avalon")
                         # came first and prompt_builder renders only the first
                         # web_grounding, so these results were dropped. A
@@ -3477,6 +3496,10 @@ class AgentCore:
                                  "remembered": True, "retrieved_at": r.retrieved_at, "stale": r.stale,
                                  "memory_id": r.memory_id}
                                 if r.source == "memory" else
+                                # 6qzb: a past exchange, kept apart from sources
+                                {"title": r.title, "snippet": r.content, "url": "",
+                                 "conversation": True, "retrieved_at": r.retrieved_at}
+                                if r.source == "conversation" else
                                 {"title": r.source, "snippet": r.content, "url": r.url,
                                  "memory_id": r.memory_id}
                                 for r in _grounding_ctx.results[:3]],
@@ -3487,6 +3510,7 @@ class AgentCore:
                             "memory_query": getattr(_grounding_ctx, "query", "") or user_input,
                             "disputed_answer": re.sub(r"^\s*\[[A-Za-z ]+\]\s*", "", strip_think_tags(_disputed))[:300],
                             "followup": _followup,
+                            "conversation": _conv_recall,
                         }},
                         type="json",
                         source="knowledge_router",
@@ -3495,6 +3519,24 @@ class AgentCore:
                                len(_grounding_ctx.results),
                                ",".join(_grounding_ctx.sources_queried),
                                _grounding_ctx.elapsed_ms)
+                elif _conv_recall and _grounding_ctx is not None:
+                    # 6qzb: the record was searched and holds nothing on it.
+                    # That is the answer, stated as a fact — left empty, Core
+                    # promised "I'll look through our memory banks" and stopped.
+                    packet.content.data_fields = [
+                        df for df in packet.content.data_fields
+                        if getattr(df, "key", "") != "web_grounding"]
+                    packet.content.data_fields.append(DataField(
+                        key="web_grounding",
+                        value={user_input[:50]: {
+                            "results": [], "conversation": True,
+                            "topic": conversation_topic(user_input),
+                            # none at all: this is their first conversation
+                            "on_record": _conversation_count(session_id),
+                            "source": "knowledge_router:conversation",
+                            "query": user_input[:120]}},
+                        type="json", source="knowledge_router"))
+                    logger.info("KnowledgeRouter: no earlier exchange about %r on record", _grounding_ctx.query)
                 elif _grounding_ctx is not None:
                     # Grounding ran but found nothing — a knowledge gap. Affect
                     # appraisal (P0): pull curiosity toward what she couldn't
@@ -3570,12 +3612,18 @@ class AgentCore:
                     # The adapter recites or invents over grounding (8xr4.20);
                     # bare Core answers from it. Same for an answer from her
                     # memory of an earlier lookup (0vuz).
-                    _delib_adapter = not ((_followup or _memory_answer) and _grounding_ctx is not None
+                    # 6qzb: and for her record of an earlier conversation —
+                    # with the adapter, both recalled exchanges went unused
+                    # ("I don't remember it right now, but I can check").
+                    _delib_adapter = not ((_followup or _memory_answer or _conv_recall)
+                                          and _grounding_ctx is not None
                                           and _grounding_ctx.has_grounding)
                     if not _delib_adapter:
                         logger.info("[DELIBERATION] grounded %s → answering from the %s (no adapter)",
                                     "follow-up" if _followup else "question",
-                                    "search results" if _followup else "remembered lookups")
+                                    "search results" if _followup
+                                    else "conversation record" if _conv_recall
+                                    else "remembered lookups")
                         _delib_casual = True
                     _delib_result = run_deliberated_turn(
                         user_input=packet.content.original_prompt or user_input or "",
@@ -3587,7 +3635,9 @@ class AgentCore:
                         model_role=_delib_role,
                         casual=_delib_casual,
                         use_adapter=_delib_adapter,
-                        offer_tools=offers_tools(_delib_intent, packet),
+                        # 6qzb: the record was already searched; offered
+                        # tools, she ran palace(recall) on top of it.
+                        offer_tools=offers_tools(_delib_intent, packet) and not _conv_recall,
                         # Deep focus: the person asked her to focus / think
                         # hard, so Prime thinks natively on this turn only.
                         deep_focus=_delib_role == "prime" and _wants_focus_transition(

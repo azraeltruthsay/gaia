@@ -7,7 +7,7 @@ Prompt Builder (robust, persona/context-aware)
 
 import logging
 import os
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 
 # [GCP v0.3] Import the new packet structure
 from gaia_common.protocols.cognition_packet import CognitionPacket, ToolExecutionStatus
@@ -98,6 +98,33 @@ _WORLD_ANSWERABLE_INTENTS = frozenset({"time"})
 # catch-all and covers "Fetch the page at …" and "Update my knowledge base".
 TOOL_FREE_INTENTS = frozenset({"greeting", "farewell", "gratitude", "smalltalk", "social",
                                "chitchat", "acknowledgment", "affirmation", "time"})
+
+
+# "with them": "this person" was repeated back to the person ("I don't have
+# any prior conversations with this person").
+CONVERSATION_RECALL_LABEL = "Searching your record of earlier conversations with them"
+
+
+def conversation_recall_text(packet) -> Optional[str]:
+    """6qzb: this turn's search of the conversation record, as text to answer
+    from — the recalled exchanges, or a plain statement that there are none.
+    None when the turn didn't search the record."""
+    for df in getattr(getattr(packet, "content", None), "data_fields", None) or []:
+        value = getattr(df, "value", None)
+        if getattr(df, "key", "") != "web_grounding" or not isinstance(value, dict):
+            continue
+        for info in value.values():
+            if not (isinstance(info, dict) and info.get("conversation")):
+                continue
+            lines = [f"- {r.get('snippet', '')[:900]}" for r in info.get("results") or []
+                     if r.get("snippet")]
+            if lines:
+                return "\n".join(lines)
+            if info.get("on_record") == 0:
+                return "Nothing: this is your first conversation together on record."
+            topic = info.get("topic") or ""
+            return f"Nothing about {topic}." if topic else "Nothing earlier than what you can already see."
+    return None
 
 
 def offers_tools(intent: str, packet=None) -> bool:
@@ -989,6 +1016,14 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 break
     except Exception:
         logger.debug("Could not extract tool_result from packet.content.data_fields")
+    if not _routed_answer:
+        _recall_text = conversation_recall_text(packet)
+        if _recall_text is not None:
+            # 6qzb: the record was searched for this turn, so it is answered
+            # like a tool that already ran. As a grounding block ahead of the
+            # full prompt, Core used the recalled exchange ~half the time and
+            # once invented a name; result-first is what gjuh.7 measured best.
+            _routed_answer = (CONVERSATION_RECALL_LABEL, _recall_text)
     if _routed_answer:
         logger.info("PromptBuilder: answering from routed %s result (tool-answer shape)", _routed_answer[0])
         return tool_answer_messages(

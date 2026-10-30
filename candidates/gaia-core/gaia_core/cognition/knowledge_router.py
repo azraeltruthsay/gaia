@@ -741,6 +741,48 @@ def recall_answer(question: str) -> Optional[GroundingContext]:
     return ctx
 
 
+def recall_conversation(session_id: str, question: str,
+                        history: Optional[List[Dict[str, Any]]] = None,
+                        top_k: int = 3) -> GroundingContext:
+    """6qzb: a question about the conversation itself ("What did we talk about
+    regarding the memory palace?"), answered from the palace's record of this
+    session's past exchanges.
+
+    Exchanges still in `history` (what the prompt already shows) are left
+    out. With no topic ("what did we talk about last time?") the latest
+    earlier exchanges come back. Results are source="conversation": a record
+    of what was said, not evidence of what is true, so prompt_builder renders
+    them as past exchanges. An empty result is an answer too — sources_queried
+    says the record was searched, and the caller tells her nothing was found.
+    """
+    from gaia_common.utils.conversation_memory import ConversationMemory
+    from gaia_core.cognition.nlu.intent_detection import conversation_topic
+
+    t0 = time.time()
+    topic = conversation_topic(question)
+    ctx = GroundingContext(query=topic or question, sources_queried=["conversation"])
+    try:
+        memory = ConversationMemory()
+        visible = {(h.get("content") or "").strip() for h in (history or [])
+                   if isinstance(h, dict) and h.get("role") == "user"}
+        n = top_k + len(visible)
+        hits = memory.recall(session_id, topic, top_k=n) if topic else memory.latest(session_id, n)
+        hits =[h for h in hits if (h.get("user") or "").strip() not in visible][:top_k]
+        for h in hits:
+            ctx.results.append(GroundingResult(
+                source="conversation", trust_tier="remembered",
+                content=(f"On {(h.get('ts') or '')[:10]}, they said: \"{h.get('user', '')}\""
+                         f" — and you replied: \"{h.get('reply', '')}\""),
+                title="earlier conversation", retrieved_at=h.get("ts", ""),
+                score=float(h.get("score", 0.0) or 0.0), query=topic))
+    except Exception:
+        logger.debug("Conversation recall failed", exc_info=True)
+    ctx.elapsed_ms = (time.time() - t0) * 1000
+    logger.info("KnowledgeRouter: conversation recall %r in %s → %d exchange(s) in %.0fms",
+                topic or "(latest)", session_id, len(ctx.results), ctx.elapsed_ms)
+    return ctx
+
+
 def ground_conversation(user_turns: List[str], reason: str = "follow-up",
                         context_turns: Optional[List[str]] = None) -> GroundingContext:
     """Web-ground a turn whose subject lives in the earlier turns.

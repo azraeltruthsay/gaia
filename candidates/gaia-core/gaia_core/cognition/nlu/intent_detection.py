@@ -881,6 +881,56 @@ def is_knowledge_followup(text: str, history=None) -> bool:
     return bool(_FOLLOWUP_ANAPHOR_RE.search(stripped))
 
 
+# 6qzb: a question about the conversation itself — answered from the palace's
+# record of what was said, not from the web or her knowledge.
+_CONV_VERB = (r"(talk(ed|ing)?|discuss(ed|ing)?|chat(ted|ting)?|spoke|speak|say|said|"
+              r"mention(ed)?|tell|told|cover(ed)?|go(ne)? over|went over|"
+              # a decision made together: "what did we decide to name the cat?"
+              r"decide[d]?|agree[d]?|settle[d]?|choose|chose|pick(ed)?|plan(ned)?)")
+# "did we talk…", "have I told you…", "did you mention…" — a question by form.
+_CONV_ASKED_RE = re.compile(
+    rf"\b(did|have|had)\s+(we|i|you)\s+(ever\s+|already\s+|just\s+|once\s+)?{_CONV_VERB}\b", re.I)
+# "what we talked about", "our last conversation" — a recall only when asked
+# ("…?") or prompted ("remind me…"); "I told you I'm tired" is a statement.
+_CONV_PAST_RE = re.compile(
+    r"\b(we|i|you)\s+(talked|discussed|chatted|spoke|said|mentioned|told|covered|went over)\b"
+    r"|\b(our|the|that)\s+(last|previous|earlier|past|other)\s+(conversation|chat|discussion|talk)s?\b",
+    re.I)
+_CONV_PROMPT_RE = re.compile(r"^\s*(do you\s+)?(remember|recall|remind me)\b", re.I)
+# The recall phrasing itself, removed to leave the topic.
+_CONV_PHRASE_WORDS = frozenset("""
+talk talked talking discuss discussed discussing chat chatted chatting spoke speak say said
+mention mentioned tell told cover covered go gone went over regarding remember recall remind
+conversation conversations discussion discussions earlier previous previously last time times
+before ever already again once other day days yesterday week ago thing things anything
+something stuff ok okay hey so decide decided agree agreed settle settled choose chose
+pick picked plan planned
+""".split())
+
+
+def is_conversation_recall(text: str) -> bool:
+    """True for "What did we talk about regarding X?", "Did I tell you about
+    Y?", "Remind me what we discussed last time"."""
+    stripped = (text or "").strip()
+    if not stripped or len(stripped) > 300:
+        return False
+    if _CONV_ASKED_RE.search(stripped):
+        return True
+    return bool(_CONV_PAST_RE.search(stripped)) and (
+        stripped.endswith("?") or bool(_CONV_PROMPT_RE.search(stripped)))
+
+
+def conversation_topic(text: str) -> str:
+    """What a conversation-recall question asks about, with the recall
+    phrasing removed: "What did we talk about regarding the memory palace?"
+    → "memory palace". Empty when it names no topic ("what did we talk
+    about last time?")."""
+    from gaia_common.utils.lookup_memory import content_terms
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'\-]*", text or "")
+    kept = [w for w in words if w.lower() not in _CONV_PHRASE_WORDS]
+    return " ".join(w for w in kept if content_terms(w))
+
+
 def _fast_track_intent_detection(text: str) -> Optional[str]:
     """
     Fast-track intent detection for common conversational patterns.

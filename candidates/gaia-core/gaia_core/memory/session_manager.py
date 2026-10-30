@@ -193,6 +193,19 @@ class SessionManager:
             except Exception as e:
                 logger.warning(f"Session indexing failed (non-fatal): {e}")
 
+        # 6qzb: the palace's read-only record of the conversation. Written
+        # here, by code, and nowhere else (no tool writes it). The user turn
+        # is the latest one, past any tool-result turns in between.
+        if role == "assistant":
+            _user = next((t.get("content") or "" for t in reversed(session.history[:-1])
+                          if t.get("role") == "user"), "")
+            if _user:
+                try:
+                    from gaia_common.utils.conversation_memory import ConversationMemory
+                    ConversationMemory().record_exchange(session_id, _user, content, ts=turn["timestamp"])
+                except Exception:
+                    logger.debug("Conversation record failed (non-fatal)", exc_info=True)
+
         # Check if the conversation is long enough to be archived
         if len(session.history) >= self.max_active_messages:
             self.summarize_and_archive(session_id)
