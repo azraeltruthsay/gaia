@@ -842,6 +842,16 @@ def run_deliberated_turn(
     # is merged into the base, so when running Prime deliberation we don't
     # try to load an adapter — Prime IS the adapter, baked into weights.
     _is_prime_tier = model_role in ("prime", "cpu_prime")
+    # gjuh.8: a turn answered from a tool's result (the tool-answer shape)
+    # deliberates bare, from either call site. With core_thinking_v1 a routed
+    # file read recited the file's opening 6/6; bare Core 0/6 (2026-10-29).
+    try:
+        from gaia_common.utils.tool_call_parser import is_tool_answer
+        if use_adapter and is_tool_answer(assembled_messages):
+            logger.info("[DELIBERATION] answering from a tool's result → no adapter")
+            use_adapter, casual = False, True
+    except Exception:
+        logger.debug("Deliberation: tool-answer check failed (non-fatal)", exc_info=True)
     adapter_name = None if (_is_prime_tier or not use_adapter) else cfg.get("adapter_name", "core_deliberation_v1")
     max_tokens = int(cfg.get("max_tokens", 900))
     # h1ok: Core thinks in Gemma 4's own thought channel, restored by the

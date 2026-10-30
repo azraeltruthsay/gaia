@@ -1888,7 +1888,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # palace(recall) 3/4.
                         _retry_user_turn = (
                             f'The user asked: "{user_input}"\n\nYou already did that: '
-                            f"{_tool_label} returned the following.\n\n{_tool_text}\n\n---\n\n"
+                            f"{_tool_label} returned the following.\n\n{_tool_text}\n\n"
                             f"Your reply to them, from what it returned:"
                         )
 

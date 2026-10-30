@@ -467,14 +467,26 @@ def tool_answer_messages(user_input: str, tool_label: str, tool_text: str) -> li
     Result first, then the request as something already done: with the
     question first and ~4k chars after it, Core carried on writing the page;
     with the bare request last, an imperative one made her call the tool again
-    (A/B on the live engine, 2026-10-28)."""
+    (A/B on the live engine, 2026-10-28). No '---' rule between result and
+    request: Core read it as a section break and carried on past it, echoing
+    it in 10/20 replies vs 0/20 without, same answers (gjuh.8, 2026-10-29)."""
     return [
         {"role": "system", "content": TOOL_ANSWER_SYSTEM},
         {"role": "user", "content": (
-            f"{tool_label} returned the following.\n\n{tool_text}\n\n---\n\n"
+            f"{tool_label} returned the following.\n\n{tool_text}\n\n"
             f'They asked: "{user_input}" You already did that, and it returned '
             f"the above. Your reply to them:")},
     ]
+
+
+def is_tool_answer(messages: list) -> bool:
+    """Whether `messages` are the tool-answer shape: the reply is written from
+    a result already in hand. Core answers those bare — the deliberation
+    adapter recited the result's opening instead (file read 6/6 recited vs
+    0/6 bare, 2026-10-29), as it did over search results and recalled
+    exchanges (8xr4.20, 6qzb)."""
+    return bool(messages) and messages[0].get("role") == "system" \
+        and messages[0].get("content") == TOOL_ANSWER_SYSTEM
 
 
 def tool_result_text(result: Any, limit: int = 4000) -> str:
