@@ -374,6 +374,13 @@ register("GAIA-MCP-020", "Tool execution crashed",
          "The tool raised an unhandled exception during execution.",
          logging.ERROR, ErrorCategory.TOOL, is_retryable=True)
 
+# qgws: a bad path or a missing parameter is the caller's mistake, not a
+# crash — it comes back as the tool's own {ok: false, error} result.
+register("GAIA-MCP-021", "Tool rejected its input",
+         "The tool refused the call's parameters (bad path, missing or invalid value). "
+         "Fix the call rather than retrying it as-is.",
+         logging.WARNING, ErrorCategory.TOOL)
+
 register("GAIA-MCP-025", "py_compile gate failed",
          "Sovereign Shield: the written Python file has syntax errors. Write was blocked.",
          logging.ERROR, ErrorCategory.SAFETY)

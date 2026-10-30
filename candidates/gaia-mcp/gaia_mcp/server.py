@@ -158,6 +158,19 @@ async def jsonrpc_endpoint(request: Request):
             },
             "id": request_id
         }, status_code=403)
+    except (ValueError, FileNotFoundError, NotADirectoryError, IsADirectoryError) as e:
+        # qgws: the tools raise these for bad input ("… is not a directory",
+        # "path parameter required"). Answered as a 500 crash, the caller saw
+        # "500 Server Error" (and retried the candidate MCP); as the tool's own
+        # failed result, the model and the outcome ledger see the message.
+        log_gaia_error(logger, "GAIA-MCP-021", f"Tool '{method}': {e}")
+        defn = _lookup_error("GAIA-MCP-021")
+        return JSONResponse(content={
+            "jsonrpc": "2.0",
+            "result": {"ok": False, "error": str(e), "gaia_code": "GAIA-MCP-021",
+                       "hint": defn.hint if defn else ""},
+            "id": request_id
+        })
     except Exception as e:
         log_gaia_error(logger, "GAIA-MCP-020", f"Tool '{method}': {e}", exc_info=True)
         defn = _lookup_error("GAIA-MCP-020")

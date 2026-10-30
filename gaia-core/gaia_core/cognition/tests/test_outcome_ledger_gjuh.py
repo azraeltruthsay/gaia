@@ -205,3 +205,16 @@ def test_unknown_action_for_a_real_domain_is_invalid(ledger):
 def test_llm_confidence_stays_under_the_review_skip(ledger):
     tool, _ = ts.select_tool(_packet(), "what do cats eat", _Model(_sel("web", {"action": "search", "query": "x"}, 0.99)))
     assert tool.selection_confidence < 0.9
+
+
+# ── qgws: a tool that ran and failed is a failed call ──
+
+def test_tool_reported_failure_is_not_ok():
+    from gaia_core.utils.mcp_client import _rpc_outcome
+    bad = {"jsonrpc": "2.0", "result": {"ok": False, "error": "x is not a directory", "hint": "h"}, "id": 1}
+    out = _rpc_outcome(bad)
+    assert out["ok"] is False and out["error"] == "x is not a directory"
+    assert out["response"]["result"]["hint"] == "h"   # the tool's own fields stay readable
+    good = {"jsonrpc": "2.0", "result": {"ok": True, "entries": []}, "id": 1}
+    assert _rpc_outcome(good) == {"ok": True, "response": good}
+    assert _rpc_outcome({"jsonrpc": "2.0", "result": ["a"], "id": 1})["ok"] is True

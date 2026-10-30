@@ -10247,6 +10247,8 @@ Start your response with the first line of the file."""
                         return ToolExecutionResult(
                             success=False,
                             error=rpc_result.get("error", "Domain tool call failed"),
+                            # qgws: the tool's own failed result (its hint) when it ran
+                            output=(rpc_result.get("response") or {}).get("result"),
                             execution_time_ms=elapsed_ms
                         )
             except ImportError:
@@ -10302,6 +10304,8 @@ Start your response with the first line of the file."""
                     return ToolExecutionResult(
                         success=False,
                         error=rpc_result.get("error", "MCP call failed"),
+                        # qgws: the tool's own failed result (its hint) when it ran
+                        output=(rpc_result.get("response") or {}).get("result"),
                         execution_time_ms=elapsed_ms
                     )
 

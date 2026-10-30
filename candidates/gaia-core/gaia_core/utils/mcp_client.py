@@ -37,6 +37,20 @@ def _normalize_endpoint(ep: str) -> str:
     return ep + "/jsonrpc"
 
 
+def _rpc_outcome(body: Any) -> Dict:
+    """A JSON-RPC reply as call_jsonrpc's {ok, response[, error]}.
+
+    qgws: a tool that ran and failed ({"ok": false, "error": ...} as its
+    result) is a failed call, not a successful one — callers and the outcome
+    ledger read `ok`, and recorded these as successes. `response` is kept so
+    a caller can still read the tool's own fields (hint, gaia_code)."""
+    result = body.get("result") if isinstance(body, dict) else None
+    if isinstance(result, dict) and result.get("ok") is False:
+        return {"ok": False, "error": str(result.get("error") or "tool reported failure"),
+                "response": body}
+    return {"ok": True, "response": body}
+
+
 def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int = None) -> Dict:
     timeout = timeout or int(config.get_timeout("MCP_DEFAULT", 20))
     ep_raw = endpoint or os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp")
@@ -69,7 +83,7 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
             else:
                 return {"ok": False, "error": f"Approval request failed: {approval_result.get('error', 'unknown')}"}
         r.raise_for_status()
-        return {"ok": True, "response": r.json()}
+        return _rpc_outcome(r.json())
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
         logger.error(f"[{datetime.now(timezone.utc).isoformat()}] call_jsonrpc failed: {e}")
         # HA fallback: try candidate MCP if configured and not in maintenance.
@@ -89,7 +103,7 @@ def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int =
                 fb_r = requests.post(fb_ep, json=payload, timeout=timeout)
                 fb_r.raise_for_status()
                 logger.info("MCP fallback succeeded")
-                return {"ok": True, "response": fb_r.json()}
+                return _rpc_outcome(fb_r.json())
             except Exception as fb_e:
                 logger.error("MCP fallback also failed: %s", fb_e)
         return {"ok": False, "error": str(e)}
