@@ -3407,6 +3407,76 @@ def _check_audio_sensory_health():
         pass  # Container unreachable — normal health check will catch this
 
 
+# t0f2: a host reboot once left every GPU container with a broken CUDA
+# context — nvidia-smi worked, torch.cuda.is_available() raised "CUDA unknown
+# error", and every HTTP health check stayed green until a chat crashed the
+# engine. A fresh process in each GPU container is the probe that found it.
+GPU_CONTAINERS = [c.strip() for c in os.environ.get(
+    "GPU_CONTAINERS", "gaia-core,gaia-prime,gaia-audio,gaia-study").split(",") if c.strip()]
+CUDA_PROBE_INTERVAL = int(os.environ.get("CUDA_PROBE_INTERVAL", "600"))
+CUDA_PROBE_GRACE = int(os.environ.get("CUDA_PROBE_GRACE", "90"))  # let containers boot first
+_CUDA_PROBE = "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 3)"
+_cuda_probe_last = time.monotonic() - CUDA_PROBE_INTERVAL + CUDA_PROBE_GRACE
+_cuda_broken: dict = {}  # container -> first-seen ISO time, while broken
+
+
+def _probe_cuda(name: str) -> bool | None:
+    """True/False for CUDA usable inside `name`; None when the probe itself
+    couldn't run (no torch, exec failed, timed out) — never acted on."""
+    try:
+        r = subprocess.run(["docker", "exec", name, "python3", "-c", _CUDA_PROBE],
+                           capture_output=True, text=True, timeout=90)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        log.debug("CUDA probe of %s did not complete", name)
+        return None
+    if r.returncode == 0:
+        return True
+    if r.returncode == 3:
+        return False
+    log.debug("CUDA probe of %s could not run (rc=%d): %s", name, r.returncode, r.stderr.strip()[-200:])
+    return None
+
+
+def _check_gpu_contexts():
+    """Every CUDA_PROBE_INTERVAL (first run CUDA_PROBE_GRACE after start):
+    a GPU container that can't see CUDA is alarmed, recreated through
+    docker_restart (cooldown + circuit breaker), and re-probed — the restart
+    only counts once CUDA is back (t0f2 recurrence #3: a rollback's restart
+    silently never happened)."""
+    global _cuda_probe_last
+    now = time.monotonic()
+    if now - _cuda_probe_last < CUDA_PROBE_INTERVAL:
+        return
+    _cuda_probe_last = now
+    if is_maintenance_active() or _is_meditation_active():
+        return  # training or an operator owns the GPU
+    seen = {}
+    for name in GPU_CONTAINERS:
+        info = inspect_container(name)
+        if not info or info.get("status") != "running" or _tenant_default_stopped(name):
+            continue
+        ok = seen[name] = _probe_cuda(name)
+        if ok is None:
+            continue
+        if ok:
+            if _cuda_broken.pop(name, None):
+                log.info("CUDA recovered in %s", name)
+            continue
+        first = _cuda_broken.setdefault(name, datetime.now(timezone.utc).isoformat())
+        raise_alarm(name, f"CUDA unavailable inside the container since {first} "
+                          "(stale context after boot?) — HTTP health stays green")
+        if name in SERVICES and docker_restart(name):
+            time.sleep(20)
+            if _probe_cuda(name):
+                _cuda_broken.pop(name, None)
+                log.info("REMEDIATION: CUDA restored in %s after recreate", name)
+            else:
+                log.error("REMEDIATION: %s recreated but CUDA still unavailable", name)
+    if seen:
+        log.info("CUDA contexts: %s", ", ".join(
+            f"{n}={'ok' if v else 'BROKEN' if v is False else 'unknown'}" for n, v in seen.items()))
+
+
 def poll_cycle():
     """Run one health check cycle across all services."""
     global _gpu_status_cache, _model_server_cache, _pipeline_status_cache
@@ -3442,6 +3512,12 @@ def poll_cycle():
         _check_audio_sensory_health()
     except Exception:
         log.debug("Audio sensory health check failed", exc_info=True)
+
+    # CUDA context health inside GPU containers (t0f2) — periodic
+    try:
+        _check_gpu_contexts()
+    except Exception:
+        log.debug("CUDA context check failed", exc_info=True)
 
     # GPU zombie cleanup — detect orphaned processes not owned by any container
     try:

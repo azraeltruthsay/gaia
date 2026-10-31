@@ -1216,10 +1216,17 @@ def audit_code():
 
 def run_service_tests(name: str) -> bool:
     """Run ruff and pytest inside the container to validate code changes."""
-    # 1. Lint Check (all F-rules: F401 unused import, F811 redef, F821 undef, etc.)
+    # o9dh/saq3: no --select override -- let ruff auto-discover the
+    # service's own pyproject.toml [tool.ruff.lint] ignore list (F401,
+    # F811, F841, etc. are deliberately non-blocking project policy,
+    # e.g. F811 is the intentional guarded-optional-import idiom used
+    # throughout this codebase). --select "F" was bypassing that policy
+    # entirely, so this check (and the self-repair loop it triggers,
+    # up to and including restoring a candidate file from production)
+    # was firing on code the project has explicitly decided is fine.
     log.info("Running lint audit for %s...", name)
     try:
-        lint_cmd = ["docker", "exec", name, "python", "-m", "ruff", "check", "/app", "--select", "F", "--no-cache"]
+        lint_cmd = ["docker", "exec", name, "python", "-m", "ruff", "check", "/app", "--no-cache"]
         lint_res = subprocess.run(lint_cmd, capture_output=True, text=True, timeout=30)
         if lint_res.returncode != 0:
             log.error("LINT ERROR in %s:\n%s", name, lint_res.stdout)
@@ -1262,7 +1269,14 @@ def run_service_tests(name: str) -> bool:
 # Lint Auto-Fix (safe subset of F-rules)
 # ---------------------------------------------------------------------------
 
-# Rules safe for unattended auto-fix (ruff --fix handles these deterministically):
+# o9dh/saq3: F401/F541/F811/F841 are ALL in this project's own
+# pyproject.toml [tool.ruff.lint] ignore list (deliberately non-blocking
+# -- e.g. F811 is the intentional guarded-optional-import idiom used
+# throughout the codebase; ruff --fix on it could delete one arm of a
+# real fallback). Kept only as a label for the proposal record below;
+# no longer passed as a --select override, so this function now only
+# ever finds something to "fix" when the service's own pyproject.toml
+# considers it a real, non-ignored issue.
 _LINT_AUTOFIX_RULES = "F401,F541,F811,F841"
 
 
@@ -1272,11 +1286,11 @@ def _attempt_lint_autofix(name: str) -> bool:
     Returns True if fixes were applied successfully.
     If surgeon approval is required, queues a proposal and returns False.
     """
-    # 1. Preview fixable issues
+    # 1. Preview fixable issues (service's own pyproject.toml ignore list applies)
     try:
         preview_cmd = [
             "docker", "exec", name, "python", "-m", "ruff", "check", "/app",
-            "--select", _LINT_AUTOFIX_RULES, "--no-cache",
+            "--no-cache",
         ]
         preview = subprocess.run(preview_cmd, capture_output=True, text=True, timeout=30)
         if preview.returncode == 0:
@@ -1308,22 +1322,22 @@ def _attempt_lint_autofix(name: str) -> bool:
         log.info("Surgeon approval required — queued lint autofix %s for %s", repair_id, name)
         return False
 
-    # 3. Apply fixes
+    # 3. Apply fixes (service's own pyproject.toml ignore list applies)
     try:
         fix_cmd = [
             "docker", "exec", name, "python", "-m", "ruff", "check", "/app",
-            "--select", _LINT_AUTOFIX_RULES, "--fix", "--no-cache",
+            "--fix", "--no-cache",
         ]
         fix_res = subprocess.run(fix_cmd, capture_output=True, text=True, timeout=30)
     except Exception as e:
         log.warning("Lint autofix apply failed for %s: %s", name, e)
         return False
 
-    # 4. Validate — full F-rule check
+    # 4. Validate — same (config-respecting) check, confirm it's now clean
     try:
         verify_cmd = [
             "docker", "exec", name, "python", "-m", "ruff", "check", "/app",
-            "--select", "F", "--no-cache",
+            "--no-cache",
         ]
         verify = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=30)
     except Exception as e:
@@ -1593,10 +1607,13 @@ def _validate_repair(service: str, container_path: str) -> dict:
         ast.parse(content)
     except SyntaxError as e:
         return {"valid": False, "reason": f"syntax error: {e}"}
-    # Lint check — just this file
+    # Lint check — just this file. F821 (undefined name) only: real danger,
+    # not ignored by project policy. F811 (redefinition) dropped -- it's
+    # the intentional guarded-optional-import idiom used throughout this
+    # codebase and is in every service's pyproject.toml ignore list (o9dh/saq3).
     try:
         lint_cmd = ["docker", "exec", service, "python", "-m", "ruff", "check",
-                    container_path, "--select", "F821,F811", "--no-cache"]
+                    container_path, "--select", "F821", "--no-cache"]
         lint_res = subprocess.run(lint_cmd, capture_output=True, text=True, timeout=30)
         if lint_res.returncode != 0:
             return {"valid": False, "reason": f"lint errors: {lint_res.stdout[:200]}"}
@@ -3390,6 +3407,76 @@ def _check_audio_sensory_health():
         pass  # Container unreachable — normal health check will catch this
 
 
+# t0f2: a host reboot once left every GPU container with a broken CUDA
+# context — nvidia-smi worked, torch.cuda.is_available() raised "CUDA unknown
+# error", and every HTTP health check stayed green until a chat crashed the
+# engine. A fresh process in each GPU container is the probe that found it.
+GPU_CONTAINERS = [c.strip() for c in os.environ.get(
+    "GPU_CONTAINERS", "gaia-core,gaia-prime,gaia-audio,gaia-study").split(",") if c.strip()]
+CUDA_PROBE_INTERVAL = int(os.environ.get("CUDA_PROBE_INTERVAL", "600"))
+CUDA_PROBE_GRACE = int(os.environ.get("CUDA_PROBE_GRACE", "90"))  # let containers boot first
+_CUDA_PROBE = "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 3)"
+_cuda_probe_last = time.monotonic() - CUDA_PROBE_INTERVAL + CUDA_PROBE_GRACE
+_cuda_broken: dict = {}  # container -> first-seen ISO time, while broken
+
+
+def _probe_cuda(name: str) -> bool | None:
+    """True/False for CUDA usable inside `name`; None when the probe itself
+    couldn't run (no torch, exec failed, timed out) — never acted on."""
+    try:
+        r = subprocess.run(["docker", "exec", name, "python3", "-c", _CUDA_PROBE],
+                           capture_output=True, text=True, timeout=90)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        log.debug("CUDA probe of %s did not complete", name)
+        return None
+    if r.returncode == 0:
+        return True
+    if r.returncode == 3:
+        return False
+    log.debug("CUDA probe of %s could not run (rc=%d): %s", name, r.returncode, r.stderr.strip()[-200:])
+    return None
+
+
+def _check_gpu_contexts():
+    """Every CUDA_PROBE_INTERVAL (first run CUDA_PROBE_GRACE after start):
+    a GPU container that can't see CUDA is alarmed, recreated through
+    docker_restart (cooldown + circuit breaker), and re-probed — the restart
+    only counts once CUDA is back (t0f2 recurrence #3: a rollback's restart
+    silently never happened)."""
+    global _cuda_probe_last
+    now = time.monotonic()
+    if now - _cuda_probe_last < CUDA_PROBE_INTERVAL:
+        return
+    _cuda_probe_last = now
+    if is_maintenance_active() or _is_meditation_active():
+        return  # training or an operator owns the GPU
+    seen = {}
+    for name in GPU_CONTAINERS:
+        info = inspect_container(name)
+        if not info or info.get("status") != "running" or _tenant_default_stopped(name):
+            continue
+        ok = seen[name] = _probe_cuda(name)
+        if ok is None:
+            continue
+        if ok:
+            if _cuda_broken.pop(name, None):
+                log.info("CUDA recovered in %s", name)
+            continue
+        first = _cuda_broken.setdefault(name, datetime.now(timezone.utc).isoformat())
+        raise_alarm(name, f"CUDA unavailable inside the container since {first} "
+                          "(stale context after boot?) — HTTP health stays green")
+        if name in SERVICES and docker_restart(name):
+            time.sleep(20)
+            if _probe_cuda(name):
+                _cuda_broken.pop(name, None)
+                log.info("REMEDIATION: CUDA restored in %s after recreate", name)
+            else:
+                log.error("REMEDIATION: %s recreated but CUDA still unavailable", name)
+    if seen:
+        log.info("CUDA contexts: %s", ", ".join(
+            f"{n}={'ok' if v else 'BROKEN' if v is False else 'unknown'}" for n, v in seen.items()))
+
+
 def poll_cycle():
     """Run one health check cycle across all services."""
     global _gpu_status_cache, _model_server_cache, _pipeline_status_cache
@@ -3425,6 +3512,12 @@ def poll_cycle():
         _check_audio_sensory_health()
     except Exception:
         log.debug("Audio sensory health check failed", exc_info=True)
+
+    # CUDA context health inside GPU containers (t0f2) — periodic
+    try:
+        _check_gpu_contexts()
+    except Exception:
+        log.debug("CUDA context check failed", exc_info=True)
 
     # GPU zombie cleanup — detect orphaned processes not owned by any container
     try:
@@ -4201,17 +4294,18 @@ class DoctorHandler(BaseHTTPRequestHandler):
         file_path = proposal["file"]
 
         # ── Lint autofix branch — run ruff --fix instead of writing fixed_code ──
+        # o9dh/saq3: no --select override -- respects the service's own
+        # pyproject.toml ignore list (see _attempt_lint_autofix above).
         if proposal.get("method") == "lint_autofix":
-            rules = proposal.get("rules", _LINT_AUTOFIX_RULES)
             try:
                 fix_cmd = [
                     "docker", "exec", service, "python", "-m", "ruff", "check", "/app",
-                    "--select", rules, "--fix", "--no-cache",
+                    "--fix", "--no-cache",
                 ]
                 subprocess.run(fix_cmd, capture_output=True, text=True, timeout=30)
                 verify_cmd = [
                     "docker", "exec", service, "python", "-m", "ruff", "check", "/app",
-                    "--select", "F", "--no-cache",
+                    "--no-cache",
                 ]
                 verify = subprocess.run(verify_cmd, capture_output=True, text=True, timeout=30)
             except Exception as e:
