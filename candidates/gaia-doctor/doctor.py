@@ -2726,15 +2726,24 @@ def docker_restart(name: str) -> bool:
         if len(_remediation_log) > 50:
             _remediation_log.pop(0)
 
-        if result.returncode == 0:
-            log.info("Successfully restarted %s", name)
-            _alarmed_services.discard(name)
-            url = SERVICES[name][0]
-            _verify_recovery(name, url)
-            return True
-        else:
-            log.error("Failed to restart %s: %s", name, result.stderr.strip()[:200])
-            return False
+        if result.returncode != 0:
+            # The real error follows compose's warnings (orphans etc.), so log
+            # the tail. Recreating gaia-core from in here always failed: its
+            # groq secret is `${HOME}/.gaia/secrets/…`, and HOME is /root in
+            # this container (t0f2, 2026-10-31). A plain restart needs neither
+            # compose nor secrets, and is what cleared a stale CUDA context.
+            log.error("Compose recreate of %s failed: %s", name, result.stderr.strip()[-300:])
+            fb = subprocess.run(["docker", "restart", name], capture_output=True, text=True, timeout=120)
+            entry["mode"], entry["success"] = "docker_restart_fallback", fb.returncode == 0
+            if fb.returncode != 0:
+                log.error("Failed to restart %s: %s", name, fb.stderr.strip()[-300:])
+                return False
+            log.warning("REMEDIATION: %s restarted in place (compose recreate unavailable)", name)
+        log.info("Successfully restarted %s", name)
+        _alarmed_services.discard(name)
+        url = SERVICES[name][0]
+        _verify_recovery(name, url)
+        return True
     except subprocess.TimeoutExpired:
         log.error("Restart of %s timed out (>60s)", name)
         _last_restart[name] = time.monotonic()
