@@ -50,3 +50,11 @@ def test_bare_search_request_falls_back_to_full_text():
     # subject matter, so the full (short) text is the only reasonable query.
     query = _query_for("please do a web search")
     assert query
+
+
+def test_subject_after_the_instruction_becomes_the_query():
+    # "Look it up: <question>" sent the whole utterance, instruction included.
+    from gaia_core.cognition.tool_selector import _deterministic_tool_match
+    text = "Look it up: what is the population of Reykjavik?"
+    m = _deterministic_tool_match(text.lower(), text)
+    assert m.tool_name == "web" and m.params["query"] == "what is the population of reykjavik"

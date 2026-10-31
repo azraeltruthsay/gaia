@@ -289,6 +289,12 @@ def _deterministic_tool_match(lowered: str, user_input: str = "") -> Optional[Se
                             before = before.split(conditional, 1)[0].strip().rstrip(".,;")
                     if before:
                         query = before
+                    else:
+                        # "Look it up: what is the population of Reykjavik?"
+                        # — the subject follows the instruction instead.
+                        after = lowered.split(tool_phrase, 1)[1].strip(" :,.-—")
+                        if len(after) >= 3:
+                            query = after
                     break
 
         # Pattern 3: the trigger phrase is embedded in ordinary conversational
