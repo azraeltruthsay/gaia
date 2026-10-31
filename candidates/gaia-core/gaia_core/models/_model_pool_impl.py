@@ -553,9 +553,16 @@ class ModelPool:
                     "endpoint": nano_endpoint,
                     "path": nano_model,
                     "enabled": True,
-                    "max_model_len": 2048,
+                    # rlnp: keep the configured window (nano is an alias to
+                    # Core's engine); a hardcoded 2048 overrode it and cut the
+                    # planning call's system prompt to 200 chars.
+                    "max_model_len": int(
+                        _existing_nano.get("max_model_len")
+                        or self.config.MODEL_CONFIGS.get("core", {}).get("max_model_len")
+                        or 4096),
                 }
-                logger.info("NANO_ENDPOINT set: nano -> GAIA Engine @ %s", nano_endpoint)
+                logger.info("NANO_ENDPOINT set: nano -> GAIA Engine @ %s (window %d)",
+                            nano_endpoint, self.config.MODEL_CONFIGS["nano"]["max_model_len"])
             elif _nano_explicitly_disabled:
                 logger.info("NANO_ENDPOINT set but nano.enabled=False in config — keeping disabled")
 

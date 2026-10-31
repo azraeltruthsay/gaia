@@ -6961,9 +6961,9 @@ RESULT: COMPLEX (reason: <brief reason>)
         if force_slim:
             return True
 
-        # Nano MUST always use slim prompt — its context window (2048)
-        # cannot fit the full planning pipeline. Sending the full prompt causes
-        # context overflow errors (400) and exhausts the fallback chain.
+        # Nano (the reflex tier) always takes the slim prompt. It is now an
+        # alias to Core's engine with Core's window (rlnp: its stale 2048
+        # cut the planning call's system prompt to 200 chars).
         if selected_model_name == "nano":
             return True
 

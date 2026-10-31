@@ -63,7 +63,7 @@
       "path": "Gemma4-E4B-GAIA-Core-v1",
       "type": "managed",
       "endpoint": "http://localhost:8092",
-      "max_model_len": 2048,
+      "max_model_len": 4096,
       "description": "RETIRED tier \u2014 legacy alias to Core's embedded engine (Sovereign Duality: Core handles all triage)"
     }
   },
