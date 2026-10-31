@@ -2167,6 +2167,21 @@ async def process_packet(packet_data: Dict[str, Any]):
                 packet.response.candidate = full_response
                 final_packet_dict = packet.to_serializable_dict()
 
+            # e6a: paths that answer and persist on their own (deliberation,
+            # reflex, fallback/escalation) return without the terminal packet
+            # event; gaia-web then had no completed packet ("Core stream
+            # finished without a final packet"). Emit one from this turn's
+            # packet — no persistence here, those paths already did it.
+            if not final_packet_dict and full_response.strip():
+                try:
+                    from gaia_common.protocols.cognition_packet import PacketState
+                    packet.status.state = PacketState.COMPLETED
+                    packet.status.finalized = True
+                    packet.response.candidate = full_response
+                    final_packet_dict = packet.to_serializable_dict()
+                except Exception:
+                    logger.warning("Terminal packet synthesis failed", exc_info=True)
+
             if final_packet_dict:
                 # Ensure the final response in the packet is clean (no think tags)
                 if "response" in final_packet_dict and "candidate" in final_packet_dict["response"]:
