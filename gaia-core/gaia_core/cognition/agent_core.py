@@ -4876,7 +4876,7 @@ class AgentCore:
                 # Request FOCUSING mode: Core→CPU, Prime→GPU, Nano stays GPU.
                 _escalated_ok = False
                 _prime_endpoint = os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777")
-                _prime_model = os.environ.get("PRIME_MODEL_PATH", "/models/Huihui-Qwen3-8B-GAIA-Prime-adaptive")
+                _prime_model = os.environ.get("PRIME_MODEL_PATH", "/models/prime")  # 2bwj: was a deleted model
                 _orchestrator_endpoint = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
                 try:
                     import httpx as _httpx_esc

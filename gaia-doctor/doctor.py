@@ -2226,10 +2226,8 @@ def _attempt_inference_recovery(service: str, error_line: str, pattern: str):
     try:
         prime_endpoint = os.environ.get("PRIME_ENDPOINT", "http://gaia-prime:7777")
         data = json.dumps({
-            "model_path": os.environ.get(
-                "PRIME_MODEL_PATH",
-                "/warm_pool/Huihui-Qwen3-8B-GAIA-Prime-adaptive",
-            ),
+            # 2bwj: the old default named a deleted warm-pool model.
+            "model_path": os.environ.get("PRIME_MODEL_PATH", "/models/prime"),
         }).encode()
         req = Request(
             f"{prime_endpoint}/model/load",

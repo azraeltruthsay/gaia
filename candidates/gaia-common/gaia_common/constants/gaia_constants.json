@@ -211,7 +211,7 @@
     "summary_max_output_tokens": 400,
     "synthesis_max_output_tokens": 800,
     "vllm_endpoint": "http://gaia-prime:7777",
-    "model": "/models/Huihui-Qwen3-8B-abliterated-v2-merged",
+    "model": "/models/prime",
     "summary_temperature": 0.3,
     "max_documents": 50
   },
@@ -312,7 +312,7 @@
   },
   "STUDY_MODE": {
     "enabled": true,
-    "base_model_path": "/models/Huihui-Qwen3-8B-abliterated-v2",
+    "base_model_path": "/models/prime",
     "max_training_time_seconds": 600,
     "max_training_samples": 1000,
     "max_training_content_kb": 500,
@@ -672,40 +672,27 @@
   "MODEL_REGISTRY": {
     "models_dir": "/models",
     "prime": {
-      "base": "/models/Qwen/Qwen3.5-9B",
+      "base": "/models/Qwen/Qwen3-VL-8B-Instruct",
       "merged": "/models/prime",
       "gguf": "/models/prime.gguf",
-      "family": "qwen3.5",
-      "params": "9B",
+      "family": "qwen3-vl",
+      "params": "8B",
       "multimodal": true,
-      "skills": "13/14 Primary School",
-      "notes": "Identity-baked Qwen3.5-9B. Adaptive training v6p1. Vision encoder preserved."
-    },
-    "prime_8b_legacy": {
-      "base": "/models/Huihui-Qwen3-8B-abliterated-v2",
-      "merged": "/models/Huihui-Qwen3-8B-abliterated-v2-merged",
-      "gguf": "/models/Huihui-Qwen3-8B-abliterated-v2-Q4_K_M.gguf",
-      "notes": "Legacy 8B \u2014 retained for rollback"
+      "notes": "Qwen3-VL-8B-GAIA-Prime-v1, Azrael identity-aligned, self-abliterated 2026-06-09. Symlinks: prime -> Qwen3-VL-8B-GAIA-Prime-v1-abliterated, prime.gguf -> its Q4_K_M."
     },
     "core": {
-      "base": "/models/Qwen/Qwen3.5-4B",
+      "base": "/models/google/gemma-4-E4B",
       "merged": "/models/core",
       "gguf": "/models/core.gguf",
-      "family": "qwen3.5",
-      "params": "4B",
+      "family": "gemma4",
+      "params": "E4B",
       "multimodal": true,
-      "skills": "13/14 Primary School",
-      "notes": "Identity-baked Qwen3.5-4B. Primary School curriculum. Vision preserved."
+      "notes": "Gemma4-E4B-GAIA-Core CORE_IDENTITY_V3 (baked 2026-06-09). Symlinks: core -> ...-Multimodal-CORE_IDENTITY_V3, core.gguf -> IDENTITY_V3-Q8_0."
     },
     "nano": {
-      "base": "/models/Qwen/Qwen3.5-0.8B",
       "merged": "/models/nano",
       "gguf": "/models/nano.gguf",
-      "family": "qwen3.5",
-      "params": "0.8B",
-      "multimodal": true,
-      "skills": "3/3 Nano School (triage, cleanup, greeting)",
-      "notes": "Identity-baked Qwen3.5-0.8B. Nano School curriculum. Vision preserved."
+      "notes": "RETIRED tier (Sovereign Duality): nano and nano.gguf are symlinks to core and core.gguf, kept for code that still names the nano tier."
     },
     "audio": {
       "stt": "/models/Qwen3-ASR-0.6B",
@@ -719,19 +706,15 @@
     "enabled": true,
     "tmpfs_path": "/mnt/gaia_warm_pool",
     "source_path": "/gaia/gaia-instance/gaia-models",
-    "size_gb": 30,
+    "size_gb": 40,
     "models": {
-      "nano": {
-        "source": "Qwen3.5-0.8B-Abliterated",
-        "description": "Nano (0.8B) \u2014 triage, transcript cleanup"
-      },
       "core": {
-        "source": "Qwen3.5-4B-GAIA-Core-Multimodal-v4",
-        "description": "Core (4B) \u2014 intent detection, tool selection, planning"
+        "source": "Gemma4-E4B-GAIA-Core-Multimodal-CORE_IDENTITY_V3",
+        "description": "Core (Gemma4-E4B) \u2014 operator, triage, tools, vision"
       },
       "prime": {
-        "source": "Huihui-Qwen3-8B-GAIA-Prime-adaptive-GPTQ",
-        "description": "Prime (8B GPTQ 4-bit) \u2014 complex reasoning, code, long-form"
+        "source": "Qwen3-VL-8B-GAIA-Prime-v1-abliterated",
+        "description": "Prime (Qwen3-VL-8B) \u2014 deep reasoning, code, planning"
       },
       "embedding": {
         "source": "all-MiniLM-L6-v2",
@@ -739,9 +722,7 @@
       }
     },
     "stage_on_boot": [
-      "nano",
       "core",
-      "prime",
       "embedding"
     ],
     "stage_on_demand": [
