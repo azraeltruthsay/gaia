@@ -6346,6 +6346,17 @@ class AgentCore:
                     "\"web search\", etc.) verbatim — integrate the information naturally "
                     "as if it's something you know, citing only filenames or URLs."
                 )
+                # The tier's architecture fact, by the casual-turn rule in
+                # prompt_builder: always for Prime (its weights say Gemma 4
+                # E4B), for Core when asked what she runs on. Without it an
+                # escalated "Which base model are you built on?" got Gemma
+                # from Prime.
+                try:
+                    from gaia_core.utils.prompt_builder import arch_fact_for, asks_about_substrate
+                    if candidate in ("prime", "cpu_prime") or asks_about_substrate(user_question):
+                        _system += arch_fact_for(candidate)
+                except Exception:
+                    self.logger.debug("Escalation arch fact skipped (non-fatal)", exc_info=True)
                 _user = user_question
                 if _gc:
                     # Extract proper nouns from the grounding so we can present

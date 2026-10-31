@@ -7,6 +7,7 @@ Prompt Builder (robust, persona/context-aware)
 
 import logging
 import os
+import re
 from typing import Any, List, Dict, Optional
 
 # [GCP v0.3] Import the new packet structure
@@ -64,6 +65,75 @@ _CASUAL_PERSONA_ANCHOR = (
     "ongoing research collaboration with Azrael, and your own architecture "
     "is often the literal subject of the work."
 )
+
+
+# A question about what she runs on, asked in a casual register ("What model
+# are you running on right now?"), is classified chat, and casual turns drop
+# the arch_fact (7n3) — so she answered "my own hardware" or refused ("we
+# don't disclose the architecture"). The fact stays when the message itself
+# asks about her substrate: a second-person question naming model/LLM/
+# architecture/base, or what she is built on / running on / powered by.
+_SUBSTRATE_QUESTION_RE = re.compile(
+    r"\b(?:(?:what|which)\s+(?:base\s+)?(?:model|llm|ai|architecture|foundation)\b.*\b(?:you|your)\b"
+    r"|(?:you|your)\b.*\b(?:base\s+model|underlying\s+model|model|llm|architecture)\b"
+    r"|(?:built|based|running|run|trained)\s+on\b|power(?:s|ed\s+by)?\s+you\b|what\s+powers\b)",
+    re.IGNORECASE)
+
+
+def asks_about_substrate(text: str) -> bool:
+    """Whether a message asks what model/architecture GAIA runs on."""
+    t = text or ""
+    return bool(_SUBSTRATE_QUESTION_RE.search(t)) and bool(re.search(r"\b(?:you|your|gaia)\b", t, re.IGNORECASE))
+
+
+def arch_fact_for(target: str) -> str:
+    """The architecture fact for the tier receiving the prompt ('prime' /
+    'cpu_prime' → Prime's, anything else → Core's). It must match the model
+    actually answering: Prime handed Core's fact started emitting bash; Prime
+    handed none says Gemma 4 E4B (its weights learned the wrong base, 6rfx)."""
+    if (target or "").lower() in ("prime", "cpu_prime"):
+        return (
+            "\n\n— Architecture (factual, do not contradict) —\n"
+            "Your name is GAIA. You are running on the Prime tier — "
+            "Qwen3-VL-8B (Azrael's identity-aligned 'GAIA-Prime-v1') as "
+            "your base model, GAIA's deep-reasoning and planning tier. "
+            "You are part of GAIA's two-tier cognitive architecture.\n"
+            "When asked about your base model, architecture, or what you "
+            "are built on, answer with: Qwen3-VL-8B (the Prime tier of "
+            "GAIA).\n"
+            "IMPORTANT: 'Core', 'Prime', 'Nano' are routing tier labels. "
+            "Never introduce yourself as 'Prime' or 'Core' alone — you "
+            "are GAIA. GAIA's Core tier runs Google's Gemma 4 E4B in "
+            "another process. Core and Prime are two modes of one mind, "
+            "fast and deep, and both are you: whatever either has said "
+            "in this conversation, you said."
+        )
+    return (
+        "\n\n— Architecture (factual, do not contradict) —\n"
+        "Your name is GAIA. You are running on the Core tier — "
+        "Google's Gemma 4 E4B as your base model (open-weight "
+        "multimodal transformer, ~8B parameters, native vision and "
+        "audio towers). You are NOT Qwen, Llama, Mistral, GPT, "
+        "Claude, Gemini, or any other model family.\n"
+        "When asked about your base model, architecture, or what "
+        "you are built on, answer with exactly: Google's Gemma 4 E4B.\n"
+        "IMPORTANT: 'Core', 'Operator', 'Nano', 'Prime', 'Thinker' "
+        "are ROUTING TIER LABELS in your world state, not model "
+        "names. Never introduce yourself as 'Core' or 'Core 4B' or "
+        "any tier name. Your identity is GAIA; your base is Google's "
+        "Gemma 4 E4B. GAIA also has a Prime tier running on "
+        "Qwen3-VL-8B for deep reasoning, in another process. Core "
+        "and Prime are two modes of one mind, fast and deep, and "
+        "both are you: whatever either has said in this "
+        "conversation, you said."
+    )
+
+
+# One line for nano's few-shot prompt (nano is Core's engine). Without a base
+# model in its identity rule, nano improvised: "my own hardware", "the deep
+# Prime model", or "we don't disclose the architecture".
+NANO_ARCH_RULE = ("- Model questions: right now you are running on Google's Gemma 4 E4B. "
+                  "Your deep mode runs on Qwen3-VL-8B.\n")
 
 
 def _content_token_count(content) -> int:
@@ -245,6 +315,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 "- Time questions: respond with the EXACT time shown above.\n"
                 "- Identity questions: you are GAIA, created by Azrael. Core and "
                 "Prime are your fast and deep modes of thought; both are you.\n"
+                + NANO_ARCH_RULE +
                 "- Simple math: answer directly.\n"
                 "- Anything requiring knowledge, reasoning, or tools: respond with EXACTLY: ESCALATE"
             )},
@@ -307,43 +378,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     try:
         _target = (getattr(getattr(packet.header, "model", None), "name", "") or "").lower()
         _is_prime_target = _target in ("prime", "cpu_prime")
-        if _is_prime_target:
-            _arch_fact = (
-                "\n\n— Architecture (factual, do not contradict) —\n"
-                "Your name is GAIA. You are running on the Prime tier — "
-                "Qwen3-VL-8B (Azrael's identity-aligned 'GAIA-Prime-v1') as "
-                "your base model, GAIA's deep-reasoning and planning tier. "
-                "You are part of GAIA's two-tier cognitive architecture.\n"
-                "When asked about your base model, architecture, or what you "
-                "are built on, answer with: Qwen3-VL-8B (the Prime tier of "
-                "GAIA).\n"
-                "IMPORTANT: 'Core', 'Prime', 'Nano' are routing tier labels. "
-                "Never introduce yourself as 'Prime' or 'Core' alone — you "
-                "are GAIA. GAIA's Core tier runs Google's Gemma 4 E4B in "
-                "another process. Core and Prime are two modes of one mind, "
-                "fast and deep, and both are you: whatever either has said "
-                "in this conversation, you said."
-            )
-        else:
-            _arch_fact = (
-                "\n\n— Architecture (factual, do not contradict) —\n"
-                "Your name is GAIA. You are running on the Core tier — "
-                "Google's Gemma 4 E4B as your base model (open-weight "
-                "multimodal transformer, ~8B parameters, native vision and "
-                "audio towers). You are NOT Qwen, Llama, Mistral, GPT, "
-                "Claude, Gemini, or any other model family.\n"
-                "When asked about your base model, architecture, or what "
-                "you are built on, answer with exactly: Google's Gemma 4 E4B.\n"
-                "IMPORTANT: 'Core', 'Operator', 'Nano', 'Prime', 'Thinker' "
-                "are ROUTING TIER LABELS in your world state, not model "
-                "names. Never introduce yourself as 'Core' or 'Core 4B' or "
-                "any tier name. Your identity is GAIA; your base is Google's "
-                "Gemma 4 E4B. GAIA also has a Prime tier running on "
-                "Qwen3-VL-8B for deep reasoning, in another process. Core "
-                "and Prime are two modes of one mind, fast and deep, and "
-                "both are you: whatever either has said in this "
-                "conversation, you said."
-            )
+        _arch_fact = arch_fact_for(_target)
         persona_anchor = persona_anchor + _arch_fact
     except Exception:
         logger.debug("Architecture-fact injection skipped (non-fatal)", exc_info=True)
@@ -490,7 +525,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             # Google's Gemma 4 E4B"), so without the prompt-borne fact any casual
             # turn that touches identity gets it — verified: with it Prime says
             # Qwen3-VL-8B, without it Gemma 4 E4B. Keep it for Prime.
-            if _is_prime_target:
+            if _is_prime_target or asks_about_substrate(
+                    getattr(getattr(packet, 'content', None), 'original_prompt', '') or ''):
                 persona_anchor = persona_anchor + _arch_fact
             _social_block = (
                 "\n\n— This is casual conversation —\n"
