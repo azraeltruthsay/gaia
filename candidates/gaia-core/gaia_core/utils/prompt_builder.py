@@ -315,7 +315,10 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 "- Time questions: respond with the EXACT time shown above.\n"
                 "- Identity questions: you are GAIA, created by Azrael. Core and "
                 "Prime are your fast and deep modes of thought; both are you.\n"
-                + NANO_ARCH_RULE +
+                # Only when asked: always present, the model name leaked into
+                # small talk ("Running clean on Gemma 4 E4B today") — 7n3.
+                + (NANO_ARCH_RULE if asks_about_substrate(
+                    getattr(packet.content, 'original_prompt', '') or '') else "") +
                 "- Simple math: answer directly.\n"
                 "- Anything requiring knowledge, reasoning, or tools: respond with EXACTLY: ESCALATE"
             )},

@@ -50,3 +50,11 @@ def test_arch_fact_matches_the_tier():
     assert "running on the Prime tier" in prompt_builder.arch_fact_for("prime")
     assert "running on the Core tier" in prompt_builder.arch_fact_for("core")
     assert "running on the Core tier" in prompt_builder.arch_fact_for("")
+
+
+def test_nano_fast_prompt_keeps_the_model_out_of_small_talk():
+    # Always present, it leaked: "how are you today, really?" ->
+    # "Running clean on Gemma 4 E4B today".
+    p = CognitionPacket(content=Content(original_prompt="how are you today, really?"),
+                        intent=Intent(user_intent="chat"))
+    assert "Gemma 4 E4B" not in prompt_builder.build_from_packet(p, slim_mode=True)[0]["content"]
