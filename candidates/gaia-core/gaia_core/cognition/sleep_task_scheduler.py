@@ -1277,6 +1277,20 @@ class SleepTaskScheduler:
     def _CORPUS_DIR(self) -> str:
         return str(Path(self.config.KNOWLEDGE_DIR) / "curricula" / "code-architect")
 
+    def _knowledge_path(self, path: str) -> str:
+        """A knowledge-tree path as an absolute one under KNOWLEDGE_DIR.
+
+        bits: detections carry "knowledge/awareness/…" relative paths, and the
+        process cwd is /app — so capability-gap notes were appended to a stray
+        /app/knowledge/ inside the container, lost on recreate, instead of the
+        mounted /knowledge tree."""
+        p = Path(path)
+        if p.is_absolute():
+            return str(p)
+        if p.parts and p.parts[0] == "knowledge":
+            p = Path(*p.parts[1:])
+        return str(Path(self.config.KNOWLEDGE_DIR) / p)
+
     @property
     def _PRIME_MD(self) -> str:
         return str(Path(self.config.SHARED_DIR) / "self_model" / "prime.md")
@@ -1573,7 +1587,8 @@ class SleepTaskScheduler:
                             self._mark_seed_reviewed(detection, "skill_draft_failed")
                         continue
                     try:
-                        awareness_path = file_path or "knowledge/awareness/operational/architecture_facts.md"
+                        awareness_path = self._knowledge_path(
+                            file_path or "knowledge/awareness/operational/architecture_facts.md")
                         current_awareness = ""
                         if os.path.isfile(awareness_path):
                             with open(awareness_path, "r", encoding="utf-8") as f:
