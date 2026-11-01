@@ -128,6 +128,7 @@ class ExternalVoice:
                         session_id=self.session_id,
                         think_tag_char_threshold=int(think_cfg.get("char_threshold", 500)),
                         think_tag_ratio_threshold=float(think_cfg.get("ratio_threshold", 0.90)),
+                        think_tag_max_chars=int(think_cfg.get("max_chars", 8000)),
                     )
             except Exception as _loop_init_exc:
                 try:

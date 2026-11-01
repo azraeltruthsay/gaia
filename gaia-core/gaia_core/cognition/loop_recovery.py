@@ -486,6 +486,17 @@ class LoopInterrupt:
         )
 
 
+def _is_repetitive(text: str, n: int = 6, min_words: int = 40, max_unique: float = 0.6) -> bool:
+    """Whether reasoning text is going round in circles: fewer than
+    `max_unique` of its n-word phrases are distinct. Careful reasoning
+    rarely repeats a 6-word run; a stuck model repeats whole sentences."""
+    words = re.findall(r"\w+", text.lower())
+    if len(words) < min_words:
+        return False
+    grams = [tuple(words[i:i + n]) for i in range(len(words) - n + 1)]
+    return len(set(grams)) / len(grams) < max_unique
+
+
 class LoopDetectorObserver:
     """
     Observer adapter for integration with ExternalVoice streaming.
@@ -510,7 +521,8 @@ class LoopDetectorObserver:
     def __init__(self, manager: Optional[LoopRecoveryManager] = None,
                  session_id: str = "",
                  think_tag_char_threshold: int = 2000,
-                 think_tag_ratio_threshold: float = 0.90):
+                 think_tag_ratio_threshold: float = 0.90,
+                 think_tag_max_chars: int = 8000):
         self.manager = manager or get_recovery_manager(session_id)
         self._token_buffer = ""
         self._last_check_len = 0
@@ -519,6 +531,7 @@ class LoopDetectorObserver:
         # Think-tag circuit breaker config
         self._think_tag_char_threshold = think_tag_char_threshold
         self._think_tag_ratio_threshold = think_tag_ratio_threshold
+        self._think_tag_max_chars = think_tag_max_chars
         self._think_tag_triggered = False
 
         # Phrase loop warn-first tracking
@@ -547,6 +560,7 @@ class LoopDetectorObserver:
         # Walk through the buffer tracking open/close tag state.
         visible_chars = 0
         think_chars = 0
+        think_text = []
         depth = 0  # nesting depth inside think tags
         i = 0
         while i < buf_len:
@@ -567,6 +581,7 @@ class LoopDetectorObserver:
             # Regular character
             if depth > 0:
                 think_chars += 1
+                think_text.append(buf[i])
             else:
                 # Only count non-whitespace as "visible"
                 if not buf[i].isspace():
@@ -580,12 +595,20 @@ class LoopDetectorObserver:
         think_ratio = think_chars / total_content
 
         if think_ratio >= self._think_tag_ratio_threshold and visible_chars < 20:
-            # Model is stuck in think tags — interrupt
+            # krws: "mostly thinking so far" is not a loop. A 488-char,
+            # non-repeating thought 15 chars from closing was aborted here.
+            # Interrupt only when the thought repeats itself, or runs past a
+            # generous budget; otherwise let it finish (the think block is
+            # stripped from the reply downstream).
+            repeating = _is_repetitive("".join(think_text))
+            if not repeating and think_chars < self._think_tag_max_chars:
+                return None
             self._think_tag_triggered = True
             logger.warning(
                 "Think-tag circuit breaker: %d chars in think tags, "
-                "%d visible chars (ratio: %.2f). Interrupting.",
-                think_chars, visible_chars, think_ratio
+                "%d visible chars (ratio: %.2f, %s). Interrupting.",
+                think_chars, visible_chars, think_ratio,
+                "repeating" if repeating else f"over the {self._think_tag_max_chars}-char budget",
             )
             return LoopInterrupt(
                 level="BLOCK",
