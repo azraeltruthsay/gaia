@@ -713,7 +713,8 @@ def recall_answer(question: str) -> Optional[GroundingContext]:
       - asked before but not confirmed (6afh): it's a knowledge question
         her memory hasn't answered yet — search again, memory after.
     """
-    if _about_the_user(question):
+    from gaia_core.utils.prompt_builder import is_check_in
+    if _about_the_user(question) or is_check_in(question):
         logger.debug("KnowledgeRouter: %r is about the user; lookup memory skipped", question[:80])
         return None
     t0 = time.time()

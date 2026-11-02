@@ -2327,6 +2327,15 @@ class AgentCore:
                         # TargetEngine.NANO's own value is "nano" (router.py).
                         selected_model_name = "nano"
                         logger.info("[CASCADE] NeuralRouter: SIMPLE request, staying on Nano")
+                        # Nano's few-shot prompt has no persona anchor and no
+                        # Inner weather, and its exemplars teach "How can I
+                        # help you today?" — so greetings and "how are you"
+                        # never reached the casual prompt built for them (7n3,
+                        # rbc9). Core's prompt carries both.
+                        from gaia_core.utils.prompt_builder import is_social_turn
+                        if is_social_turn(_route.intent, user_input):
+                            selected_model_name = "core"
+                            logger.info("[CASCADE] Social turn — Core's casual prompt instead of Nano's few-shot")
             except Exception:
                 logger.debug("Cascade routing failed; continuing with selected model", exc_info=True)
 
@@ -6146,8 +6155,9 @@ class AgentCore:
         # earlier — ecnc smoke 16); the conversation can. Keep her reply.
         try:
             from gaia_core.cognition.knowledge_router import _about_the_user
-            if _about_the_user(user_input):
-                self.logger.info("Epistemic grounding skipped: the question is about the user")
+            from gaia_core.utils.prompt_builder import is_check_in
+            if _about_the_user(user_input) or is_check_in(user_input):
+                self.logger.info("Epistemic grounding skipped: the question is about the user or her")
                 return initial_response
         except Exception:
             self.logger.debug("about-the-user check failed; grounding as usual", exc_info=True)

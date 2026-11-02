@@ -86,6 +86,30 @@ def asks_about_substrate(text: str) -> bool:
     return bool(_SUBSTRATE_QUESTION_RE.search(t)) and bool(re.search(r"\b(?:you|your|gaia)\b", t, re.IGNORECASE))
 
 
+# "How are you, really?" is a question for her, not for a search: live, it
+# fetched a book of that title and she summarized it. Anchored to the whole
+# message so "How are you able to read files?" stays a real question.
+_CHECK_IN_RE = re.compile(
+    r"^\W*(?:(?:hey|hi|hello|ok|okay|so|and|well)\W+)*(?:gaia\W+)?"
+    r"(?:how\s+are\s+you|how\s+have\s+you\s+been|how\s+do\s+you\s+feel"
+    r"|how(?:'s|\s+is)\s+(?:it\s+going|life|everything|your\s+(?:day|morning|evening|night))"
+    r"|how\s+are\s+things|what\s+have\s+you\s+been\s+up\s+to|what(?:'s|\s+is)\s+new)"
+    r"(?:\W+(?:doing|feeling|today|tonight|lately|now|really|gaia|this\s+(?:morning|afternoon|evening)))*\W*$",
+    re.IGNORECASE)
+
+
+def is_check_in(text: str) -> bool:
+    """Whether a message just asks how she is / what she's been up to."""
+    return bool(_CHECK_IN_RE.match(text or ""))
+
+
+def is_social_turn(intent: str, text: str) -> bool:
+    """A greeting or check-in: the turns that need presence, not tools. Not all
+    of intent 'chat', which covers plenty of factual questions that need search,
+    and not a greeting carrying a question ("Hi, what's the capital of France?")."""
+    return is_check_in(text) or ((intent or "").lower() == "greeting" and "?" not in (text or ""))
+
+
 def arch_fact_for(target: str) -> str:
     """The architecture fact for the tier receiving the prompt ('prime' /
     'cpu_prime' → Prime's, anything else → Core's). It must match the model
@@ -377,6 +401,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # Detect target tier from packet.header.model.name (set by agent_core
     # at model-selection time). Fall back to Core's arch_fact if unknown.
     _arch_fact = ""  # always defined (used again on the casual-anchor swap below)
+    _social_turn = False  # always defined (read again on the compact path below)
     _is_prime_target = False
     try:
         _target = (getattr(getattr(packet.header, "model", None), "name", "") or "").lower()
@@ -537,6 +562,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 "asked how you are, answer in your own voice."
             )
             persona_anchor = persona_anchor + _social_block
+            _social_turn = is_social_turn(
+                _li, getattr(getattr(packet, 'content', None), 'original_prompt', '') or '')
             logger.info("PromptBuilder: tool-free intent '%s' — social mode (lean anchor, skipped capability + system-health blocks)", _li)
         else:
             # World-answerable (e.g. time): the data is already in world_state.
@@ -1111,7 +1138,16 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # Also skip for tiny_context WHEN the unified-skills adapter is active.
     # Without the unified training, the model needs the verbose prompt.
     _use_compact = _tiny_context_early and config.constants.get("USE_META_VERBS", False)
-    if kv_prefix_active or _use_compact:
+    # Core's window is 4096, so every live Core turn lands here — and this branch
+    # dropped persona_anchor, leaving the casual anchor built for small talk (7n3,
+    # rbc9) unused and offering a greeting the tool catalog ("holding an open tool
+    # (search)"). A social turn keeps the anchor and skips the rules + tools.
+    _compact_social = _social_turn and _use_compact and not kv_prefix_active
+    if _compact_social:
+        system_content_parts.append(persona_anchor)
+        if _affect_prompt_lines:
+            system_content_parts.append("\n".join(_affect_prompt_lines))
+    elif kv_prefix_active or _use_compact:
         # Minimal context marker so the model knows its foundation is loaded
         import time as _time
         _current_time = _time.strftime('%Y-%m-%d %H:%M:%S UTC', _time.gmtime())
@@ -1269,7 +1305,9 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
     # For tiny context models, skip ALL verbose directives — the identity
     # bake handles behavioral patterns, and we can't afford 2K of system
     # prompt in a 4K context window.
-    if _tiny_context and not kv_prefix_active:
+    if _compact_social:
+        pass
+    elif _tiny_context and not kv_prefix_active:
         import time as _tc_time
         from datetime import datetime, timezone, timedelta
         try:
@@ -1353,7 +1391,11 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         system_content_parts.append(epistemic_honesty_directive)
 
     # 3.55. Epistemic Drive — behavioral tendency toward knowledge grounding
-    if _small_context:
+    if _compact_social:
+        system_content_parts.append(
+            "LANGUAGE: Always respond in English unless translation is explicitly requested."
+        )
+    elif _small_context:
         epistemic_drive_directive = (
             "BEHAVIOR: Be authentic, not performative. Calibrate confidence to source quality. "
             "When uncertain, use tools to check. Emit THOUGHT_SEED: for knowledge gaps."
@@ -1507,7 +1549,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         system_content_parts.append(goal_context)
 
     # 4. Task Instruction (specific to the current phase, e.g., initial_planning)
-    if task_instruction_content:
+    if task_instruction_content and not (_compact_social and not task_instruction_key):
         system_content_parts.append(task_instruction_content)
 
     # 5. World State (compact) — skip for tiny context and when KV prefix active.
