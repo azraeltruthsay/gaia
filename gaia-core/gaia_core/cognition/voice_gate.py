@@ -73,6 +73,11 @@ _TELL_PATTERNS = [
     # tool_call itself stopped leaking. Distinctive training-scaffold token,
     # never natural conversation — safe as a high-precision literal tell.
     re.compile(r"\bTHOUGHT_SEED\s*:", re.I),
+    # The label and anchor wording of her own casual prompt (croy). The label has
+    # to stay in the prompt: it voices the state far more often than any other
+    # wording tried, and the state should bend the reply without being named.
+    re.compile(r"\b(inner|internal) weather\b", re.I),
+    re.compile(r"\bwarm(,| and) present\b", re.I),
 ]
 
 
