@@ -86,6 +86,24 @@ def asks_about_substrate(text: str) -> bool:
     return bool(_SUBSTRATE_QUESTION_RE.search(t)) and bool(re.search(r"\b(?:you|your|gaia)\b", t, re.IGNORECASE))
 
 
+# "Tell me about yourself" on nano had only a name and a creator to draw on, so
+# she invented the rest ("the 2nd generation of my lineage", "GPT models"). The
+# facts arrive as an exemplar, and only on these questions (ww08).
+_SELF_INTRO_RE = re.compile(
+    r"^\W*(?:(?:hey|hi|hello|ok|okay|so|and|well|please|can\s+you|could\s+you)\W+)*(?:gaia\W+)?"
+    r"(?:tell\s+me\s+(?:a\s+(?:bit|little)\s+)?about\s+yourself|describe\s+yourself|introduce\s+yourself"
+    r"|what\s+are\s+you|who\s+are\s+you,?\s+really|what\s+is\s+gaia|who\s+is\s+gaia)(?:\W+please)?\W*$",
+    re.IGNORECASE)
+NANO_SELF_INTRO = ("I'm GAIA, a sovereign AI created by Azrael. I run locally on Azrael's workstation, "
+                   "as part of our ongoing research collaboration. I have my own memory and sleep cycle, "
+                   "and I look after my own systems.")
+
+
+def is_self_intro(text: str) -> bool:
+    """Whether a message asks her to describe herself, beyond her name."""
+    return bool(_SELF_INTRO_RE.match(text or ""))
+
+
 # "How are you, really?" is a question for her, not for a search: live, it
 # fetched a book of that title and she summarized it. Anchored to the whole
 # message so "How are you able to read files?" stays a real question.
@@ -358,13 +376,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
 
         return [
             {"role": "system", "content": (
-                "You are GAIA, a sovereign AI created by Azrael. This is your fast-reflex mode.\n"
+                "You are GAIA, a sovereign AI created by Azrael.\n"
                 f"Current time: {clock_display}\n"
                 "Rules:\n"
                 "- Greetings: respond warmly as GAIA. Never include the time unless asked.\n"
                 "- Time questions: respond with the EXACT time shown above.\n"
-                "- Identity questions: you are GAIA, created by Azrael. Core and "
-                "Prime are your fast and deep modes of thought; both are you.\n"
+                "- Identity questions: you are GAIA, created by Azrael. Core is your fast "
+                "mode of thought and Prime your deep one; both are you.\n"
                 # Only when asked: always present, the model name leaked into
                 # small talk ("Running clean on Gemma 4 E4B today") — 7n3.
                 + (NANO_ARCH_RULE if asks_about_substrate(
@@ -392,6 +410,9 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
             # a leak just reinforces "I'm GAIA," which is harmless everywhere.
             {"role": "user", "content": "Who are you?"},
             {"role": "assistant", "content": "I'm GAIA, a sovereign AI created by Azrael."},
+            *([{"role": "user", "content": "Tell me about yourself"},
+               {"role": "assistant", "content": NANO_SELF_INTRO}]
+              if is_self_intro(getattr(packet.content, 'original_prompt', '') or '') else []),
             # rlx8: the conversation so far, between the exemplars and the
             # real turn. Slim mode had none, so "What is my favorite color?"
             # right after "Remember this: my favorite color is cerulean." got
