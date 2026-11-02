@@ -935,6 +935,12 @@ def _fast_track_intent_detection(text: str) -> Optional[str]:
     """
     Fast-track intent detection for common conversational patterns.
     """
+    # A check-in is social however the embedder scores it: "what's new?" came
+    # out 'other', got searched, and she answered about a song of that name.
+    from gaia_core.utils.prompt_builder import is_check_in
+    if is_check_in(text):
+        return "greeting"
+
     lowered = (text or "").lower()
 
     # Brainstorming patterns (check BEFORE feedback — "ideas" overlaps)

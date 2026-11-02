@@ -8,7 +8,7 @@ import pytest
 
 from gaia_common.protocols.cognition_packet import CognitionPacket, Content, Intent
 from gaia_core.utils import prompt_builder
-from gaia_core.utils.prompt_builder import is_check_in, is_social_turn
+from gaia_core.utils.prompt_builder import is_check_in, is_social_turn, recent_work_fact
 
 
 @pytest.mark.parametrize("text", [
@@ -72,3 +72,48 @@ def test_asked_substrate_on_a_greeting_turn_keeps_the_fact(monkeypatch):
     _compact_core(monkeypatch)
     s = _system("Hey, what model are you running on", "greeting")
     assert "Gemma 4 E4B" in s
+
+
+_LOG = [{"hash": "a", "date": "2026-11-02T09:00:00-08:00", "subject": "fix(rbc9): greetings reach Core"},
+        {"hash": "b", "date": "2026-11-01T09:00:00-08:00", "subject": "plain subject"},
+        {"hash": "c", "date": "2026-10-01T09:00:00-08:00", "subject": "feat: too old"}]
+
+
+def _now():
+    from datetime import datetime
+    return datetime.fromisoformat("2026-11-02T12:00:00-08:00")
+
+
+def _with_log(monkeypatch, log):
+    from gaia_common.utils import code_evolution
+    monkeypatch.setattr(code_evolution, "recent_git_log", lambda limit=3: log)
+
+
+def test_activity_question_gets_recent_commits(monkeypatch):
+    _with_log(monkeypatch, _LOG)
+    fact = recent_work_fact("What have you been up to?", now=_now())
+    assert "greetings reach Core; plain subject." in fact
+    assert "fix(" not in fact and "too old" not in fact
+
+
+def test_a_quiet_week_is_stated(monkeypatch):
+    _with_log(monkeypatch, _LOG[2:])
+    assert "nothing in the past week" in recent_work_fact("what's new", now=_now())
+
+
+def test_unreadable_log_adds_nothing(monkeypatch):
+    _with_log(monkeypatch, [])
+    assert recent_work_fact("What have you been up to?", now=_now()) == ""
+
+
+@pytest.mark.parametrize("text", ["How are you today?", "Good afternoon",
+                                  "What's new in Python 3.13?"])
+def test_other_turns_get_no_activity_line(monkeypatch, text):
+    _with_log(monkeypatch, _LOG)
+    assert recent_work_fact(text, now=_now()) == ""
+
+
+@pytest.mark.parametrize("text", ["what's new?", "How are you today?", "What have you been up to?"])
+def test_check_ins_fast_track_to_greeting(text):
+    from gaia_core.cognition.nlu.intent_detection import _fast_track_intent_detection
+    assert _fast_track_intent_detection(text) == "greeting"

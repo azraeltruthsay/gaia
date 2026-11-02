@@ -103,6 +103,32 @@ def is_check_in(text: str) -> bool:
     return bool(_CHECK_IN_RE.match(text or ""))
 
 
+# Asked what she's been up to, she has no record to draw on and invents one
+# ("computational biology, quantum mechanics"). Commits are a real record. Only
+# when asked: on every casual turn it would read as a status report (7n3).
+_ACTIVITY_QUESTION_RE = re.compile(r"\bbeen\s+up\s+to\b|\bwhat(?:'s|\s+is)\s+new\b", re.IGNORECASE)
+_COMMIT_PREFIX_RE = re.compile(r"^\w+(?:\([^)]*\))?:\s*")
+
+
+def recent_work_fact(text: str, now=None) -> str:
+    """Declarative line of recent commits for a check-in about her activity; ""
+    for any other message, or when the git log can't be read."""
+    if not (is_check_in(text) and _ACTIVITY_QUESTION_RE.search(text or "")):
+        return ""
+    from datetime import datetime, timedelta
+    from gaia_common.utils.code_evolution import recent_git_log
+    entries = recent_git_log(limit=3)
+    if not entries:
+        return ""
+    now = now or datetime.now().astimezone()
+    recent = [e for e in entries
+              if now - datetime.fromisoformat(e["date"]) <= timedelta(days=7)]
+    if not recent:
+        return "\n\nRecent work on you with Azrael: nothing in the past week."
+    return ("\n\nRecent work on you with Azrael: "
+            + "; ".join(_COMMIT_PREFIX_RE.sub("", e["subject"]) for e in recent) + ".")
+
+
 def is_social_turn(intent: str, text: str) -> bool:
     """A greeting or check-in: the turns that need presence, not tools. Not all
     of intent 'chat', which covers plenty of factual questions that need search,
@@ -561,7 +587,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                 "Be warm, natural, and plain-spoken — genuine over clever. If "
                 "asked how you are, answer in your own voice."
             )
-            persona_anchor = persona_anchor + _social_block
+            persona_anchor = persona_anchor + _social_block + recent_work_fact(
+                getattr(getattr(packet, 'content', None), 'original_prompt', '') or '')
             _social_turn = is_social_turn(
                 _li, getattr(getattr(packet, 'content', None), 'original_prompt', '') or '')
             logger.info("PromptBuilder: tool-free intent '%s' — social mode (lean anchor, skipped capability + system-health blocks)", _li)
