@@ -7640,9 +7640,16 @@ RESULT: COMPLEX (reason: <brief reason>)
         (lesson plan, curriculum, study guide) rather than the work."""
         import urllib.parse
         try:
-            path = urllib.parse.urlparse(url).path.lower()
+            parsed = urllib.parse.urlparse(url)
+            path = parsed.path.lower()
+            host = parsed.netloc.lower()
         except Exception:
             path = (url or "").lower()
+            host = ""
+        # Never the work itself: a whole encyclopedia article got recited as
+        # "The Raven" (yx93).
+        if any(host == d or host.endswith("." + d) for d in ("wikipedia.org", "youtube.com", "youtu.be")):
+            return True
         return any(seg in path for seg in (
             "/lesson-plan", "/lesson_plan", "/teach", "/curriculum",
             "/study-guide", "/study_guide", "/analysis",

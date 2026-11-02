@@ -77,6 +77,13 @@ class TestIsInstructionalUrl:
             "https://example.com/study-guide/the-raven"
         ) is True
 
+    def test_flags_pages_that_are_never_the_work(self):
+        for url in ("https://en.wikipedia.org/wiki/The_Raven", "https://www.youtube.com/watch?v=sOSCuf0gli0"):
+            assert AgentCore._is_instructional_url(url) is True
+
+    def test_allows_wikisource(self):
+        assert AgentCore._is_instructional_url("https://en.wikisource.org/wiki/The_Raven_(Poe)") is False
+
     def test_allows_plain_poem_path(self):
         assert AgentCore._is_instructional_url(
             "https://www.poetryfoundation.org/poems/48860/the-raven"
