@@ -1,10 +1,13 @@
 """Tests for GAIA MCP web_search and web_fetch tools."""
 
+import sys
 import time
+import types
 from unittest.mock import patch, MagicMock
 
 import pytest
 
+from gaia_mcp import web_tools
 from gaia_mcp.web_tools import (
     SourceTrustConfig,
     _RateLimiter,
@@ -264,3 +267,33 @@ class TestHelpers:
         assert _domain_from_url("https://en.wikipedia.org/wiki/Test") == "en.wikipedia.org"
         assert _domain_from_url("https://example.com:8080/path") == "example.com:8080"
         assert _domain_from_url("invalid") == ""
+
+
+class TestAbsoluteResults:
+    """yx93: ddgs's Google results can be relative redirects nothing can fetch."""
+
+    def _ddgs(self, monkeypatch, *batches):
+        calls = iter(batches)
+
+        class FakeDDGS:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def text(self, query, max_results=5):
+                return next(calls)
+
+        fake = types.ModuleType("ddgs")
+        fake.DDGS = FakeDDGS
+        monkeypatch.setitem(sys.modules, "ddgs", fake)
+
+    def test_relative_links_are_dropped(self):
+        rows = [{"href": "/url?opi=89978449&q=CAES"}, {"href": "https://www.gutenberg.org/x"}, {"url": "http://a.org"}, {}]
+        assert web_tools._absolute_results(rows) == rows[1:3]
+
+    def test_asks_again_when_every_link_is_relative(self, monkeypatch):
+        good = {"href": "https://www.gutenberg.org/x"}
+        self._ddgs(monkeypatch, [{"href": "/url?q=a"}], [good])
+        assert web_tools._ddg_search("q", 5) == [good]

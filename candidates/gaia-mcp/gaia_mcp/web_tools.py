@@ -337,16 +337,25 @@ def _patch_ddgs_text_joining() -> None:
         logger.warning("web_search: could not patch ddgs text joining; snippets may have glued words: %s", e)
 
 
+def _absolute_results(results) -> List[dict]:
+    """Only results whose link can actually be fetched."""
+    return [r for r in results if (r.get("href") or r.get("url") or "").startswith(("http://", "https://"))]
+
+
 def _ddg_search(query: str, max_results: int) -> List[dict]:
     """Search DuckDuckGo using the library, falling back to Instant Answer API."""
     # Try ddgs library first (renamed from duckduckgo_search)
     _patch_ddgs_text_joining()
     try:
         from ddgs import DDGS
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-        if results:
-            return results
+        # ddgs picks engines at random; its Google results can be relative
+        # redirects ("/url?opi=...") that nothing can fetch. Ask once more
+        # rather than hand those on (yx93).
+        for _ in range(2):
+            with DDGS() as ddgs:
+                results = _absolute_results(ddgs.text(query, max_results=max_results))
+            if results:
+                return results
     except ImportError:
         logger.info("ddgs library not available, trying duckduckgo_search fallback")
     except Exception as e:

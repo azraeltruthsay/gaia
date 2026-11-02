@@ -650,7 +650,7 @@ def run_test(
             failures.append(detail)
 
     if failures:
-        return (False, "; ".join(failures), duration)
+        return (False, f"{'; '.join(failures)}\n    response: {response_text[:1500]!r}", duration)
 
     return (True, "all checks passed", duration)
 
