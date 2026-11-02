@@ -167,8 +167,8 @@ managed_http_api:
 
     - endpoint: /status
       method: GET
-      response: { mode: str, model_loaded: bool, managed: bool }
-      description: "Operational status"
+      response: { mode: str, model_loaded: bool, managed: bool, vram: "{ allocated_mb, reserved_mb, peak_allocated_mb, peak_reserved_mb, device_used_mb } | null" }
+      description: "Operational status. vram is null off GPU; reserved_mb includes allocator cache and CUDA-graph pools (vram_mb is allocated only); device_used_mb is the whole GPU, every process included (snuy)."
 
   inference_endpoints:
     - endpoint: /v1/chat/completions

@@ -61,12 +61,14 @@ GAIA's GPU lifecycle is a transmission system. States map to "gears":
 | Gear | State | Core | Prime | GPU VRAM |
 |------|-------|------|-------|----------|
 | **P** | PARKED | CPU (GGUF) | Unloaded | ~2.5 GB |
-| **1** | AWAKE | GPU (NF4) | CPU (GGUF) | ~8.8 GB |
-| **1+** | LISTENING | GPU (NF4) + Audio | CPU (GGUF) | ~8.8 GB |
+| **1** | AWAKE | GPU (NF4) | CPU (GGUF) | ~11–12 GB |
+| **1+** | LISTENING | GPU (NF4) + Audio | CPU (GGUF) | ~11–12 GB |
 | **2** | FOCUSING | CPU (GGUF) | GPU (Buffered) | ~4.6 GB |
 | **S** | SLEEP | CPU (GGUF) | Unloaded | ~2.5 GB |
 | **0** | DEEP_SLEEP | Unloaded | Unloaded | ~2.5 GB |
 | **T** | MEDITATION | Unloaded | Unloaded | Study owns GPU |
+
+Gear 1 measured 2026-11-02 on WSL: 10.9 GB loaded, 11.9 GB after the smoke battery (engine `/status` → `vram`).
 
 VRAM figures for P/S/0 corrected 2026-07-02 — measured via `nvidia-smi`, not the
 theoretical "fully offloaded" value. Even with Core/Prime "unloaded" per the
