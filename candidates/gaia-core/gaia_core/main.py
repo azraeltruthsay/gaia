@@ -1018,8 +1018,9 @@ async def update_session_meta(request: Request, session_id: str):
 
 
 @app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str):
-    """Archive and remove a session."""
+async def delete_session(session_id: str, archive: bool = True):
+    """Archive and remove a session. archive=false skips the summary, for
+    throwaway sessions (test probes) that shouldn't enter long-term memory."""
     if _ai_manager is None:
         return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
 
@@ -1030,9 +1031,11 @@ async def delete_session(session_id: str):
     session = sm.sessions[session_id]
 
     # Archive before deletion if there is history
-    if session.history:
+    if archive and session.history:
         try:
-            sm.summarize_and_archive(session_id)
+            # 74t8: this runs LLM calls. On the event loop it starved /health;
+            # ten deletes in a row got gaia-core restarted by the doctor.
+            await asyncio.to_thread(sm.summarize_and_archive, session_id)
         except Exception as e:
             logger.warning("Pre-delete archive failed for %s: %s", session_id, e)
 
