@@ -1,7 +1,7 @@
 """6afh: gaia-mcp's palace tools for answer feedback, pinning, restoring
 and the lifecycle sweep, over a real palace in a temp dir."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -153,3 +153,35 @@ def test_palace_recall_finds_a_work_a_request_names_in_passing(palace):
     tools._palace_store_work_impl({"name": "Numbers", "text": POEM, "sources": [{"url": "a"}, {"url": "b"}]})
     out = tools._palace_recall_impl({"query": "Use your memory palace to recall Numbers and tell me what it is about"})
     assert out["works"] and out["works"][0]["text"] == POEM
+
+
+def test_knowledge_add_keeps_a_told_fact_where_recall_finds_it(palace):
+    fact = "The Raven was first published in the New York Evening Mirror on January 29, 1845."
+    out = tools._knowledge_add_impl({"fact": fact}, None)
+    assert out["ok"] and "not verified" in out["source"]
+    hit = palace.recall("Where was The Raven first published?")["lookups"][0]
+    assert hit["fact"] == fact and hit["source"] == "Told in conversation" and hit["pinned"]
+    assert not palace.lookups.revalidation_candidates()
+
+
+def test_a_short_told_fact_is_kept(palace):
+    assert tools._knowledge_add_impl({"fact": "My favorite color is cerulean."}, None)["ok"]
+
+
+def test_a_fact_arrives_under_whichever_param_she_chose(palace):
+    assert tools._knowledge_add_impl({"query": "The attic lantern is kept in the north attic."}, None)["ok"]
+    assert palace.recall("Where is the attic lantern kept?")["lookups"]
+
+
+def test_knowledge_add_still_takes_a_file_and_says_when_it_has_nothing():
+    indexer = MagicMock()
+    tools._knowledge_add_impl({"file_path": "/knowledge/a.md"}, indexer)
+    indexer.instance.return_value.add_document.assert_called_once_with("/knowledge/a.md")
+    assert tools._knowledge_add_impl({}, None)["ok"] is False
+
+
+@pytest.mark.parametrize("domain,action", [("knowledge", "add"), ("knowledge", "update"), ("knowledge", "add_fact"),
+                                           ("knowledge", "learn"), ("memory", "remember")])
+def test_the_verbs_she_tries_for_a_fact_all_reach_it(domain, action):
+    from gaia_common.utils.domain_tools import validate_domain_call
+    assert validate_domain_call(domain, action) == "add_document"

@@ -102,7 +102,7 @@ DOMAIN_TOOLS: Dict[str, dict] = {
                 "maps_to": "memory_query",
             },
             "add": {
-                "params": {"knowledge_base_name": "string", "file_path": "string"},
+                "params": {"fact": "string?", "file_path": "string?", "knowledge_base_name": "string?"},
                 "maps_to": "add_document",
             },
             "index": {
@@ -443,6 +443,19 @@ def _build_mappings():
         ("study", "unload"): ("study", "adapter_unload"),
         ("study", "info"): ("study", "adapter_info"),
         ("study", "list"): ("study", "adapter_list"),
+        # A fact she was told: every verb she has tried for it (1zbx)
+        ("knowledge", "update"): ("knowledge", "add"),
+        ("knowledge", "add_fact"): ("knowledge", "add"),
+        ("knowledge", "learn"): ("knowledge", "add"),
+        ("knowledge", "remember"): ("knowledge", "add"),
+        ("knowledge", "save"): ("knowledge", "add"),
+        ("knowledge", "store"): ("knowledge", "add"),
+        ("memory", "update"): ("knowledge", "add"),
+        ("memory", "add_fact"): ("knowledge", "add"),
+        ("memory", "learn"): ("knowledge", "add"),
+        ("memory", "remember"): ("knowledge", "add"),
+        ("memory", "save"): ("knowledge", "add"),
+        ("memory", "store"): ("knowledge", "add"),
         # palace lookups (prip): verbs she reaches for when remembering
         # what she looked up (76hb live: she tried "recall" unprompted)
         ("knowledge", "recall"): ("palace", "lookups"),

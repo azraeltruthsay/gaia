@@ -56,7 +56,17 @@ from gaia_common.protocols.cognition_packet import (
     OutputDestination, OutputRouting, DestinationTarget,
 )
 from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detect_fragmentation_request, _has_named_work_signal
-from gaia_core.cognition.reply_scrub import own_words
+from gaia_common.utils.tool_call_parser import tool_answer_messages
+from gaia_core.cognition.reply_scrub import claims_success, honest_about_failure, own_words
+from gaia_core.cognition.told_facts import (
+    MIN_MATCH,
+    TOLD_SOURCE,
+    is_question,
+    recall_query,
+    speaks_to,
+    told_fact,
+    told_facts_in,
+)
 from gaia_common.utils.work_memory import asks_for_the_words, best_agreement, excerpt, requested_part, work_name
 # o9dh/saq3: aliased -- this is a DIFFERENT enum from cognition_packet's
 # TargetEngine (different members: NANO/CORE/PRIME here vs PRIME/CORE/LITE/
@@ -1443,6 +1453,22 @@ class AgentCore:
                     return
         except Exception:
             logger.debug("Pending-write approval check failed, continuing", exc_info=True)
+
+        # Facts she was told, kept and recalled. Ahead of research and the
+        # old save-to-file route, which get these turns otherwise (1zbx).
+        try:
+            _palace_reply = self._told_fact_reply(user_input, session_id)
+            if _palace_reply:
+                if not _user_msg_persisted:
+                    self.session_manager.add_message(session_id, "user", user_input)
+                    self._emit_timeline_message(session_id, "user", source)
+                    _user_msg_persisted = True
+                yield {"type": "token", "value": _palace_reply}
+                yield {"type": "flush"}
+                self.session_manager.add_message(session_id, "assistant", _palace_reply)
+                return
+        except Exception:
+            logger.warning("Told-fact check failed, continuing", exc_info=True)
 
         # Research orchestration — "research X", "look into X", etc. fan out
         # across all KBs + web search and synthesize a brief in a single turn.
@@ -7628,6 +7654,53 @@ RESULT: COMPLEX (reason: <brief reason>)
         title = document.get("title") or "the requested text"
         body = (document.get("content") or "").strip()
         return f"Here is **{title}**:\n\n{excerpt(body, requested_part(user_input)) or body}"
+
+    def _told_fact_reply(self, user_input: str, session_id: str) -> Optional[str]:
+        """Her reply when this turn keeps a fact she was told or asks for one;
+        None when it does neither. Her words stand if they match what really
+        happened; otherwise the plain result does."""
+        fact = told_fact(user_input)
+        if fact:
+            label, ok, result = "knowledge(add)", *self._palace_call("add_document", {"fact": fact})
+            text = f"Saved: {fact}" if ok else f"Failed: {result.get('error', 'it could not be saved')}"
+            plain = text
+            fits = claims_success
+        elif is_question(user_input):
+            topic = recall_query(user_input)
+            if topic != user_input and self._palace_call("palace_recall_work", {"query": topic, "mentioned": True})[1].get("found"):
+                return None  # she knows the work itself, not just what she was told of it
+            _ok, result = self._palace_call("palace_recall_lookup", {"query": topic, "min_score": MIN_MATCH})
+            hits = told_facts_in(result.get("results"), user_input)
+            if not hits:
+                return None
+            label, ok = "palace(recall)", True
+            text = "\n".join(f"- {h['snippet']} ({TOLD_SOURCE.lower()}, not verified)" for h in hits)
+            plain = f"I was told: {hits[0]['snippet']}"
+            fits = lambda said: speaks_to(said, user_input, hits[0]["snippet"])
+        else:
+            return None
+        self.logger.info("Told facts: %s -> %s", label, "ok" if ok else "failed")
+        events = self.generate_continuation(
+            messages=tool_answer_messages(user_input, label, text), session_id=session_id,
+            max_tokens=120, temperature=0.5)
+        if not ok:
+            events = honest_about_failure(events, label)
+            fits = bool
+        reply = "".join(e.get("value", "") for e in events if isinstance(e, dict) and e.get("type") == "token").strip()
+        return reply if fits(reply) else plain
+
+    def _palace_call(self, method: str, params: dict) -> tuple:
+        try:
+            resp = mcp_client.call_jsonrpc(method, params)
+        except Exception as e:
+            self.logger.warning("Told facts: %s failed: %s", method, e)
+            return False, {"error": "the palace could not be reached"}
+        payload = resp.get("response", resp) if isinstance(resp, dict) else {}
+        if isinstance(payload, dict) and "result" in payload:
+            payload = payload["result"]
+        if not isinstance(payload, dict):
+            return False, {"error": "the palace gave no answer"}
+        return bool(resp.get("ok")) and payload.get("ok") is not False, payload
 
     def _after_reading(self, user_input: str, reply: str, document: Dict[str, str], session_id: str) -> str:
         """She reads what she is about to say and responds to it, so the words

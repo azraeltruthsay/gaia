@@ -412,14 +412,14 @@ TOOLS = {
         }
     },
     "add_document": {
-        "description": "Adds a new document to a knowledge base.",
+        "description": "Adds a fact you were told, or a document to a knowledge base.",
         "params": {
             "type": "object",
             "properties": {
+                "fact": {"type": "string", "description": "A fact you were told, to keep."},
                 "knowledge_base_name": {"type": "string", "description": "The name of the knowledge base to add the document to."},
                 "file_path": {"type": "string", "description": "The path to the document to add."}
-            },
-            "required": ["knowledge_base_name", "file_path"]
+            }
         }
     },
     # --- Web Research Tools ---

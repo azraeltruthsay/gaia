@@ -249,8 +249,8 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         # with "Knowledge base 'None' not found in configuration." (GAIA_Project-pfdw).
         "embed_documents": lambda p: VectorIndexer.instance(p.get("knowledge_base_name") or "system").add_document(p.get("file_path")) if p.get("file_path") else VectorIndexer.instance(p.get("knowledge_base_name") or "system").build_index_from_docs(),
         "query_knowledge": lambda p: VectorIndexer.instance(p.get("knowledge_base_name") or "system").query(p.get("query"), top_k=p.get("top_k", 5)),
-        "add_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name") or "system").add_document(p.get("file_path")),
-        "index_document": lambda p: VectorIndexer.instance(p.get("knowledge_base_name") or "system").add_document(p.get("file_path")),
+        "add_document": lambda p: _knowledge_add_impl(p, VectorIndexer),
+        "index_document": lambda p: _knowledge_add_impl(p, VectorIndexer),
         # Knowledge Graph (temporal triple store)
         "kg_query": lambda p: _kg_query_impl(p),
         "kg_add": lambda p: _kg_add_impl(p),
@@ -1155,6 +1155,27 @@ def _palace_recall_impl(params: dict) -> dict:
     top_k = int(params.get("top_k", 5))
     return palace.recall(query, top_k=top_k, include_archive=bool(params.get("include_archive")),
                          include_lookups=params.get("include_lookups", True) is not False)
+
+
+_FACT_PARAMS = ("fact", "query", "text", "content", "statement", "information", "info", "data", "value", "note")
+
+
+def _knowledge_add_impl(params: dict, indexer) -> dict:
+    """Add to what she knows: a file to a knowledge base, or a fact she was
+    told. The params are the ones she reaches for: knowledge(add, fact=...)
+    failed 15 times before it existed. A told fact is pinned, since nothing
+    can look it up again, and its source says it was told, not verified."""
+    if params.get("file_path"):
+        return indexer.instance(params.get("knowledge_base_name") or "system").add_document(params["file_path"])
+    fact = next((str(params[k]).strip() for k in _FACT_PARAMS if params.get(k)), "")
+    if not fact:
+        return {"ok": False, "error": "Nothing to add: give the fact, or a file_path."}
+    lookups = _get_palace().lookups
+    ids = lookups.remember(fact, [{"snippet": fact, "title": "Told in conversation", "trust_tier": "told"}], kind="told")
+    if not ids:
+        return {"ok": False, "error": "That's too short to keep as a fact."}
+    lookups.pin(ids)
+    return {"ok": True, "saved": fact, "source": "told in conversation, not verified", "id": ids[0]}
 
 
 def _palace_store_work_impl(params: dict) -> dict:

@@ -52,6 +52,7 @@ logger = logging.getLogger("GAIA.LookupMemory")
 
 # Snippets shorter than this carry no answer worth remembering.
 MIN_SNIPPET_CHARS = 40
+MIN_TOLD_CHARS = 8
 # Page fetches are long; keep the opening, which is what grounding shows.
 MAX_SNIPPET_CHARS = 1500
 MAX_QUERIES_PER_RECORD = 10
@@ -333,7 +334,8 @@ class LookupMemory:
             if not isinstance(r, dict):
                 continue
             snippet = (r.get("snippet") or r.get("content") or "").strip()[:MAX_SNIPPET_CHARS]
-            if len(snippet) < MIN_SNIPPET_CHARS:
+            # A web scrap that short is noise; a fact she was told isn't.
+            if len(snippet) < (MIN_TOLD_CHARS if kind == "told" else MIN_SNIPPET_CHARS):
                 continue
             url = (r.get("url") or "").strip()
             rid = self._record_id(url, snippet)
@@ -356,7 +358,10 @@ class LookupMemory:
             if query and query not in rec["queries"]:
                 rec["queries"] = (rec["queries"] + [query])[-MAX_QUERIES_PER_RECORD:]
             rec["retrieved_at"] = _iso(now)
-            rec["revalidate_after"] = _iso(now + timedelta(days=days))
+            # A told fact has no page to go stale against, and a fresh search
+            # isn't what could correct it.
+            if kind != "told":
+                rec["revalidate_after"] = _iso(now + timedelta(days=days))
             rec.pop("disputed_at", None)
             rec.pop("archived_at", None)       # back in everyday recall
             rec.pop("archived_reason", None)
