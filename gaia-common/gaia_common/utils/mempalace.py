@@ -386,7 +386,7 @@ class MemPalace:
     # ── Recall ───────────────────────────────────────────────────────────
 
     def recall(self, query: str, top_k: int = 5, include_archive: bool = False,
-               include_lookups: bool = True) -> dict:
+               include_lookups: bool = True, asker: str = "") -> dict:
         """Semantic recall with KG enrichment.
 
         1. Search stored memories for query matches (text search across AAAK
@@ -469,7 +469,7 @@ class MemPalace:
         # include_lookups=False, so one question isn't counted twice.)
         try:
             lookups = [compact_lookup(h) for h in self.lookups.recall(
-                query, top_k=top_k, include_archive=include_archive)] if include_lookups else []
+                query, top_k=top_k, include_archive=include_archive, asker=asker)] if include_lookups else []
         except Exception as e:
             logger.warning("MemPalace: lookup recall failed for %r: %s", query[:80], e)
             lookups = []

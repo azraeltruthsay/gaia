@@ -1154,6 +1154,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                     metadata = {
                         "channel_id": routing.primary.channel_id,
                         "user_id": routing.primary.user_id,
+                        "author_name": (routing.primary.metadata or {}).get("author_name"),
                         "reply_to_message_id": routing.primary.reply_to_message_id,
                         "is_dm": routing.primary.metadata.get("is_dm", False) if routing.primary.metadata else False,
                     }
@@ -1739,6 +1740,12 @@ async def process_packet(packet_data: Dict[str, Any]):
                             tool_params = dict(tc.tool_params or {})
                             if not _is_meta and tc.tool_action:
                                 tool_params["action"] = tc.tool_action
+                            # Who's talking comes from the transport, whatever she wrote.
+                            if tc.tool_name in ("knowledge", "memory", "palace"):
+                                from gaia_core.cognition.told_facts import speaker
+                                _who = speaker(source, session_id, metadata)
+                                tool_params["_asker"] = _who["id"]
+                                tool_params["_told_by"] = {**_who, "why": "she chose to keep it"}
                             rpc_result = await loop.run_in_executor(None, lambda: call_jsonrpc(
                                 method=tc.tool_name,
                                 params=tool_params,

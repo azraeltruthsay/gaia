@@ -19,6 +19,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from gaia_common.utils.lookup_memory import provenance_note
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("GAIA.KnowledgeRouter")
@@ -301,7 +302,8 @@ def _query_lookup_memory(query: str, top_k: int = 3,
             results.append(GroundingResult(
                 source="memory",
                 trust_tier="remembered",
-                content=hit["snippet"],
+                # A told fact says so wherever it's read: anyone can tell her anything.
+                content=f"{hit['snippet']} ({provenance_note(hit)})" if hit.get("told_by") else hit["snippet"],
                 url=hit.get("url", ""),
                 query=query,
                 title=hit.get("title") or hit.get("domain") or "",

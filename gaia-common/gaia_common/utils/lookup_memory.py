@@ -47,12 +47,14 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger("GAIA.LookupMemory")
 
 # Snippets shorter than this carry no answer worth remembering.
 MIN_SNIPPET_CHARS = 40
 MIN_TOLD_CHARS = 8
+MAX_TELLERS = 20
 # Page fetches are long; keep the opening, which is what grounding shows.
 MAX_SNIPPET_CHARS = 1500
 MAX_QUERIES_PER_RECORD = 10
@@ -235,6 +237,62 @@ def _days_since(ts: Optional[str], now: datetime) -> Optional[float]:
     return (now - dt).total_seconds() / 86400 if dt else None
 
 
+# How much a memory can be leaned on, lowest first. Worked out from the evidence
+# each time, so every record has a level without a migration, and a level can
+# never claim more than the record shows.
+TRUST_LEVELS = ("disputed", "told", "told_by_several", "looked_up", "corroborated", "validated")
+
+
+def _site(url: str) -> str:
+    host = urlparse(url or "").netloc.lower().split(":")[0]
+    return ".".join(host.split(".")[-2:]) if host else ""
+
+
+def _distinct_tellers(rec: dict) -> set:
+    """Who told her, as far as can be known: conversations without a real
+    identity may all be one person, so together they count once."""
+    return {t["id"] if str(t.get("id", "")).partition(":")[0] not in ("", "session") else "someone"
+            for t in rec.get("told_by") or []}
+
+
+def trust_level(rec: dict) -> str:
+    """Disputed beats everything: a challenge stands until something answers it."""
+    if rec.get("disputed_at"):
+        return "disputed"
+    if rec.get("validated"):
+        return "validated"
+    sites = {_site(u) for u in [rec.get("url", "")] + list(rec.get("also_at") or [])} - {""}
+    if len(sites) >= 2:
+        return "corroborated"
+    if sites:
+        return "looked_up"
+    return "told_by_several" if len(_distinct_tellers(rec)) >= 2 else "told"
+
+
+def provenance_note(rec: dict) -> str:
+    """Where a told fact came from, as she reads it: who, when, where, and
+    whether anyone has checked it."""
+    tellers = rec.get("told_by") or []
+    if tellers:
+        first = tellers[0]
+        note = f"told by {first.get('who') or 'someone'}"
+        if first.get("when"):
+            note += f" on {first['when'][:10]}"
+        if first.get("where"):
+            note += f", {first['where']}"
+        others = len(_distinct_tellers(rec)) - 1
+        if others > 0:
+            note += f", and by {others} other{'s' if others > 1 else ''}"
+    else:
+        note = rec.get("title") or rec.get("domain") or "source not recorded"
+    level = trust_level(rec)
+    if level == "validated":
+        return f"{note}; checked by {rec['validated'].get('by', 'someone')}"
+    if level == "disputed":
+        return f"{note}; disputed"
+    return f"{note}; not independently checked" if tellers or rec.get("kind") == "told" else note
+
+
 def compact_lookup(rec: dict) -> dict:
     """A record as GAIA reads it when she rummages: the fact, where it came
     from and how much to trust it — not the bookkeeping."""
@@ -255,7 +313,20 @@ def compact_lookup(rec: dict) -> dict:
         out["answered_well"] = rec["times_confirmed"]
     if rec.get("also_at"):
         out["also_at"] = rec["also_at"]
+    out["trust"] = trust_level(rec)
+    if rec.get("told_by"):
+        out["told_by"] = rec["told_by"]
+        out["source"] = provenance_note(rec)
+    if rec.get("validated"):
+        out["validated"] = rec["validated"]
     return out
+
+
+def _may_see(rec: dict, asker: str) -> bool:
+    """"My favorite color" belongs to whoever said it: it answers only them."""
+    if not rec.get("about_teller"):
+        return True
+    return bool(asker) and asker in {t.get("id") for t in rec.get("told_by") or []}
 
 
 class LookupMemory:
@@ -355,6 +426,12 @@ class LookupMemory:
                     "times_recalled": 0,
                     "last_recalled_at": None,
                 }
+            teller = r.get("told_by")
+            if teller:
+                known = {t.get("id") or t.get("who") for t in rec.get("told_by") or []}
+                if (teller.get("id") or teller.get("who")) not in known:
+                    rec["told_by"] = ((rec.get("told_by") or []) + [teller])[-MAX_TELLERS:]
+                rec["about_teller"] = rec.get("about_teller") or bool(r.get("about_teller"))
             if query and query not in rec["queries"]:
                 rec["queries"] = (rec["queries"] + [query])[-MAX_QUERIES_PER_RECORD:]
             rec["retrieved_at"] = _iso(now)
@@ -362,7 +439,7 @@ class LookupMemory:
             # isn't what could correct it.
             if kind != "told":
                 rec["revalidate_after"] = _iso(now + timedelta(days=days))
-            rec.pop("disputed_at", None)
+                rec.pop("disputed_at", None)   # the web just corroborated it; a retelling doesn't
             rec.pop("archived_at", None)       # back in everyday recall
             rec.pop("archived_reason", None)
             try:
@@ -392,6 +469,18 @@ class LookupMemory:
             except OSError as e:
                 logger.warning("LookupMemory: could not %s %s: %s", what, rid, e)
         return n
+
+    def validate(self, ids: Iterable[str], by: str, how: str = "", evidence: str = "",
+                 now: Optional[datetime] = None) -> int:
+        """Record that someone or something checked these against a source
+        other than the one that gave them. Clears a dispute: it was answered."""
+        stamp = _iso(now or _now())
+
+        def change(rec):
+            rec["validated"] = {"by": by, "how": how, "evidence": evidence, "when": stamp}
+            rec.pop("disputed_at", None)
+
+        return self._update(ids, change, "validate")
 
     def mark_disputed(self, ids: Iterable[str], now: Optional[datetime] = None) -> int:
         """Flag records as needing revalidation (e.g. the user pushed back on
@@ -540,7 +629,7 @@ class LookupMemory:
 
     def recall(self, query: str, top_k: int = 3, min_score: float = 0.34,
                now: Optional[datetime] = None, touch: bool = True,
-               include_archive: bool = False) -> List[dict]:
+               include_archive: bool = False, asker: str = "") -> List[dict]:
         """Remembered lookups relevant to `query`, best first.
 
         The record's own title + snippet must cover at least `min_score` of
@@ -560,6 +649,8 @@ class LookupMemory:
             return []
         scored = []
         for path, rec, archived in self._records(include_archive):
+            if not _may_see(rec, asker):
+                continue
             text_terms = content_terms(f"{rec.get('title', '')} {rec.get('snippet', '')}")
             text_hit = terms & text_terms
             text_score = len(text_hit) / len(terms)
@@ -602,11 +693,11 @@ class LookupMemory:
                         ", from archive" if hits[0]["archived"] else "")
         return hits
 
-    def recent(self, limit: int = 10, include_archive: bool = False) -> List[dict]:
+    def recent(self, limit: int = 10, include_archive: bool = False, asker: str = "") -> List[dict]:
         """Browse: the most recently used lookups (retrieved, recalled or
         confirmed), for rummaging without a particular query in mind."""
         recs = [{**rec, "archived": archived}
-                for _p, rec, archived in self._records(include_archive)]
+                for _p, rec, archived in self._records(include_archive) if _may_see(rec, asker)]
         recs.sort(key=lambda r: max(r.get(k) or "" for k in (
             "retrieved_at", "last_recalled_at", "last_confirmed_at")), reverse=True)
         return recs[:limit]
@@ -714,6 +805,9 @@ class LookupMemory:
         if keep.get("disputed_at") and keep["disputed_at"] < keep.get("retrieved_at", ""):
             keep.pop("disputed_at")
         if dup.get("url") and dup["url"] != keep.get("url"):
+            for teller in dup.get("told_by") or []:
+                if teller not in keep.setdefault("told_by", []):
+                    keep["told_by"].append(teller)
             also = keep.setdefault("also_at", [])
             for u in [dup["url"]] + dup.get("also_at", []):
                 if u not in also and u != keep.get("url"):

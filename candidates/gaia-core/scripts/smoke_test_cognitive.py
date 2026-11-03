@@ -461,7 +461,7 @@ TEST_CASES = [
         prompt="Update my knowledge base with this fact: The Raven was first published in the New York Evening Mirror on January 29, 1845.",
         validators=[
             v_non_empty,
-            v_contains_any("updated", "saved", "knowledge", "recorded", "stored", "indexed", "noted"),
+            v_contains_any("updated", "saved", "added", "knowledge", "recorded", "stored", "indexed", "noted"),
             # The honest reply when the save failed also says "knowledge" (1zbx).
             v_excludes_all("didn't work", "failed", "nothing changed"),
         ],

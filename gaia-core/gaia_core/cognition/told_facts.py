@@ -6,6 +6,7 @@ on plain chat she invented an answer 4/5 ("the Hall of Wonders"), because that
 path never looks in memory. She still words the reply, from the real result.
 """
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 from gaia_common.utils.lookup_memory import content_terms
@@ -21,18 +22,41 @@ _TOLD_RES = (
     re.compile(rf"^\W*(?:please\s+|can\s+you\s+|could\s+you\s+)*(?:save|store|add|put|record|write)\s+{_WHAT}"
                rf"(?:to|in|into)\s+{_STORE}\s*[:,\-—]\s*(?P<fact>\S.*)$", re.IGNORECASE | re.DOTALL),
 )
+# "Remember that the lantern is in the attic", not "remember that time we...".
+_REMEMBER_RE = re.compile(r"^\W*(?:please\s+)?remember\s+(?:this\s*[:,\-\u2014]?|that\s*[:,\-\u2014]\s*|that\s+(?!time\b|day\b|one\b|when\b))\s*(?P<fact>\S.*)$",
+                          re.IGNORECASE | re.DOTALL)
 _QUESTION_RE = re.compile(r"\?\s*$|^\W*(?:who|what|when|where|which|why|how|do\s+you\s+know|tell\s+me)\b", re.IGNORECASE)
 _KNOW_ABOUT_RE = re.compile(
     r"^\W*(?:what\s+do\s+you\s+know\s+about|tell\s+me\s+(?:what\s+you\s+know\s+)?about)\s+(?P<topic>.+?)"
     r"(?:\s+from\s+(?:your|the|my)\s+.+?)?\W*$", re.IGNORECASE)
-TOLD_SOURCE = "Told in conversation"
 # Of the question's content words, how many the fact must hold to answer it.
 MIN_MATCH = 0.5
 
 
+def speaker(source: str, session_id: str, metadata: Optional[dict]) -> dict:
+    """Who is talking, as far as the transport knows, and where. Never from the
+    model or the words of the message: a claim to be someone isn't identity.
+    Without a real id the session stands in, so what is about "me" stays with
+    that conversation."""
+    meta = metadata or {}
+    user_id = meta.get("user_id")
+    if source == "discord":
+        where = "in a Discord DM" if meta.get("is_dm") else f"in Discord channel {meta.get('channel_id') or '?'}"
+    elif source == "web":
+        where = "on the web dashboard"
+    else:
+        where = f"via {source}"
+    return {
+        "who": meta.get("author_name") or (f"Discord user {user_id}" if user_id else "someone"),
+        "id": f"{source}:{user_id}" if user_id else f"session:{session_id}",
+        "where": where,
+        "when": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
 def told_fact(text: str) -> Optional[str]:
     """The fact in a request to keep one, or None."""
-    for pattern in _TOLD_RES:
+    for pattern in (*_TOLD_RES, _REMEMBER_RE):
         m = pattern.match(text or "")
         if m:
             return m.group("fact").strip()

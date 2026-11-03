@@ -158,9 +158,10 @@ def test_palace_recall_finds_a_work_a_request_names_in_passing(palace):
 def test_knowledge_add_keeps_a_told_fact_where_recall_finds_it(palace):
     fact = "The Raven was first published in the New York Evening Mirror on January 29, 1845."
     out = tools._knowledge_add_impl({"fact": fact}, None)
-    assert out["ok"] and "not verified" in out["source"]
+    assert out["ok"] and out["trust"] == "told"
     hit = palace.recall("Where was The Raven first published?")["lookups"][0]
-    assert hit["fact"] == fact and hit["source"] == "Told in conversation" and hit["pinned"]
+    assert hit["fact"] == fact and hit["trust"] == "told" and hit["pinned"]
+    assert "not independently checked" in hit["source"]
     assert not palace.lookups.revalidation_candidates()
 
 
@@ -185,3 +186,63 @@ def test_knowledge_add_still_takes_a_file_and_says_when_it_has_nothing():
 def test_the_verbs_she_tries_for_a_fact_all_reach_it(domain, action):
     from gaia_common.utils.domain_tools import validate_domain_call
     assert validate_domain_call(domain, action) == "add_document"
+
+
+AZ = {"who": "Azrael", "id": "discord:1", "where": "in a Discord DM", "when": "2026-11-03T10:00:00+00:00",
+      "why": "asked me to keep it"}
+BO = {**AZ, "who": "Bo", "id": "discord:2"}
+LANTERN = "The north lantern is kept in the attic."
+
+
+def test_a_told_fact_records_who_when_where_why(palace):
+    tools._knowledge_add_impl({"fact": LANTERN, "_told_by": AZ}, None)
+    hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
+    assert hit["told_by"] == [AZ]
+    assert hit["source"].startswith("told by Azrael on 2026-11-03, in a Discord DM")
+
+
+def test_a_second_person_raises_the_level_but_validates_nothing(palace):
+    tools._knowledge_add_impl({"fact": LANTERN, "_told_by": AZ}, None)
+    tools._knowledge_add_impl({"fact": LANTERN, "_told_by": AZ}, None)
+    hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
+    assert hit["trust"] == "told" and len(hit["told_by"]) == 1
+    tools._knowledge_add_impl({"fact": LANTERN, "_told_by": BO}, None)
+    hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
+    assert hit["trust"] == "told_by_several" and "and by 1 other" in hit["source"]
+    assert "not independently checked" in hit["source"]
+
+
+def test_validation_needs_evidence_and_answers_a_dispute(palace):
+    rid = tools._knowledge_add_impl({"fact": LANTERN, "_told_by": AZ}, None)["id"]
+    assert not tools._palace_validate_lookup_impl({"id": rid})["ok"]
+    palace.lookups.mark_disputed([rid])
+    assert palace.recall("Where is the north lantern kept?")["lookups"][0]["trust"] == "disputed"
+    tools._knowledge_add_impl({"fact": LANTERN, "_told_by": BO}, None)
+    assert palace.recall("Where is the north lantern kept?")["lookups"][0]["trust"] == "disputed"
+    assert tools._palace_validate_lookup_impl({"id": rid, "evidence": "seen in the attic", "by": "Azrael"})["ok"]
+    hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
+    assert hit["trust"] == "validated" and "checked by Azrael" in hit["source"]
+
+
+def test_what_is_about_the_teller_answers_only_the_teller(palace):
+    tools._knowledge_add_impl({"fact": "My favorite color is cerulean.", "_told_by": AZ}, None)
+    q = "What is my favorite color?"
+    assert palace.lookups.recall(q, asker="discord:1")
+    assert not palace.lookups.recall(q, asker="discord:2")
+    assert not palace.lookups.recall(q)
+    assert not palace.lookups.recent(asker="discord:2")
+    assert palace.recall(q, asker="discord:1")["lookups"]
+    assert not palace.recall(q)["lookups"]
+
+
+def test_web_lookups_get_a_level_from_their_evidence(palace):
+    from gaia_common.utils.lookup_memory import trust_level
+    assert trust_level({"url": "https://a.org/x"}) == "looked_up"
+    assert trust_level({"url": "https://a.org/x", "also_at": ["https://www.a.org/y"]}) == "looked_up"
+    assert trust_level({"url": "https://a.org/x", "also_at": ["https://b.org/y"]}) == "corroborated"
+
+
+def test_conversations_without_an_identity_count_as_one_teller(palace):
+    for sid in ("session:a", "session:b"):
+        tools._knowledge_add_impl({"fact": LANTERN, "_told_by": {"who": "someone", "id": sid}}, None)
+    assert palace.recall("Where is the north lantern kept?")["lookups"][0]["trust"] == "told"

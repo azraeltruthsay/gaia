@@ -4,6 +4,7 @@ GAIA MCP Tools - Tool Dispatcher and Implementations.
 
 import asyncio
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -320,6 +321,7 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         # 0vuz: lookup memory — what GAIA has looked up, with provenance
         "palace_store_lookup": lambda p: _palace_store_lookup_impl(p),
         "palace_recall_lookup": lambda p: _palace_recall_lookup_impl(p),
+        "palace_validate_lookup": lambda p: _palace_validate_lookup_impl(p),
         # yx93: work memory — whole texts she knows word for word
         "palace_store_work": lambda p: _palace_store_work_impl(p),
         "palace_recall_work": lambda p: _palace_recall_work_impl(p),
@@ -1154,28 +1156,47 @@ def _palace_recall_impl(params: dict) -> dict:
         return out
     top_k = int(params.get("top_k", 5))
     return palace.recall(query, top_k=top_k, include_archive=bool(params.get("include_archive")),
-                         include_lookups=params.get("include_lookups", True) is not False)
+                         include_lookups=params.get("include_lookups", True) is not False,
+                         asker=str(params.get("_asker") or ""))
 
 
 _FACT_PARAMS = ("fact", "query", "text", "content", "statement", "information", "info", "data", "value", "note")
+_ABOUT_TELLER_RE = re.compile(r"\b(?:my|mine|i|i'm|i've|me|our|ours|we)\b", re.IGNORECASE)
 
 
 def _knowledge_add_impl(params: dict, indexer) -> dict:
     """Add to what she knows: a file to a knowledge base, or a fact she was
     told. The params are the ones she reaches for: knowledge(add, fact=...)
-    failed 15 times before it existed. A told fact is pinned, since nothing
-    can look it up again, and its source says it was told, not verified."""
+    failed 15 times before it existed. A told fact keeps who said it, when,
+    where and why (`_told_by`, set by gaia-core, never by the model), and stays
+    "told" until something independent checks it. One about the teller answers
+    only the teller."""
     if params.get("file_path"):
         return indexer.instance(params.get("knowledge_base_name") or "system").add_document(params["file_path"])
     fact = next((str(params[k]).strip() for k in _FACT_PARAMS if params.get(k)), "")
     if not fact:
         return {"ok": False, "error": "Nothing to add: give the fact, or a file_path."}
+    teller = params.get("_told_by") if isinstance(params.get("_told_by"), dict) else {"who": "someone"}
     lookups = _get_palace().lookups
-    ids = lookups.remember(fact, [{"snippet": fact, "title": "Told in conversation", "trust_tier": "told"}], kind="told")
+    ids = lookups.remember(fact, [{"snippet": fact, "title": f"Told by {teller.get('who') or 'someone'}",
+                                   "trust_tier": "told", "told_by": teller,
+                                   "about_teller": bool(_ABOUT_TELLER_RE.search(fact))}], kind="told")
     if not ids:
         return {"ok": False, "error": "That's too short to keep as a fact."}
     lookups.pin(ids)
-    return {"ok": True, "saved": fact, "source": "told in conversation, not verified", "id": ids[0]}
+    return {"ok": True, "saved": fact, "trust": "told", "id": ids[0]}
+
+
+def _palace_validate_lookup_impl(params: dict) -> dict:
+    """Record that a memory was checked against something other than the source
+    that gave it. The evidence is required: a level with nothing behind it
+    would be worse than none."""
+    rid, evidence = params.get("id"), params.get("evidence")
+    if not rid or not evidence:
+        return {"ok": False, "error": "id and evidence are required"}
+    n = _get_palace().lookups.validate([str(rid)], by=str(params.get("by") or "GAIA"),
+                                       how=str(params.get("how") or ""), evidence=str(evidence))
+    return {"ok": bool(n), "validated": n}
 
 
 def _palace_store_work_impl(params: dict) -> dict:
@@ -1232,6 +1253,7 @@ def _palace_recall_lookup_impl(params: dict) -> dict:
         query,
         top_k=int(params.get("top_k", 3)),
         min_score=float(params.get("min_score", 0.34)),
+        asker=str(params.get("_asker") or ""),
         # 6afh: the archive is searched only when asked ("rummage deeper").
         include_archive=bool(params.get("include_archive")),
     )
@@ -1305,11 +1327,12 @@ def _palace_lookups_impl(params: dict) -> dict:
     except (TypeError, ValueError):
         top_k = 5
     include_archive = bool(params.get("archive") or params.get("include_archive"))
+    asker = str(params.get("_asker") or "")
     query = _query_param(params)
     if query:
-        hits = lookups.recall(query, top_k=top_k, include_archive=include_archive)
+        hits = lookups.recall(query, top_k=top_k, include_archive=include_archive, asker=asker)
     else:
-        hits = lookups.recent(limit=top_k, include_archive=include_archive)
+        hits = lookups.recent(limit=top_k, include_archive=include_archive, asker=asker)
     results = [compact_lookup(h) for h in hits]
     out: dict = {"ok": True, "query": query, "results": results}
     if not results:

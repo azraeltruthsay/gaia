@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gaia_core.cognition.told_facts import is_question, recall_query, speaks_to, told_fact, told_facts_in
+from gaia_core.cognition.told_facts import is_question, recall_query, speaker, speaks_to, told_fact, told_facts_in
 
 FACT = "The Raven was written by Edgar Allan Poe in 1845."
 
@@ -13,6 +13,8 @@ FACT = "The Raven was written by Edgar Allan Poe in 1845."
     f"Please save the following to my knowledge base: {FACT}",
     f"add to your memory palace: {FACT}",
     f"Can you store this fact in your memory: {FACT}",
+    f"Remember this: {FACT}",
+    f"Please remember that {FACT}",
 ])
 def test_requests_to_keep_a_fact(text):
     assert told_fact(text) == FACT
@@ -21,6 +23,8 @@ def test_requests_to_keep_a_fact(text):
 @pytest.mark.parametrize("text", [
     "What is in my knowledge base?",
     "Remember when we talked about The Raven?",
+    "Remember that time we talked about The Raven?",
+    "Remember to save your work.",
     "Update the README with the new ports.",
     "Save this file to /tmp/out.md: hello",
     "How do I add to my knowledge base?",
@@ -61,7 +65,8 @@ def _core(rpc, said="Done, I noted that."):
 def test_the_save_runs_whatever_she_would_have_done_and_she_words_the_reply():
     core = _core((True, {"ok": True}))
     assert core._told_fact_reply(f"Update my knowledge base with this fact: {FACT}", "s") == "Done, I noted that."
-    core._palace_call.assert_called_once_with("add_document", {"fact": FACT})
+    params = core._palace_call.call_args.args[1]
+    assert params["fact"] == FACT and params["_told_by"]["why"] == "asked me to keep it"
     assert f"Saved: {FACT}" in core.generate_continuation.call_args.kwargs["messages"][1]["content"]
 
 
@@ -73,14 +78,14 @@ def test_a_failed_save_cannot_be_reported_as_done():
 def test_a_question_she_was_told_the_answer_to_comes_from_the_palace():
     core = _core((True, {"results": [{"kind": "told", "snippet": FACT}]}), said="Poe wrote it, in 1845.")
     assert core._told_fact_reply("Who was The Raven written by?", "s") == "Poe wrote it, in 1845."
-    assert "not verified" in core.generate_continuation.call_args.kwargs["messages"][1]["content"]
+    assert "not independently checked" in core.generate_continuation.call_args.kwargs["messages"][1]["content"]
 
 
 def test_the_plain_result_stands_when_her_words_miss_what_happened():
     core = _core((True, {"ok": True}), said="I'll check it against what's there.")
     assert core._told_fact_reply(f"Update my knowledge base with this fact: {FACT}", "s") == f"Saved: {FACT}"
     core = _core((True, {"results": [{"kind": "told", "snippet": FACT}]}), said="They are asking who wrote it.")
-    assert core._told_fact_reply("Who was The Raven written by?", "s") == f"I was told: {FACT}"
+    assert core._told_fact_reply("Who was The Raven written by?", "s").startswith(FACT)
 
 
 def test_other_turns_go_on_as_before():
@@ -88,3 +93,11 @@ def test_other_turns_go_on_as_before():
     assert core._told_fact_reply("Who was The Raven written by?", "s") is None
     assert core._told_fact_reply("Good morning.", "s") is None
     core.generate_continuation.assert_not_called()
+
+
+def test_identity_comes_from_the_transport():
+    who = speaker("discord", "s", {"user_id": "42", "author_name": "Azrael", "is_dm": True})
+    assert (who["who"], who["id"], who["where"]) == ("Azrael", "discord:42", "in a Discord DM")
+    who = speaker("web", "abc", {})
+    assert (who["who"], who["id"], who["where"]) == ("someone", "session:abc", "on the web dashboard")
+    assert who["when"]

@@ -172,6 +172,10 @@ DOMAIN_TOOLS: Dict[str, dict] = {
             },
             # prip: rummage what she looked up before (no query = recent;
             # archive=true also searches the archive).
+            "validate": {
+                "params": {"id": "string", "evidence": "string", "how": "string?"},
+                "maps_to": "palace_validate_lookup",
+            },
             "lookups": {
                 "params": {"query": "string?", "top_k": "integer?", "archive": "boolean?"},
                 "maps_to": "palace_lookups",

@@ -58,11 +58,12 @@ from gaia_common.protocols.cognition_packet import (
 from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detect_fragmentation_request, _has_named_work_signal
 from gaia_common.utils.tool_call_parser import tool_answer_messages
 from gaia_core.cognition.reply_scrub import claims_success, honest_about_failure, own_words
+from gaia_common.utils.lookup_memory import provenance_note
 from gaia_core.cognition.told_facts import (
     MIN_MATCH,
-    TOLD_SOURCE,
     is_question,
     recall_query,
+    speaker,
     speaks_to,
     told_fact,
     told_facts_in,
@@ -1457,7 +1458,7 @@ class AgentCore:
         # Facts she was told, kept and recalled. Ahead of research and the
         # old save-to-file route, which get these turns otherwise (1zbx).
         try:
-            _palace_reply = self._told_fact_reply(user_input, session_id)
+            _palace_reply = self._told_fact_reply(user_input, session_id, source, _metadata)
             if _palace_reply:
                 if not _user_msg_persisted:
                     self.session_manager.add_message(session_id, "user", user_input)
@@ -7655,13 +7656,15 @@ RESULT: COMPLEX (reason: <brief reason>)
         body = (document.get("content") or "").strip()
         return f"Here is **{title}**:\n\n{excerpt(body, requested_part(user_input)) or body}"
 
-    def _told_fact_reply(self, user_input: str, session_id: str) -> Optional[str]:
+    def _told_fact_reply(self, user_input: str, session_id: str, source: str = "", metadata: dict = None) -> Optional[str]:
         """Her reply when this turn keeps a fact she was told or asks for one;
         None when it does neither. Her words stand if they match what really
         happened; otherwise the plain result does."""
+        who = speaker(source, session_id, metadata)
         fact = told_fact(user_input)
         if fact:
-            label, ok, result = "knowledge(add)", *self._palace_call("add_document", {"fact": fact})
+            teller = {**who, "why": "asked me to keep it", "said": user_input[:300]}
+            label, ok, result = "knowledge(add)", *self._palace_call("add_document", {"fact": fact, "_told_by": teller})
             text = f"Saved: {fact}" if ok else f"Failed: {result.get('error', 'it could not be saved')}"
             plain = text
             fits = claims_success
@@ -7669,13 +7672,14 @@ RESULT: COMPLEX (reason: <brief reason>)
             topic = recall_query(user_input)
             if topic != user_input and self._palace_call("palace_recall_work", {"query": topic, "mentioned": True})[1].get("found"):
                 return None  # she knows the work itself, not just what she was told of it
-            _ok, result = self._palace_call("palace_recall_lookup", {"query": topic, "min_score": MIN_MATCH})
+            _ok, result = self._palace_call("palace_recall_lookup",
+                                            {"query": topic, "min_score": MIN_MATCH, "_asker": who["id"]})
             hits = told_facts_in(result.get("results"), user_input)
             if not hits:
                 return None
             label, ok = "palace(recall)", True
-            text = "\n".join(f"- {h['snippet']} ({TOLD_SOURCE.lower()}, not verified)" for h in hits)
-            plain = f"I was told: {hits[0]['snippet']}"
+            text = "\n".join(f"- {h['snippet']} ({provenance_note(h)})" for h in hits)
+            plain = f"{hits[0]['snippet']} ({provenance_note(hits[0])})"
             fits = lambda said: speaks_to(said, user_input, hits[0]["snippet"])
         else:
             return None
