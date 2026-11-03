@@ -1904,6 +1904,9 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 max_tokens=_CONT_MAX_TOKENS,
                                 temperature=_CONT_TEMPERATURE,
                             )
+                            if cont_gen and not rpc_result.get("ok"):
+                                from gaia_core.cognition.reply_scrub import honest_about_failure
+                                cont_gen = honest_about_failure(cont_gen, _tool_label)
                             if cont_gen:
                                 def _next_cont():
                                     try:

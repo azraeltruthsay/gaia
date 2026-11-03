@@ -4,7 +4,15 @@ import json
 
 import pytest
 
-from gaia_core.cognition.reply_scrub import HeadScrubber, answered_already, scrub_reply, scrub_stream
+from gaia_core.cognition.reply_scrub import (
+    HeadScrubber,
+    answered_already,
+    claims_success,
+    honest_about_failure,
+    own_words,
+    scrub_reply,
+    scrub_stream,
+)
 
 CUE = 'They asked: "Tell me about it." You already did that, and it returned the above. Your reply to them:'
 
@@ -114,3 +122,93 @@ def test_an_answer_before_a_tool_call(prose):
                                    "Good question.", "[Core]\n\nI'll fetch the URL and read it. "])
 def test_not_an_answer_before_a_tool_call(prose):
     assert not answered_already(prose)
+
+
+POEM = """Ozymandias by Percy Bysshe Shelley:
+I met a traveller from an antique land,
+Who said, Two vast and trunkless legs of stone
+Stand in the desert. Look on my Works, ye Mighty, and despair!"""
+
+
+@pytest.mark.parametrize("said,kept", [
+    ("Ozymandias is a king whose empire has crumbled into the desert. It goes on.",
+     "Ozymandias is a king whose empire has crumbled into the desert."),
+    ("It is about how even the proudest power fades.\nMore.", "It is about how even the proudest power fades."),
+])
+def test_her_own_sentence_stands_beside_the_words(said, kept):
+    assert own_words(said, POEM) == kept
+
+
+@pytest.mark.parametrize("said", [
+    "",
+    "I'm sorry, I didn't understand that last part.",
+    "I'm not sure what you mean by that.",
+    "What stands out to you in it?",
+    "Is it about power?",
+    '<blockquote>"What is that?" he asked.',
+    "It was written in 1817 about a statue.",
+    "It is a poem by Percy Shelley set in Egypt.",
+    "It tells of two vast and trunkless legs of stone in the sand.",
+    "It is about power and the end of it, and then",
+])
+def test_what_cannot_stand_beside_the_words(said):
+    assert own_words(said, POEM) == ""
+
+
+def _reading(events):
+    from unittest.mock import MagicMock
+
+    from gaia_core.cognition.agent_core import AgentCore
+    core = AgentCore.__new__(AgentCore)
+    core.logger = MagicMock()
+    core.generate_continuation = MagicMock(side_effect=events if isinstance(events, Exception) else lambda **kw: iter(events))
+    reply = f"Here is **Ozymandias**:\n\n{POEM}"
+    return reply, core._after_reading("Recite Ozymandias.", reply, {"title": "Ozymandias"}, "s"), core
+
+
+def test_she_reads_the_words_as_her_own_turn_and_her_sentence_follows_them():
+    reply, out, core = _reading([{"type": "token", "value": "It is about how power fades."}])
+    assert out == f"{reply}\n\nIt is about how power fades."
+    messages = core.generate_continuation.call_args.kwargs["messages"]
+    assert messages[2] == {"role": "assistant", "content": reply} and messages[3]["role"] == "user"
+
+
+def test_the_words_go_alone_when_her_response_cannot_stand_or_she_cannot_read():
+    reply, out, _ = _reading([{"type": "token", "value": "I'm sorry, I didn't understand."}])
+    assert out == reply
+    reply, out, _ = _reading(RuntimeError("no model"))
+    assert out == reply
+
+
+@pytest.mark.parametrize("reply", [
+    "I updated my knowledge base with the new information.",
+    "The update was successful.",
+    "The update was successful. The fact has been added to your knowledge base.",
+    "I updated your knowledge base with the new information. If you need any other assistance, please let me know.",
+    "Saved and all set.",
+])
+def test_a_claim_that_it_worked(reply):
+    assert claims_success(reply)
+
+
+@pytest.mark.parametrize("reply", [
+    "The update failed. The error message is: Unknown action.",
+    "That's an interesting bit of history. Sorry for the tool failure.",
+    "I couldn't save that just now.",
+    "It wasn't added.",
+    "The Raven was published in 1845.",
+])
+def test_no_claim_that_it_worked(reply):
+    assert not claims_success(reply)
+
+
+def test_a_false_claim_after_a_failed_tool_is_replaced():
+    out = list(honest_about_failure(iter([{"type": "token", "value": "The update was "},
+                                          {"type": "token", "value": "successful."}, {"type": "flush"}]), "knowledge(add)"))
+    assert out == [{"type": "token", "value": "That didn't work: knowledge(add) failed, so nothing changed."}, {"type": "flush"}]
+
+
+def test_her_own_account_of_a_failure_stands():
+    out = list(honest_about_failure(iter([{"type": "token", "value": "I couldn't reach "},
+                                          {"type": "token", "value": "the page."}]), "web(fetch)"))
+    assert out == [{"type": "token", "value": "I couldn't reach the page."}]

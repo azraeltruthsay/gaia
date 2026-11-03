@@ -56,6 +56,7 @@ from gaia_common.protocols.cognition_packet import (
     OutputDestination, OutputRouting, DestinationTarget,
 )
 from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detect_fragmentation_request, _has_named_work_signal
+from gaia_core.cognition.reply_scrub import own_words
 from gaia_common.utils.work_memory import asks_for_the_words, best_agreement, excerpt, requested_part, work_name
 # o9dh/saq3: aliased -- this is a DIFFERENT enum from cognition_packet's
 # TargetEngine (different members: NANO/CORE/PRIME here vs PRIME/CORE/LITE/
@@ -3065,6 +3066,8 @@ class AgentCore:
                     self.logger.warning("Recitation pipeline failed", exc_info=True)
                     _recitation_doc = None
                 _reply = self._recitation_reply(user_input, _recitation_doc)
+                if _recitation_doc:
+                    _reply = self._after_reading(user_input, _reply, _recitation_doc, session_id)
                 self.logger.info("Recitation pipeline: direct streaming %d chars (source found: %s)",
                                  len(_reply), bool(_recitation_doc))
                 yield {"type": "token", "value": _reply}
@@ -7625,6 +7628,30 @@ RESULT: COMPLEX (reason: <brief reason>)
         title = document.get("title") or "the requested text"
         body = (document.get("content") or "").strip()
         return f"Here is **{title}**:\n\n{excerpt(body, requested_part(user_input)) or body}"
+
+    def _after_reading(self, user_input: str, reply: str, document: Dict[str, str], session_id: str) -> str:
+        """She reads what she is about to say and responds to it, so the words
+        pass through her and not just past her (uyor). She can't copy a long
+        text faithfully (refused 8/12, invented lines 3/12, 2026-11-03), so the
+        palace keeps the words exact; hers come after, from a turn of their
+        own. Right after the words in the same turn she carried on the poem."""
+        messages = [
+            {"role": "system", "content": "You are GAIA."},
+            {"role": "user", "content": user_input},
+            {"role": "assistant", "content": reply},
+            {"role": "user", "content": "In a sentence, what is that about?"},
+        ]
+        try:
+            said = "".join(
+                event.get("value", "") for event in self.generate_continuation(
+                    messages=messages, session_id=session_id, max_tokens=70, temperature=0.5)
+                if isinstance(event, dict) and event.get("type") == "token")
+        except Exception:
+            self.logger.warning("Recitation: she couldn't read it just now", exc_info=True)
+            return reply
+        hers = own_words(said, f"{document.get('title', '')}\n{reply}")
+        self.logger.info("Recitation: read; said %r; kept: %s", said[:120], bool(hers))
+        return f"{reply}\n\n{hers}" if hers else reply
 
     # Marks a page as being ABOUT a work (a lesson plan, study guide,
     # discussion aid) rather than the work itself. Domain trust doesn't
