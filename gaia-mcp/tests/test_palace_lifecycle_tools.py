@@ -147,3 +147,9 @@ def test_palace_recall_brings_the_work_along(palace):
     out = palace.recall("Numbers")
     assert out["works"][0]["text"] == POEM and out["works"][0]["sources"] == ["a", "b"]
     assert palace.status()["works"] == 1
+
+
+def test_palace_recall_finds_a_work_a_request_names_in_passing(palace):
+    tools._palace_store_work_impl({"name": "Numbers", "text": POEM, "sources": [{"url": "a"}, {"url": "b"}]})
+    out = tools._palace_recall_impl({"query": "Use your memory palace to recall Numbers and tell me what it is about"})
+    assert out["works"] and out["works"][0]["text"] == POEM

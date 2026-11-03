@@ -475,7 +475,8 @@ class MemPalace:
             lookups = []
 
         try:
-            work = self.works.recall(query)
+            # The query may be a whole request naming the work in passing.
+            work = self.works.recall(query) or self.works.mentioned(query)
         except Exception as e:
             logger.warning("MemPalace: work recall failed for %r: %s", query[:80], e)
             work = None
@@ -486,7 +487,7 @@ class MemPalace:
         return {
             "ok": True,
             "query": query,
-            "works": [compact_work(work)] if work else [],
+            "works": [compact_work(work, max_chars=3000)] if work else [],
             "lookups": lookups,
             "results": results,
             "result_count": len(results),

@@ -515,7 +515,14 @@ def tool_result_text(result: Any, limit: int = 4000) -> str:
             text = "\n".join(head + [result.get("content") or result.get("text")])
         else:
             rows = result.get("lookups") or result.get("results")
-            if isinstance(rows, list) and rows and all(isinstance(r, dict) for r in rows):
+            works = [w for w in result.get("works") or [] if isinstance(w, dict) and w.get("text")]
+            if works:
+                # A work she knows outranks scraps about it: with lookups
+                # alone she made up how The Raven ends (8ail, 2026-11-03).
+                text = "\n\n".join(f"{w.get('name', 'Text')}, from memory:\n{w['text']}" for w in works)
+                if isinstance(rows, list) and rows and all(isinstance(r, dict) for r in rows):
+                    text += "\n\nAlso noted:\n" + "\n".join(_result_line(r) for r in rows)
+            elif isinstance(rows, list) and rows and all(isinstance(r, dict) for r in rows):
                 text = "\n".join(_result_line(r) for r in rows)
                 if result.get("note"):
                     text = f"{result['note']}\n{text}"

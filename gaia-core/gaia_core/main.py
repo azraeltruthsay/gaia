@@ -1445,6 +1445,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                 except StopIteration:
                     return None
 
+            from gaia_core.cognition.reply_scrub import answered_already
             _pending_tool_calls = []
             _seen_tool_calls = set()  # Dedup repeated tool calls
 
@@ -1454,6 +1455,7 @@ async def process_packet(packet_data: Dict[str, Any]):
             # never need a tool, so drop such calls silently (the surrounding
             # reply text still streams).
             _suppress_tools = False
+            _plain_chat = False
             # 7o99: counts calls dropped below so a turn whose ENTIRE output
             # was suppressed tool-call markup (no surrounding prose at all)
             # can get a graceful fallback instead of dead silence — see the
@@ -1481,6 +1483,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                     _embed_intent_cfg = getattr(_get_config_h3ds(), 'constants', {}).get("EMBED_INTENT", {}) or {}
                     _suppress_thr = float(_embed_intent_cfg.get("confidence_threshold", 0.42))
                     _intent_lbl, _ = _eic.classify(user_input or "", confidence_threshold=_suppress_thr)
+                    _plain_chat = _intent_lbl == "chat" and "://" not in (user_input or "")
                     # 'time' is world-state-answerable: the clock is already
                     # injected in the prompt, so drop the redundant (noisy)
                     # worldstate tool call and let Core answer from context.
@@ -1561,6 +1564,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                                         logger.info("Tool call '%s' suppressed (tool-free intent)", pe.tool_name)
                                         _suppressed_tool_count += 1
                                         continue
+                                    # Plain chat she has already answered needs no tool (8ail).
+                                    if _plain_chat and pe.tool_name != "expand_context" and answered_already("".join(response_pieces)):
+                                        logger.info("Tool call '%s' dropped: already answered", pe.tool_name)
+                                        _suppressed_tool_count += 1
+                                        continue
                                     # Dedup: only process each unique tool call once
                                     _tc_key = f"{pe.tool_name}:{pe.tool_action}:{json.dumps(pe.tool_params, sort_keys=True)}"
                                     if _tc_key in _seen_tool_calls:
@@ -1613,9 +1621,9 @@ async def process_packet(packet_data: Dict[str, Any]):
                                                 pe.tool_name, exc_info=True,
                                             )
                                     else:
-                                        _action_display = f"({pe.tool_action})" if pe.tool_action else ""
-                                        tool_display = f"\n*[calling {pe.tool_name}{_action_display}...]*\n"
-                                        yield json.dumps({"type": "token", "value": tool_display}) + "\n"
+                                        # Status is its own event, never reply text (8ail):
+                                        # it went to the chat, to history-less voice, everywhere.
+                                        yield json.dumps({"type": "tool_status", "tool": pe.tool_name, "action": pe.tool_action, "state": "calling"}) + "\n"
                                         yield json.dumps({"type": "flush"}) + "\n"
                                     _pending_tool_calls.append(pe)
 
@@ -1825,19 +1833,12 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # failure shape (9t27 fixed the known-pattern case; this
                         # closes the gap for anything _norm_msg's pattern matching
                         # doesn't recognize — e.g. a nonexistent tool domain).
-                        if _is_invalid_tool:
-                            # No plumbing marker for a tool that never
-                            # existed — showing "*[poet(create) -> failed]*"
-                            # to the user for a hallucinated capability is
-                            # confusing internal mechanics, not useful
-                            # transparency (nxxl follow-up).
-                            pass
-                        else:
-                            if rpc_result.get("ok"):
-                                result_preview = str(actual_result)[:200]
-                            else:
-                                result_preview = "failed"
-                            yield json.dumps({"type": "token", "value": f"\n*[{tc.tool_name}({tc.tool_action}) → {result_preview}]*\n"}) + "\n"
+                        if not _is_invalid_tool:
+                            # No status for a tool that never existed (nxxl
+                            # follow-up). The result itself is for the reply
+                            # below, not for showing (8ail).
+                            yield json.dumps({"type": "tool_status", "tool": tc.tool_name, "action": tc.tool_action,
+                                              "state": "ok" if rpc_result.get("ok") else "failed"}) + "\n"
                         yield json.dumps({"type": "flush"}) + "\n"
 
                         # Affect appraisal (P0): competence drive ← tool outcome
@@ -2072,15 +2073,21 @@ async def process_packet(packet_data: Dict[str, Any]):
                                     yield json.dumps({"type": "flush"}) + "\n"
                         except Exception as cont_err:
                             logger.warning("Continuation generation failed: %s", cont_err)
-                            # Fallback: just append the raw result
-                            response_pieces.append(f"\n{result_xml}\n")
+                            # She has the result but no words for it. The raw
+                            # result is neither a reply nor worth keeping as one (8ail).
+                            _apology = "I'm having trouble putting that into words right now — mind asking me again in a moment?"
+                            response_pieces.append(_apology)
+                            yield json.dumps({"type": "token", "value": _apology}) + "\n"
 
                     except Exception as e:
                         # Full detail server-side only — never surface raw
                         # exception text (internal URLs, HTTP status strings)
                         # to the user (9t27).
                         logger.warning("Tool call execution failed: %s", e)
-                        yield json.dumps({"type": "token", "value": f"\n*[{tc.tool_name} call failed]*\n"}) + "\n"
+                        yield json.dumps({"type": "tool_status", "tool": tc.tool_name, "action": tc.tool_action, "state": "failed"}) + "\n"
+                        _apology = "That didn't work on my end, so I don't have an answer from it. Mind asking me again in a moment?"
+                        response_pieces.append(_apology)
+                        yield json.dumps({"type": "token", "value": _apology}) + "\n"
 
             # 7o99 (live incident 2026-10-13): a turn can legitimately end with
             # response_pieces totally empty — not a crash, not malformed-syntax
@@ -2102,7 +2109,9 @@ async def process_packet(packet_data: Dict[str, Any]):
             # Finalize response processing
             full_response = "".join(response_pieces)
             from gaia_core.utils.output_router import _strip_think_tags_robust
+            from gaia_core.cognition.reply_scrub import scrub_reply
             full_response = _strip_think_tags_robust(full_response)
+            full_response = scrub_reply(full_response)
 
             # 1mg: the Observer (conscience) on the user path — /process_packet
             # bypassed it. Two aspects of gate-2, unified here:
@@ -2213,7 +2222,8 @@ async def process_packet(packet_data: Dict[str, Any]):
             logger.exception(f"Error in streaming turn loop: {e}")
             yield json.dumps({"type": "error", "value": str(e)}) + "\n"
 
-    return StreamingResponse(_run_loop(), media_type="application/x-ndjson")
+    from gaia_core.cognition.reply_scrub import scrub_stream
+    return StreamingResponse(scrub_stream(_run_loop()), media_type="application/x-ndjson")
 
 
 # ── Audio Context Ingest ─────────────────────────────────────────────

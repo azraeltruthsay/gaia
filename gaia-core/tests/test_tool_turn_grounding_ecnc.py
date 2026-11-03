@@ -93,3 +93,10 @@ def test_pre_formatted_tool_result_reaches_the_prompt():
            "  Title: The Name of the Rose\n  The 1980 novel by Italian author Umberto Eco.\n"
            "--- End of Web Search Results ---")
     assert "Umberto Eco" in _prompt_text(_packet([("tool_result", pre)]))
+
+
+def test_tool_result_text_gives_a_known_work_before_scraps_about_it():
+    text = tool_result_text({"ok": True, "works": [{"name": "The Raven", "text": "Once upon a midnight dreary"}],
+                             "lookups": [{"fact": "a scrap", "source": "x"}]})
+    assert text.startswith("The Raven, from memory:\nOnce upon a midnight dreary")
+    assert text.index("Once upon") < text.index("a scrap")
