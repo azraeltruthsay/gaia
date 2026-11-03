@@ -165,7 +165,7 @@ def test_whether_a_fact_was_checked_comes_from_the_record():
     assert core._told_fact_reply("Is it verified that The Raven was written by Poe?", "s").startswith("Yes.")
 
 
-def test_her_reply_cannot_give_the_architect_credit_he_did_not_earn():
+def test_her_reply_cannot_give_the_architect_credit_they_did_not_earn():
     impostor = {"kind": "told", "snippet": FACT, "told_by": [{"who": "someone calling themselves Azrael", "id": "discord:9"}]}
     core = _core((True, {"results": [impostor]}), said="Azrael told me The Raven was written by Poe.")
     assert "calling themselves Azrael" in core._told_fact_reply("Who was The Raven written by?", "s")

@@ -251,7 +251,7 @@ def test_conversations_without_an_identity_count_as_one_teller(palace):
 ARCHITECT = {**AZ, "operator": True}
 
 
-def test_the_architect_has_a_level_of_his_own_and_still_needs_checking(palace):
+def test_the_architect_has_a_level_of_their_own_and_still_needs_checking(palace):
     rid = tools._knowledge_add_impl({"fact": LANTERN, "_told_by": ARCHITECT}, None)["id"]
     hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
     assert hit["trust"] == "told_by_architect"
@@ -263,6 +263,6 @@ def test_the_architect_has_a_level_of_his_own_and_still_needs_checking(palace):
     assert hit["trust"] == "validated" and "checked by GAIA" in hit["source"]
 
 
-def test_the_ladder_orders_his_word_between_one_site_and_two():
+def test_the_ladder_orders_that_word_between_one_site_and_two():
     from gaia_common.utils.lookup_memory import TRUST_LEVELS
     assert TRUST_LEVELS.index("looked_up") < TRUST_LEVELS.index("told_by_architect") < TRUST_LEVELS.index("corroborated")

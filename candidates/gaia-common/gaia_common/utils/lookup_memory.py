@@ -240,9 +240,9 @@ def _days_since(ts: Optional[str], now: datetime) -> Optional[float]:
 # How much a memory can be leaned on, lowest first. Worked out from the evidence
 # each time, so every record has a level without a migration, and a level can
 # never claim more than the record shows.
-# The architect has a level of his own, and his word still needs checking: it
-# is not "validated", and it can be disputed like anyone's. Above one website
-# because he knows this system firsthand, below two independent ones.
+# The architect has a level of their own, and that word still needs checking:
+# it is not "validated", and it can be disputed like anyone's. Above one website
+# for firsthand knowledge of this system, below two independent ones.
 TRUST_LEVELS = ("disputed", "told", "told_by_several", "looked_up", "told_by_architect", "corroborated", "validated")
 
 

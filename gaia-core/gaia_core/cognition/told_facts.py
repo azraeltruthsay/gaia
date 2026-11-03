@@ -125,7 +125,7 @@ def covers_each_side(reply: str, sides: list) -> bool:
 
 
 def credits_rightly(reply: str, hits: list) -> bool:
-    """A reply can't hand the architect's name to a fact he didn't give: she
+    """A reply can't hand the architect's name to a fact they didn't give: she
     shortened "someone calling themselves Azrael" to "Azrael"."""
     name = os.environ.get("GAIA_OPERATOR_NAME", "Azrael")
     if not re.search(rf"\b{re.escape(name)}\b", reply or "", re.IGNORECASE):
