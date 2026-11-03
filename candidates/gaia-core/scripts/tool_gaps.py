@@ -21,6 +21,8 @@ def show(store: dict) -> None:
     for pid, r in sorted(store.items(), key=lambda kv: (kv[1]["status"] != "pending", -kv[1]["attempts"])):
         print(f"{pid}  [{r['status']}]  {r['kind']}: {r['tool']}({r['verb']})  params={r['params']}  "
               f"{r['attempts']} attempts on {r['occasions']} occasions, {r['outside_tests']} outside tests")
+        for example in r.get("examples") or []:
+            print(f"          asked: {example[:100]}")
         if r["status"] == "pending" and r.get("candidates"):
             print(f"          takes the same params: {', '.join(r['candidates'])}")
 

@@ -105,7 +105,8 @@ def _ledger(packet: CognitionPacket, **fields: Any) -> None:
     try:
         outcome_ledger.record(
             "tool_selection", packet.header.session_id, packet.header.packet_id,
-            intent=getattr(packet.intent, "user_intent", "") or "", **fields)
+            intent=getattr(packet.intent, "user_intent", "") or "",
+            request=outcome_ledger.clip(getattr(packet.content, "original_prompt", "") or ""), **fields)
     except Exception:
         logger.debug("Tool selector: ledger record failed (non-fatal)", exc_info=True)
 

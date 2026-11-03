@@ -391,7 +391,8 @@ Start with the first line of the file."""
         AST-validated, statically lint-checked (skill_code_safety), and
         sandbox-executed in a subprocess before it's even written as a
         draft, and never wired into a live registry without a separate
-        manual promotion step.
+        manual promotion step. No "cannot draft" option here: offered one, Prime
+        took it every time, saying unit conversion needs an external API (33xl).
         """
         params_json = json.dumps(attempted_tool_params, default=str, indent=2)
         return f"""You are CodeMind, GAIA's code self-improvement layer. Core or Prime \
@@ -417,9 +418,6 @@ RULES:
   {{"ok": False, "error": "<clear reason>"}} rather than guessing.
 - No comments explaining what you're doing, no docstring essays — a single
   one-line docstring on execute() is enough.
-- If this genuinely cannot be a self-contained skill (needs real external
-  API access with credentials you don't have, etc.), respond with exactly:
-  CANNOT_DRAFT: <reason>
 
 Respond with ONLY the Python module source. No markdown fences. No explanation.
 Start with the first line of the file (an import or the function definition)."""

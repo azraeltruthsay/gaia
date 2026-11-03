@@ -141,3 +141,10 @@ def test_codemind_reads_a_gap_the_way_it_reads_any_other(store):
     text = tool_gaps.capability_gap_text({"tool": "poet", "verb": "rhyme", "params": ["words"], "attempts": 5, "occasions": 2})
     payload = json.loads(text.split("Payload: ", 1)[1])
     assert payload["attempted_tool_name"] == "poet" and payload["attempted_tool_action"] == "rhyme"
+
+
+def test_what_she_was_asked_comes_along():
+    rows = [{**attempt(f"web_{i}", str(i)), "request": f"find the {i}"} for i in range(5)]
+    p = tool_gaps.mine(rows, nothing_known)[0]
+    assert p["examples"] == ["find the 0", "find the 1", "find the 2"]
+    assert "find the 0" in tool_gaps.capability_gap_text({**p, "params": []})

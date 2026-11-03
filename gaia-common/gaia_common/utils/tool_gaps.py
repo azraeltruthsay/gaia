@@ -26,6 +26,7 @@ logger = logging.getLogger("GAIA.ToolGaps")
 STORE_DIR = Path(os.environ.get("GAIA_TOOL_GAPS_DIR", "/shared/tool_gaps"))
 MIN_ATTEMPTS = 3
 MIN_OCCASIONS = 2  # one looping conversation or one repeated test isn't demand
+MAX_EXAMPLES = 3
 
 _UNKNOWN_ACTION_RE = re.compile(r"Unknown action '([^']*)' for domain '([^']*)'")
 _NO_TOOL_RE = re.compile(r"Tool '([^']+)' is not a valid|Unknown domain: (\w+)")
@@ -87,7 +88,7 @@ def mine(rows: Iterable[dict], is_known: Callable[[str, str], bool]) -> List[dic
         found = _classify(row)
         if not found:
             continue
-        g = groups.setdefault(found, {"packets": set(), "occasions": set(), "real": set(), "params": set(),
+        g = groups.setdefault(found, {"packets": set(), "occasions": set(), "real": set(), "params": set(), "examples": [],
                                       "first": row.get("ts"), "last": row.get("ts")})
         packet = row.get("packet_id") or id(row)  # selection and execution are one attempt
         g["packets"].add(packet)
@@ -95,6 +96,8 @@ def mine(rows: Iterable[dict], is_known: Callable[[str, str], bool]) -> List[dic
         if not is_test:
             g["real"].add(packet)
         g["params"].update(set(row.get("param_keys") or []) - {"action"})
+        if row.get("request") and row["request"] not in g["examples"] and len(g["examples"]) < MAX_EXAMPLES:
+            g["examples"].append(row["request"])
         g["last"] = row.get("ts") or g["last"]
     out = []
     for (kind, tool, verb), g in groups.items():
@@ -107,7 +110,8 @@ def mine(rows: Iterable[dict], is_known: Callable[[str, str], bool]) -> List[dic
         out.append({"id": proposal_id(kind, tool, verb), "kind": kind, "tool": tool, "verb": verb,
                     "attempts": len(g["packets"]), "occasions": len(g["occasions"]),
                     "outside_tests": len(g["real"]),
-                    "params": sorted(g["params"]), "first": g["first"], "last": g["last"]})
+                    "params": sorted(g["params"]), "examples": g["examples"],
+                    "first": g["first"], "last": g["last"]})
     return sorted(out, key=lambda p: -p["attempts"])
 
 
@@ -155,7 +159,7 @@ def refresh(mined: List[dict], domain_tools: dict) -> int:
     for p in mined:
         have = store.get(p["id"])
         if have:
-            have.update({k: p[k] for k in ("attempts", "occasions", "outside_tests", "params", "last")})
+            have.update({k: p[k] for k in ("attempts", "occasions", "outside_tests", "params", "examples", "last")})
             continue
         store[p["id"]] = {**p, "status": "pending", "candidates": candidates(p["tool"], p["params"], domain_tools)}
         new += 1
@@ -191,5 +195,5 @@ def capability_gap_text(rec: dict) -> str:
     """A proposal as CodeMind's capability-gap seed: her name, and the evidence."""
     payload = {"attempted_tool_name": rec["tool"], "attempted_tool_action": rec.get("verb", ""),
                "attempted_tool_params": {k: "" for k in rec.get("params", [])},
-               "user_request": f"Attempted {rec['attempts']} times on {rec['occasions']} occasions; approved by the architect."}
+               "user_request": "; ".join(rec.get("examples") or []) or f"Attempted {rec['attempts']} times; no request on record."}
     return f"Capability gap: {rec['tool']}({rec.get('verb', '')}). Payload: {json.dumps(payload)}"

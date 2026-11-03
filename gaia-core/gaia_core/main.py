@@ -1758,6 +1758,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                             "tool_execution", session_id,
                             _ol.current_packet(session_id) or getattr(packet.header, "packet_id", ""),
                             path="inline", tool=tc.tool_name, action=tc.tool_action or "",
+                            request=_ol.clip(user_input or ""),
                             param_keys=_ol.param_keys(tc.tool_params),
                             ok=bool(rpc_result.get("ok")), hallucinated=_is_invalid_tool,
                             error="" if rpc_result.get("ok") else _ol.clip(rpc_result.get("error")),
