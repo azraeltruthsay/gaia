@@ -15,7 +15,10 @@ Usage:
     legacy_name = ACTION_TO_LEGACY[("file", "read")]  # → "read_file"
 """
 
+import logging
 from typing import Dict, List, Set, Tuple
+
+logger = logging.getLogger("GAIA.DomainTools")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Domain Tool Definitions
@@ -467,9 +470,19 @@ def _build_mappings():
         ("recall", "events"): ("introspect", "recall"),
         ("introspect", "events"): ("introspect", "recall"),
     }
+    # Her own verbs the architect has approved (yi22)
+    try:
+        from gaia_common.utils.tool_gaps import approved_aliases
+        for tool, verb, target_tool, target in approved_aliases():
+            _ACTION_ALIASES.setdefault((tool, verb), (target_tool, target))
+    except Exception as e:
+        logger.warning("Could not load approved tool aliases: %s", e)
     for alias_key, canonical_key in _ACTION_ALIASES.items():
         if canonical_key in action_to_legacy:
             action_to_legacy[alias_key] = action_to_legacy[canonical_key]
+            # A new name for a guarded action is still guarded.
+            if canonical_key in sensitive:
+                sensitive.add(alias_key)
 
     return action_to_legacy, legacy_to_domain, sensitive, all_actions
 

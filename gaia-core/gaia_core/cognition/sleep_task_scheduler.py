@@ -1422,6 +1422,10 @@ class SleepTaskScheduler:
         except Exception as e:
             logger.warning("Told-fact check failed: %s", e)
         try:
+            self._mine_tool_gaps()
+        except Exception as e:
+            logger.warning("Tool-gap mining failed: %s", e)
+        try:
             raw = mcp_client.call_jsonrpc("palace_lifecycle_sweep", {})
             inner = raw.get("response", raw) if isinstance(raw, dict) else {}
             res = inner.get("result", inner) if isinstance(inner, dict) else {}
@@ -1439,6 +1443,25 @@ class SleepTaskScheduler:
                         f"; errors: {res['errors']}" if res.get("errors") else "")
         except Exception as e:
             logger.warning("Memory lifecycle sweep failed: %s", e)
+
+    def _mine_tool_gaps(self) -> None:
+        """What she keeps reaching for and can't do, for the architect to
+        decide on. Nothing changes here (yi22)."""
+        from gaia_common.utils import tool_gaps
+        from gaia_common.utils.domain_tools import DOMAIN_TOOLS, validate_domain_call
+        from gaia_core.cognition import outcome_ledger
+
+        def is_known(tool: str, verb: str) -> bool:
+            try:
+                validate_domain_call(tool, verb)
+                return True
+            except ValueError:
+                return False
+
+        path = outcome_ledger.ledger_path()
+        new = tool_gaps.refresh(tool_gaps.mine(tool_gaps._rows([f"{path}.1", path]), is_known), DOMAIN_TOOLS)
+        if new:
+            logger.info("Tool gaps: %d new proposal(s) await the architect", new)
 
     def _check_told_facts(self, mcp_client) -> None:
         """Look for independent evidence on what she has been told (aym9)."""
