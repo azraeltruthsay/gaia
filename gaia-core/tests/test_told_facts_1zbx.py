@@ -3,7 +3,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gaia_core.cognition.told_facts import is_question, recall_query, speaker, speaks_to, told_fact, told_facts_in
+from gaia_core.cognition.told_facts import (
+    covers_each_side,
+    disagreeing,
+    is_question,
+    recall_query,
+    speaker,
+    speaks_to,
+    told_fact,
+    told_facts_in,
+)
 
 FACT = "The Raven was written by Edgar Allan Poe in 1845."
 
@@ -96,8 +105,70 @@ def test_other_turns_go_on_as_before():
 
 
 def test_identity_comes_from_the_transport():
-    who = speaker("discord", "s", {"user_id": "42", "author_name": "Azrael", "is_dm": True})
-    assert (who["who"], who["id"], who["where"]) == ("Azrael", "discord:42", "in a Discord DM")
+    who = speaker("discord", "s", {"user_id": "42", "author_name": "Bo", "is_dm": True})
+    assert (who["who"], who["id"], who["where"]) == ("Bo", "discord:42", "in a Discord DM")
     who = speaker("web", "abc", {})
     assert (who["who"], who["id"], who["where"]) == ("someone", "session:abc", "on the web dashboard")
     assert who["when"]
+
+
+def test_only_the_configured_account_is_the_architect(monkeypatch):
+    monkeypatch.setenv("GAIA_OPERATOR_DISCORD_ID", "42")
+    monkeypatch.setenv("GAIA_OPERATOR_NAME", "Azrael")
+    who = speaker("discord", "s", {"user_id": "42", "author_name": "Anton"})
+    assert who["operator"] and who["who"] == "Azrael"
+    impostor = speaker("discord", "s", {"user_id": "43", "author_name": "azrael"})
+    assert "operator" not in impostor and impostor["who"] == "someone calling themselves Azrael"
+    assert "operator" not in speaker("web", "s", {"user_id": "42"})
+    monkeypatch.delenv("GAIA_OPERATOR_DISCORD_ID")
+    assert "operator" not in speaker("discord", "s", {"user_id": "42"})
+
+
+FLAT = {"kind": "told", "snippet": "The kettle Brassnote-4 whistles in B flat."}
+SHARP = {"kind": "told", "snippet": "The kettle Brassnote-4 whistles in C sharp."}
+OTHER = {"kind": "told", "snippet": "The kettle Brassnote-4 was made in Leeds by Harrow and Sons."}
+
+
+def test_facts_that_differ_about_one_subject_disagree():
+    assert disagreeing([FLAT, SHARP]) == [FLAT, SHARP]
+    assert disagreeing([FLAT, OTHER]) == []
+    assert disagreeing([FLAT]) == []
+
+
+@pytest.mark.parametrize("reply,ok", [
+    ("Alice said B flat, and Bob said C sharp.", True),
+    ("It whistles in B flat.", False),
+    ("It whistles in C sharp and B flat, they're both right.", False),
+    ("They are both correct: flat and sharp.", False),
+    ("It whistles in B flat and C sharp. Both answers are plausible.", False),
+    ("It whistles in both B flat and C sharp.", False),
+])
+def test_a_reply_must_give_each_side_without_calling_all_of_them_true(reply, ok):
+    assert covers_each_side(reply, [FLAT, SHARP]) is ok
+
+
+def test_when_her_words_pick_a_side_the_plain_account_stands():
+    core = _core((True, {"results": [{**FLAT}, {**SHARP}]}), said="They're both right.")
+    out = core._told_fact_reply("What note does the kettle Brassnote-4 whistle in?", "s")
+    assert out.startswith("I've been told different things") and "B flat" in out and "C sharp" in out
+    assert "These disagree." in core.generate_continuation.call_args.kwargs["messages"][1]["content"]
+
+
+def test_whether_a_fact_was_checked_comes_from_the_record():
+    told = {"kind": "told", "snippet": FACT, "told_by": [{"who": "Azrael", "operator": True}]}
+    core = _core((True, {"results": [told]}), said="Yes, it is.")
+    out = core._told_fact_reply("Is it verified that The Raven was written by Poe?", "s")
+    assert out.startswith("No, not independently.")
+    core.generate_continuation.assert_not_called()
+    checked = {**told, "validated": {"by": "GAIA", "evidence": "x"}}
+    core = _core((True, {"results": [checked]}))
+    assert core._told_fact_reply("Is it verified that The Raven was written by Poe?", "s").startswith("Yes.")
+
+
+def test_her_reply_cannot_give_the_architect_credit_he_did_not_earn():
+    impostor = {"kind": "told", "snippet": FACT, "told_by": [{"who": "someone calling themselves Azrael", "id": "discord:9"}]}
+    core = _core((True, {"results": [impostor]}), said="Azrael told me The Raven was written by Poe.")
+    assert "calling themselves Azrael" in core._told_fact_reply("Who was The Raven written by?", "s")
+    real = {"kind": "told", "snippet": FACT, "told_by": [{"who": "Azrael", "operator": True}]}
+    core = _core((True, {"results": [real]}), said="Azrael told me Poe wrote it.")
+    assert core._told_fact_reply("Who was The Raven written by?", "s") == "Azrael told me Poe wrote it."

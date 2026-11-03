@@ -61,6 +61,11 @@ from gaia_core.cognition.reply_scrub import claims_success, honest_about_failure
 from gaia_common.utils.lookup_memory import provenance_note
 from gaia_core.cognition.told_facts import (
     MIN_MATCH,
+    asks_if_checked,
+    checked_answer,
+    covers_each_side,
+    credits_rightly,
+    disagreeing,
     is_question,
     recall_query,
     speaker,
@@ -7677,10 +7682,20 @@ RESULT: COMPLEX (reason: <brief reason>)
             hits = told_facts_in(result.get("results"), user_input)
             if not hits:
                 return None
+            if asks_if_checked(user_input):
+                return checked_answer(hits[0])
             label, ok = "palace(recall)", True
             text = "\n".join(f"- {h['snippet']} ({provenance_note(h)})" for h in hits)
             plain = f"{hits[0]['snippet']} ({provenance_note(hits[0])})"
             fits = lambda said: speaks_to(said, user_input, hits[0]["snippet"])
+            sides = disagreeing(hits)
+            if sides:
+                text = f"These disagree.\n{text}"
+                plain = "I've been told different things:\n" + "\n".join(
+                    f"- {h['snippet']} ({provenance_note(h)})" for h in sides)
+                fits = lambda said: covers_each_side(said, sides)
+            _fits = fits
+            fits = lambda said: _fits(said) and credits_rightly(said, hits)
         else:
             return None
         self.logger.info("Told facts: %s -> %s", label, "ok" if ok else "failed")

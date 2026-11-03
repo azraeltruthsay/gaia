@@ -242,6 +242,9 @@ services:
       # User's timezone — world_state renders the operator's local time from this
       # (Core confabulates TZ math otherwise). Override per deployment/travel.
       - GAIA_USER_TZ=${GAIA_USER_TZ:-America/Los_Angeles}
+      # The architect's Discord user id: his word gets its own trust level.
+      # Unset means nobody has it.
+      - GAIA_OPERATOR_DISCORD_ID=${GAIA_OPERATOR_DISCORD_ID:-}
       # Locality organ (gaia_common/utils/locality.py) — GAIA's sense of place +
       # live environment, folded into the [Here & Now] block. City defaults to a
       # name derived from GAIA_USER_TZ; set lat/lon to enable live weather from

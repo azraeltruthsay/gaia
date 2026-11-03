@@ -1194,7 +1194,7 @@ def _palace_validate_lookup_impl(params: dict) -> dict:
     rid, evidence = params.get("id"), params.get("evidence")
     if not rid or not evidence:
         return {"ok": False, "error": "id and evidence are required"}
-    n = _get_palace().lookups.validate([str(rid)], by=str(params.get("by") or "GAIA"),
+    n = _get_palace().lookups.validate([str(rid)], by=str(params.get("_by") or "GAIA"),
                                        how=str(params.get("how") or ""), evidence=str(evidence))
     return {"ok": bool(n), "validated": n}
 

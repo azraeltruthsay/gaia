@@ -219,7 +219,7 @@ def test_validation_needs_evidence_and_answers_a_dispute(palace):
     assert palace.recall("Where is the north lantern kept?")["lookups"][0]["trust"] == "disputed"
     tools._knowledge_add_impl({"fact": LANTERN, "_told_by": BO}, None)
     assert palace.recall("Where is the north lantern kept?")["lookups"][0]["trust"] == "disputed"
-    assert tools._palace_validate_lookup_impl({"id": rid, "evidence": "seen in the attic", "by": "Azrael"})["ok"]
+    assert tools._palace_validate_lookup_impl({"id": rid, "evidence": "seen in the attic", "_by": "Azrael"})["ok"]
     hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
     assert hit["trust"] == "validated" and "checked by Azrael" in hit["source"]
 
@@ -246,3 +246,23 @@ def test_conversations_without_an_identity_count_as_one_teller(palace):
     for sid in ("session:a", "session:b"):
         tools._knowledge_add_impl({"fact": LANTERN, "_told_by": {"who": "someone", "id": sid}}, None)
     assert palace.recall("Where is the north lantern kept?")["lookups"][0]["trust"] == "told"
+
+
+ARCHITECT = {**AZ, "operator": True}
+
+
+def test_the_architect_has_a_level_of_his_own_and_still_needs_checking(palace):
+    rid = tools._knowledge_add_impl({"fact": LANTERN, "_told_by": ARCHITECT}, None)["id"]
+    hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
+    assert hit["trust"] == "told_by_architect"
+    assert "the architect" in hit["source"] and "not independently checked" in hit["source"]
+    palace.lookups.mark_disputed([rid])
+    assert palace.recall("Where is the north lantern kept?")["lookups"][0]["trust"] == "disputed"
+    tools._palace_validate_lookup_impl({"id": rid, "evidence": "seen in the attic"})
+    hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
+    assert hit["trust"] == "validated" and "checked by GAIA" in hit["source"]
+
+
+def test_the_ladder_orders_his_word_between_one_site_and_two():
+    from gaia_common.utils.lookup_memory import TRUST_LEVELS
+    assert TRUST_LEVELS.index("looked_up") < TRUST_LEVELS.index("told_by_architect") < TRUST_LEVELS.index("corroborated")

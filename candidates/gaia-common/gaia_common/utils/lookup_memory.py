@@ -240,7 +240,10 @@ def _days_since(ts: Optional[str], now: datetime) -> Optional[float]:
 # How much a memory can be leaned on, lowest first. Worked out from the evidence
 # each time, so every record has a level without a migration, and a level can
 # never claim more than the record shows.
-TRUST_LEVELS = ("disputed", "told", "told_by_several", "looked_up", "corroborated", "validated")
+# The architect has a level of his own, and his word still needs checking: it
+# is not "validated", and it can be disputed like anyone's. Above one website
+# because he knows this system firsthand, below two independent ones.
+TRUST_LEVELS = ("disputed", "told", "told_by_several", "looked_up", "told_by_architect", "corroborated", "validated")
 
 
 def _site(url: str) -> str:
@@ -266,6 +269,8 @@ def trust_level(rec: dict) -> str:
         return "corroborated"
     if sites:
         return "looked_up"
+    if any(t.get("operator") for t in rec.get("told_by") or []):
+        return "told_by_architect"
     return "told_by_several" if len(_distinct_tellers(rec)) >= 2 else "told"
 
 
@@ -274,8 +279,10 @@ def provenance_note(rec: dict) -> str:
     whether anyone has checked it."""
     tellers = rec.get("told_by") or []
     if tellers:
-        first = tellers[0]
+        first = next((t for t in tellers if t.get("operator")), tellers[0])
         note = f"told by {first.get('who') or 'someone'}"
+        if first.get("operator"):
+            note += ", the architect,"
         if first.get("when"):
             note += f" on {first['when'][:10]}"
         if first.get("where"):

@@ -1746,6 +1746,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 _who = speaker(source, session_id, metadata)
                                 tool_params["_asker"] = _who["id"]
                                 tool_params["_told_by"] = {**_who, "why": "she chose to keep it"}
+                                tool_params.pop("_by", None)
                             rpc_result = await loop.run_in_executor(None, lambda: call_jsonrpc(
                                 method=tc.tool_name,
                                 params=tool_params,

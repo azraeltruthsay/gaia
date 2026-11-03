@@ -86,6 +86,7 @@ services:
       # (place + live open-meteo weather in the [Here & Now] block). Without
       # these the HA mirror renders UTC and no place. Values come from .env.
       - GAIA_USER_TZ=${GAIA_USER_TZ:-America/Los_Angeles}
+      - GAIA_OPERATOR_DISCORD_ID=${GAIA_OPERATOR_DISCORD_ID:-}
       - GAIA_LOCALE_CITY=${GAIA_LOCALE_CITY:-}
       - GAIA_LOCALE_LAT=${GAIA_LOCALE_LAT:-}
       - GAIA_LOCALE_LON=${GAIA_LOCALE_LON:-}

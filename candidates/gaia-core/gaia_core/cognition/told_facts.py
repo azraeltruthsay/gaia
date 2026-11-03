@@ -5,11 +5,12 @@ Both directions are processes, not her choice. Asked to save a fact she said
 on plain chat she invented an answer 4/5 ("the Hall of Wonders"), because that
 path never looks in memory. She still words the reply, from the real result.
 """
+import os
 import re
 from datetime import datetime, timezone
 from typing import Optional
 
-from gaia_common.utils.lookup_memory import content_terms
+from gaia_common.utils.lookup_memory import content_terms, provenance_note, trust_level
 from gaia_core.cognition.reply_scrub import claims_success
 
 _STORE = r"(?:my|your|the)\s+(?:knowledge\s*base|memory\s+palace|memory|palace)"
@@ -31,6 +32,9 @@ _KNOW_ABOUT_RE = re.compile(
     r"(?:\s+from\s+(?:your|the|my)\s+.+?)?\W*$", re.IGNORECASE)
 # Of the question's content words, how many the fact must hold to answer it.
 MIN_MATCH = 0.5
+_SAME_SUBJECT = 0.5
+_CALLS_ALL_TRUE_RE = re.compile(r"\bboth\b|\ball\s+(?:right|correct|true)\b|\bplausible\b", re.IGNORECASE)
+_ASKS_IF_CHECKED_RE = re.compile(r"\b(?:verified|validated|confirmed|checked|proven|corroborated)\b", re.IGNORECASE)
 
 
 def speaker(source: str, session_id: str, metadata: Optional[dict]) -> dict:
@@ -46,12 +50,21 @@ def speaker(source: str, session_id: str, metadata: Optional[dict]) -> dict:
         where = "on the web dashboard"
     else:
         where = f"via {source}"
-    return {
+    who = {
         "who": meta.get("author_name") or (f"Discord user {user_id}" if user_id else "someone"),
         "id": f"{source}:{user_id}" if user_id else f"session:{session_id}",
         "where": where,
         "when": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+    operator_id = os.environ.get("GAIA_OPERATOR_DISCORD_ID", "").strip()
+    operator_name = os.environ.get("GAIA_OPERATOR_NAME", "Azrael")
+    if source == "discord" and operator_id and str(user_id) == operator_id:
+        who["who"] = operator_name
+        who["operator"] = True
+    elif who["who"].strip().casefold() == operator_name.casefold():
+        # A display name anyone can set.
+        who["who"] = f"someone calling themselves {operator_name}"
+    return who
 
 
 def told_fact(text: str) -> Optional[str]:
@@ -82,6 +95,55 @@ def told_facts_in(hits: list, question: str = "") -> list:
         return told
     terms = content_terms(question)
     return [h for h in told if len(terms & content_terms(h["snippet"])) >= 2]
+
+
+def disagreeing(hits: list) -> list:
+    """Told facts about the same thing that say different things: most of their
+    content words shared, the rest not. Nobody wins by rank, the architect
+    included; she reports who said what."""
+    facts = [(h, content_terms(h["snippet"])) for h in hits]
+    out = []
+    for i, (hit, terms) in enumerate(facts):
+        for j, (other, other_terms) in enumerate(facts):
+            if i != j and terms != other_terms and terms and other_terms \
+                    and len(terms & other_terms) / len(terms | other_terms) >= _SAME_SUBJECT:
+                out.append(hit)
+                break
+    return out
+
+
+def covers_each_side(reply: str, sides: list) -> bool:
+    """Whether a reply gives every side, without declaring them all true."""
+    if _CALLS_ALL_TRUE_RE.search(reply):
+        return False
+    said = content_terms(reply)
+    for side in sides:
+        own = content_terms(side["snippet"]) - set().union(*(content_terms(o["snippet"]) for o in sides if o is not side))
+        if own and not said & own:
+            return False
+    return True
+
+
+def credits_rightly(reply: str, hits: list) -> bool:
+    """A reply can't hand the architect's name to a fact he didn't give: she
+    shortened "someone calling themselves Azrael" to "Azrael"."""
+    name = os.environ.get("GAIA_OPERATOR_NAME", "Azrael")
+    if not re.search(rf"\b{re.escape(name)}\b", reply or "", re.IGNORECASE):
+        return True
+    if re.search(rf"calling\s+themselves\s+{re.escape(name)}\b", reply, re.IGNORECASE):
+        return True
+    return any(t.get("operator") for h in hits for t in h.get("told_by") or [])
+
+
+def asks_if_checked(question: str) -> bool:
+    return bool(_ASKS_IF_CHECKED_RE.search(question or ""))
+
+
+def checked_answer(hit: dict) -> str:
+    """Whether a fact has been checked, from the record. Not left to her: with
+    "not independently checked" in front of her she still answered "Yes"."""
+    opening = "Yes." if trust_level(hit) == "validated" else "No, not independently."
+    return f"{opening} {hit['snippet']} ({provenance_note(hit)})"
 
 
 def speaks_to(reply: str, question: str, fact: str) -> bool:
