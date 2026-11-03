@@ -3023,8 +3023,11 @@ def _run_cognitive_monitor():
                     # Extract time and compare to actual (±10 min tolerance)
                     import re as _re
                     now_utc = datetime.now(timezone.utc)
-                    pacific = timezone(timedelta(hours=int(os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))))
-                    now_local = now_utc.astimezone(pacific)
+                    try:
+                        from zoneinfo import ZoneInfo
+                        now_local = now_utc.astimezone(ZoneInfo(os.environ.get("GAIA_USER_TZ") or "America/Los_Angeles"))
+                    except Exception:
+                        now_local = now_utc.astimezone(timezone(timedelta(hours=int(os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7")))))
 
                     # Try 12h format first, then 24h
                     m12 = _re.search(r'(\d{1,2}):(\d{2})\s*(am|pm)', time_response.lower())

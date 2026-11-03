@@ -29,7 +29,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 from urllib.request import urlopen
 
@@ -79,6 +79,17 @@ def _local_now() -> datetime:
         except Exception:
             logger.debug("Bad GAIA_USER_TZ %r; falling back to UTC", tz, exc_info=True)
     return now
+
+
+def local_now() -> datetime:
+    """Now in the operator's timezone, following daylight saving (the fixed
+    offset said PDT all winter). `%Z` gives its label."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(_env("GAIA_USER_TZ") or "America/Los_Angeles"))
+    except Exception:
+        hours = int(os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))
+        return datetime.now(timezone(timedelta(hours=hours), os.environ.get("GAIA_LOCAL_TZ_LABEL", "PDT")))
 
 
 def _locale_city() -> str:

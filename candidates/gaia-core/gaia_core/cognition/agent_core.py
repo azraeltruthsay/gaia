@@ -6833,9 +6833,8 @@ class AgentCore:
                 hour = 0
 
             # Get current local time (same tz logic as prompt_builder)
-            _tz_offset = int(os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))
-            local_tz = timezone(timedelta(hours=_tz_offset))
-            now = datetime.now(local_tz)
+            from gaia_common.utils.locality import local_now
+            now = local_now()
 
             # Compare hours and minutes
             claimed_minutes = hour * 60 + minute

@@ -345,3 +345,27 @@ class TestDetector:
         assert queue_size(path) == 0
         emit_detection("immune_irritation", "lint", "/a.py", "test", queue_path=path)
         assert queue_size(path) == 1
+
+
+def test_one_plan_per_issue_in_a_file(tmp_path):
+    from gaia_common.utils.codemind_analyzer import has_blueprint_for
+    queue = tmp_path / "q.jsonl"
+    d = {"issue_type": "timing_error", "file_path": "a.py"}
+    assert not has_blueprint_for(d, str(queue))
+    queue.write_text(json.dumps({"source_detection": d}) + "\n")
+    assert has_blueprint_for(d, str(queue))
+    assert not has_blueprint_for({"issue_type": "timing_error", "file_path": "b.py"}, str(queue))
+
+
+def test_only_a_wrong_time_is_a_timing_error(monkeypatch):
+    from gaia_common.utils import heartbeat_time_check as hb
+    emitted = []
+    monkeypatch.setattr("gaia_common.utils.codemind_detector.emit_detection", lambda **kw: emitted.append(kw))
+    monkeypatch.setattr(hb, "_write_state", lambda r: hb._heartbeat_stop.set())
+    monkeypatch.setattr(hb, "_get_focus_multiplier", lambda: 0.0)
+    for claimed, want in ((None, 0), ("1:00 PM", 1)):
+        hb._heartbeat_stop.clear()
+        monkeypatch.setattr(hb, "run_time_check", lambda e, c=claimed: {
+            "status": "fail", "claimed_time": c, "actual_time": "2:00 PM", "drift_minutes": 60, "error": "x"})
+        hb._heartbeat_loop(1, "x")
+        assert len(emitted) == want

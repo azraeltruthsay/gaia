@@ -1615,6 +1615,7 @@ class SleepTaskScheduler:
                 build_analysis_prompt,
                 parse_analysis_response,
                 save_blueprint,
+                has_blueprint_for,
             )
 
             for detection in detections:
@@ -1681,6 +1682,10 @@ class SleepTaskScheduler:
                 complexity = classify_complexity(detection)
 
                 if complexity in (FixComplexity.MODERATE, FixComplexity.COMPLEX):
+                    if has_blueprint_for(detection):
+                        logger.info("CodeMind: a fix blueprint already exists for %s in %s; skipping",
+                                    detection.get("issue_type"), detection.get("file_path"))
+                        continue
                     # Multi-file or architectural issue — generate blueprint
                     logger.info(
                         "CodeMind: %s issue detected, generating fix blueprint: %s",

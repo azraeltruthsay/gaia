@@ -358,11 +358,9 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         # Nano gets LOCAL time only — simple, one format, no confusion.
         # Core/Prime get dual (local + UTC) via the GAIA Engine's awareness.
         try:
-            _tz_offset = int(_os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))
-            _tz_label = _os.environ.get("GAIA_LOCAL_TZ_LABEL", "PDT")
-            _local_tz = timezone(timedelta(hours=_tz_offset))
-            _now = datetime.now(_local_tz)
-            local_time = _now.strftime("%-I:%M %p") + f" {_tz_label}"
+            from gaia_common.utils.locality import local_now
+            _now = local_now()
+            local_time = _now.strftime("%-I:%M %p %Z")
             local_date = _now.strftime("%A, %B %d, %Y")
             clock_display = f"{local_time}, {local_date}"
         except Exception:
@@ -1359,10 +1357,8 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
         import time as _tc_time
         from datetime import datetime, timezone, timedelta
         try:
-            _tz_off = int(os.environ.get("LOCAL_TZ_OFFSET", "-7"))
-            _tz = timezone(timedelta(hours=_tz_off))
-            _now = datetime.now(_tz)
-            _clock = _now.strftime("%-I:%M %p %Z, %A %B %d, %Y")
+            from gaia_common.utils.locality import local_now
+            _clock = local_now().strftime("%-I:%M %p %Z, %A %B %d, %Y")
         except Exception:
             _clock = _tc_time.strftime("%Y-%m-%d %H:%M:%S UTC", _tc_time.gmtime())
 

@@ -446,9 +446,8 @@ def _query_system_context(query: str) -> List[GroundingResult]:
     if any(s in q for s in time_signals):
         from datetime import datetime, timezone, timedelta
         try:
-            _tz_off = int(os.environ.get("LOCAL_TZ_OFFSET", "-7"))
-            _tz = timezone(timedelta(hours=_tz_off))
-            _now = datetime.now(_tz)
+            from gaia_common.utils.locality import local_now
+            _now = local_now()
             _display = _now.strftime("%-I:%M %p %Z, %A %B %d, %Y")
             _utc = _now.astimezone(timezone.utc).strftime("%H:%M UTC")
             results.append(GroundingResult(

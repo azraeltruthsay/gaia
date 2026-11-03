@@ -252,6 +252,24 @@ def save_blueprint(blueprint: FixBlueprint, path: str = BLUEPRINT_QUEUE_PATH) ->
     logger.info("Fix blueprint saved: %s — %s", blueprint.blueprint_id, blueprint.title)
 
 
+def has_blueprint_for(detection: Dict[str, Any], path: str = BLUEPRINT_QUEUE_PATH) -> bool:
+    """Whether a plan already exists for this kind of issue in this file. The
+    same complaint produced 105 identical plans, one a cycle (wlmf)."""
+    key = (detection.get("issue_type"), detection.get("file_path"))
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    seen = json.loads(line).get("source_detection") or {}
+                except ValueError:
+                    continue
+                if (seen.get("issue_type"), seen.get("file_path")) == key:
+                    return True
+    except OSError:
+        pass
+    return False
+
+
 def read_blueprints(path: str = BLUEPRINT_QUEUE_PATH, limit: int = 20) -> List[Dict[str, Any]]:
     """Read pending fix blueprints."""
     p = Path(path)

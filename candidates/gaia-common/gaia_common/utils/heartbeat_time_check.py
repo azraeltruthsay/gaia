@@ -29,6 +29,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.request import Request, urlopen
 
+from gaia_common.utils.locality import local_now
+
 logger = logging.getLogger("GAIA.Heartbeat")
 
 # ── Configuration ────────────────────────────────────────────────────────
@@ -59,9 +61,7 @@ def _extract_time_from_response(text: str) -> Optional[tuple]:
 
 def _get_local_time() -> tuple:
     """Get current local time as (hour_24, minute)."""
-    tz_offset = int(os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))
-    local_tz = timezone(timedelta(hours=tz_offset))
-    now = datetime.now(local_tz)
+    now = local_now()
     return now.hour, now.minute
 
 
@@ -115,11 +115,7 @@ def run_time_check(endpoint: str = NANO_ENDPOINT) -> Dict[str, Any]:
     try:
         # Inject the actual clock so Nano can read it — Nano doesn't have
         # an internal clock; it relies on the prompt for time awareness.
-        _tz_offset = int(os.environ.get("GAIA_LOCAL_TZ_OFFSET", "-7"))
-        _tz_label = os.environ.get("GAIA_LOCAL_TZ_LABEL", "PDT")
-        _local_tz = timezone(timedelta(hours=_tz_offset))
-        _now = datetime.now(_local_tz)
-        _clock = _now.strftime("%-I:%M %p") + f" {_tz_label}, " + _now.strftime("%A, %B %d, %Y")
+        _clock = local_now().strftime("%-I:%M %p %Z, %A, %B %d, %Y")
 
         # Ask via Nano's OpenAI-compatible chat endpoint
         payload = json.dumps({
@@ -279,21 +275,24 @@ def _heartbeat_loop(interval: int, endpoint: str) -> None:
                     "Heartbeat: FAIL — claimed %s, actual %s (drift %s min)",
                     result["claimed_time"], result["actual_time"], result["drift_minutes"],
                 )
-                # Emit to CodeMind detect queue for investigation
-                try:
-                    from gaia_common.utils.codemind_detector import emit_detection
-                    emit_detection(
-                        source="immune_irritation",
-                        issue_type="timing_error",
-                        file_path="gaia-core/gaia_core/utils/prompt_builder.py",
-                        description=(
-                            f"Heartbeat time check failed: Nano claimed {result['claimed_time']} "
-                            f"but actual is {result['actual_time']} (drift {result['drift_minutes']}min)"
-                        ),
-                        severity="warn",
-                    )
-                except ImportError:
-                    pass
+                # Only a wrong time is a timing error for CodeMind: "claimed
+                # None" (no time in the reply) produced 105 identical plans to
+                # fix clock drift (wlmf).
+                if result["claimed_time"] is not None:
+                    try:
+                        from gaia_common.utils.codemind_detector import emit_detection
+                        emit_detection(
+                            source="immune_irritation",
+                            issue_type="timing_error",
+                            file_path="gaia-core/gaia_core/utils/prompt_builder.py",
+                            description=(
+                                f"Heartbeat time check failed: Nano claimed {result['claimed_time']} "
+                                f"but actual is {result['actual_time']} (drift {result['drift_minutes']}min)"
+                            ),
+                            severity="warn",
+                        )
+                    except ImportError:
+                        pass
             else:
                 logger.warning("Heartbeat: ERROR — %s", result["error"])
 

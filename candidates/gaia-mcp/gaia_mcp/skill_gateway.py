@@ -208,9 +208,8 @@ class SkillGateway:
                     import os
                     from datetime import datetime, timezone, timedelta
                     try:
-                        tz_off = int(os.environ.get("LOCAL_TZ_OFFSET", "-7"))
-                        tz = timezone(timedelta(hours=tz_off))
-                        now = datetime.now(tz)
+                        from gaia_common.utils.locality import local_now
+                        now = local_now()
                         display = now.strftime("%-I:%M %p %Z, %A %B %d, %Y")
                         results.append({
                             "source": "system_clock",
