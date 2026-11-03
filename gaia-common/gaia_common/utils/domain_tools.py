@@ -152,7 +152,7 @@ DOMAIN_TOOLS: Dict[str, dict] = {
 
     # ── MemPalace ──────────────────────────────────────────────────────
     "palace": {
-        "description": "Structured memory palace — store, recall, navigate GAIA's long-term memories; lookups = what you looked up before, with sources",
+        "description": "Structured memory palace — store, recall, navigate GAIA's long-term memories; lookups = what you looked up before, with sources; work = a poem or speech you know word for word",
         "actions": {
             "store": {
                 "params": {"text": "string", "source": "string?", "date": "string?"},
@@ -175,6 +175,10 @@ DOMAIN_TOOLS: Dict[str, dict] = {
             "lookups": {
                 "params": {"query": "string?", "top_k": "integer?", "archive": "boolean?"},
                 "maps_to": "palace_lookups",
+            },
+            "work": {
+                "params": {"query": "string"},
+                "maps_to": "palace_recall_work",
             },
             "pin": {
                 "params": {"ids": "list?", "palace_id": "string?", "pinned": "boolean?"},

@@ -10,6 +10,8 @@ from gaia_core.memory.semantic_codex import SemanticCodex
 from gaia_core.ethics.core_identity_guardian import CoreIdentityGuardian
 from gaia_core.memory.codex_writer import CodexWriter
 from dataclasses import dataclass
+import time
+import urllib.parse
 from typing import Generator, Dict, Any, List, Optional, Tuple
 
 from gaia_core.cognition.external_voice import ExternalVoice
@@ -53,7 +55,8 @@ from gaia_common.protocols.cognition_packet import (
     # Output Routing (Spinal Column)
     OutputDestination, OutputRouting, DestinationTarget,
 )
-from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detect_fragmentation_request
+from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detect_fragmentation_request, _has_named_work_signal
+from gaia_common.utils.work_memory import asks_for_the_words, best_agreement, excerpt, requested_part, work_name
 # o9dh/saq3: aliased -- this is a DIFFERENT enum from cognition_packet's
 # TargetEngine (different members: NANO/CORE/PRIME here vs PRIME/CORE/LITE/
 # CODEMIND/COUNCIL there, and even different string values, "prime" vs
@@ -78,6 +81,9 @@ from gaia_core.cognition.loop_recovery import (
 
 logger = logging.getLogger("GAIA.AgentCore")
 HISTORY_SUMMARY_THRESHOLD = 20
+_RECITATION_FETCHES = 8  # Pages compared when learning a work from the web
+_RECITATION_FETCH_SECONDS = 30  # Enough for eight; a slow site must not hold the turn
+_MIN_WORK_CHARS = 50  # Short poems are short: The Red Wheelbarrow is ~100
 MAX_OUTPUT_LENGTH = 500  # Max length for command output
 
 # Pattern to match <think>...</think> blocks (including multiline content)
@@ -3033,49 +3039,45 @@ class AgentCore:
             # ── Recitation Pipeline ────────────────────────────────────
             # When the classifier detects intent=recitation (only reachable
             # now for requests naming a specific work — see
-            # _has_named_work_signal in nlu/intent_detection.py), fetch the
-            # validated source material and stream it directly.  Follow-up
+            # _has_named_work_signal in nlu/intent_detection.py), take the
+            # text from her memory palace or the web and stream it directly,
+            # or say she doesn't have it. Never generated: the weights hold
+            # how she thinks, not the words of a poem (yx93).  Follow-up
             # questions about already-recited content are classified as
             # "comprehension" by the embedding classifier and go through the
             # normal cognitive pipeline.
             #
-            # Single retrieval path: _web_retrieve_for_recitation builds a
-            # clean search query and runs _validate_recitation_content on
-            # every candidate before accepting it (GAIA_Project-9n8z — the
-            # old _fetch_recitation_source streamed the first hit verbatim
-            # with no validation at all, which is how a poets.org lesson
-            # plan got recited as if it were a poem).
+            # Single retrieval path: _web_retrieve_for_recitation checks the
+            # palace, then requires two sites to agree on the words
+            # (GAIA_Project-9n8z — the old _fetch_recitation_source streamed
+            # the first hit verbatim with no validation at all, which is how
+            # a poets.org lesson plan got recited as if it were a poem).
+            if plan.intent == "recitation" and not asks_for_the_words(user_input):
+                # A question about a work, not a request for its words: she
+                # answers it, with the work in hand if she knows it.
+                self.logger.info("Recitation intent on a question about a work — treating as comprehension")
+                plan.intent = "comprehension"
             if plan.intent == "recitation":
+                self.logger.info("Recitation pipeline: fetching source material for '%s'", user_input[:80])
                 try:
-                    self.logger.info("Recitation pipeline: fetching source material for '%s'", user_input[:80])
                     _recitation_doc = self._web_retrieve_for_recitation(user_input, session_id)
-                    if _recitation_doc:
-                        _title_line = _recitation_doc.get("title", "")
-                        _body = (_recitation_doc.get("content", "") or "").strip()
-                        _intro = f"Here is **{_title_line or 'the requested text'}**:\n\n"
-
-                        self.logger.info("Recitation pipeline: direct streaming %d chars", len(_body))
-                        yield {"type": "token", "value": _intro + _body}
-                        yield {"type": "flush"}
-
-                        # Finalize the packet and yield it for Discord/web consumers
-                        import gaia_common.protocols.cognition_packet as _cp
-                        packet.response.candidate = _intro + _body
-                        packet.response.confidence = 1.0
-                        packet.status.state = _cp.PacketState.COMPLETED
-                        self.session_manager.add_message(session_id, "assistant", packet.response.candidate)
-                        yield {"type": "packet", "value": packet.to_dict()}
-                        return
-                    else:
-                        # No validated source found for a request that DOES
-                        # name a specific work — don't keep treating this as
-                        # "recitation" (that forces temperature=0.0 later,
-                        # inviting confabulation with no source to be
-                        # faithful to). Let Core answer honestly instead.
-                        self.logger.info("Recitation pipeline: no validated source found — downgrading intent to comprehension")
-                        plan.intent = "comprehension"
                 except Exception:
-                    self.logger.warning("Recitation pipeline failed — falling through to cognitive pipeline", exc_info=True)
+                    self.logger.warning("Recitation pipeline failed", exc_info=True)
+                    _recitation_doc = None
+                _reply = self._recitation_reply(user_input, _recitation_doc)
+                self.logger.info("Recitation pipeline: direct streaming %d chars (source found: %s)",
+                                 len(_reply), bool(_recitation_doc))
+                yield {"type": "token", "value": _reply}
+                yield {"type": "flush"}
+
+                # Finalize the packet and yield it for Discord/web consumers
+                import gaia_common.protocols.cognition_packet as _cp
+                packet.response.candidate = _reply
+                packet.response.confidence = 1.0 if _recitation_doc else 0.0
+                packet.status.state = _cp.PacketState.COMPLETED
+                self.session_manager.add_message(session_id, "assistant", _reply)
+                yield {"type": "packet", "value": packet.to_dict()}
+                return
 
             # Research Glance: for comprehension intents (and partial recitation
             # queries that routed here), check /knowledge/research/ for cached
@@ -7399,6 +7401,9 @@ RESULT: COMPLEX (reason: <brief reason>)
                     self.logger.exception("Web-retrieved document recitation failed, falling back")
                     # Fall through to confidence-based approach
 
+            if _has_named_work_signal(user_input) and asks_for_the_words(user_input):
+                return self._recitation_reply(user_input, None)
+
             # No document found (local or web) - use confidence-based approach
             self.logger.info("No document found (local or web), assessing task confidence...")
 
@@ -7605,21 +7610,21 @@ RESULT: COMPLEX (reason: <brief reason>)
 
     @staticmethod
     def _build_recitation_search_query(user_input: str) -> str:
-        """Strip action verbs and qualifiers, append 'full text' for a search-friendly query."""
-        import re
-        q = user_input
-        # Remove common request preambles
-        q = re.sub(
-            r"(?i)^(please\s+)?(recite|read|share|give me|show me|write out|type out|present)\s+",
-            "",
-            q,
-        )
-        # Remove trailing qualifiers
-        q = re.sub(r"(?i)\s+(for me|please|if you (can|could|would))\.?$", "", q)
-        q = q.strip().rstrip(".")
-        if q:
-            q += " full text"
-        return q
+        """The named work plus 'full text', without the request around it."""
+        name = work_name(user_input)
+        return f"{name} full text" if name else ""
+
+    @staticmethod
+    def _recitation_reply(user_input: str, document: Optional[Dict[str, str]]) -> str:
+        """What she says: the part of the text that was asked for, or that she
+        doesn't have it."""
+        if not document:
+            name = work_name(user_input) or "that text"
+            return (f"I don't have {name} in my memory palace, and I couldn't find two sources "
+                    "that agree on its words just now. I'd rather tell you that than guess at them.")
+        title = document.get("title") or "the requested text"
+        body = (document.get("content") or "").strip()
+        return f"Here is **{title}**:\n\n{excerpt(body, requested_part(user_input)) or body}"
 
     # Marks a page as being ABOUT a work (a lesson plan, study guide,
     # discussion aid) rather than the work itself. Domain trust doesn't
@@ -7646,49 +7651,71 @@ RESULT: COMPLEX (reason: <brief reason>)
         except Exception:
             path = (url or "").lower()
             host = ""
-        # Never the work itself: a whole encyclopedia article got recited as
-        # "The Raven" (yx93).
-        if any(host == d or host.endswith("." + d) for d in ("wikipedia.org", "youtube.com", "youtu.be")):
+        if any(host == d or host.endswith("." + d) for d in ("youtube.com", "youtu.be")):
             return True
         return any(seg in path for seg in (
             "/lesson-plan", "/lesson_plan", "/teach", "/curriculum",
-            "/study-guide", "/study_guide", "/analysis",
-        ))
+            "/study-guide", "/study_guide", "/analysis", "/anthology/", "/articles/",
+        )) or "/wiki/author:" in path
 
     def _validate_recitation_content(self, content: str, user_input: str) -> bool:
-        """Gate on length, minimal relevance, and reject instructional/meta pages."""
-        if not content or len(content) < 200 or len(content) > 100_000:
+        """Gate agreed text on length and reject instructional/meta pages. No
+        keyword check: best_agreement saw the pages name the work, and a poem
+        needn't name itself ("Invictus" never says "Invictus")."""
+        if not content or len(content) < _MIN_WORK_CHARS or len(content) > 100_000:
             return False
         content_lower = content.lower()
-        if any(marker in content_lower for marker in self._INSTRUCTIONAL_CONTENT_MARKERS):
-            return False
-        # Extract salient nouns from the user input for a rough relevance check
-        import re
-        words = re.findall(r"[A-Za-z]{3,}", user_input.lower())
-        stop = {"the", "and", "for", "please", "recite", "read", "share",
-                "give", "show", "write", "type", "first", "three", "stanzas",
-                "stanza", "full", "text", "from", "out", "with", "that", "this",
-                "can", "could", "would", "you", "your", "poem", "speech"}
-        keywords = [w for w in words if w not in stop]
-        if not keywords:
-            return True  # no keywords to check — accept on length alone
-        hits = sum(1 for kw in keywords if kw in content_lower)
-        return hits >= 1  # at least one salient keyword present
+        return not any(marker in content_lower for marker in self._INSTRUCTIONAL_CONTENT_MARKERS)
+
+    def _recall_work(self, user_input: str) -> Optional[Dict[str, str]]:
+        """The whole text from her memory palace, if she knows it."""
+        resp = mcp_client.call_jsonrpc("palace_recall_work", {"query": work_name(user_input), "recited": True})
+        payload = resp.get("response", resp) if isinstance(resp, dict) else {}
+        if isinstance(payload, dict) and "result" in payload:
+            payload = payload["result"]
+        if not (isinstance(payload, dict) and payload.get("found") and payload.get("text")):
+            return None
+        self.logger.info("Recitation: %r recalled from the palace (%d chars)", payload.get("name"), len(payload["text"]))
+        return {"title": payload.get("name", ""), "content": payload["text"]}
+
+    def _fetch_recitation_page(self, result: Dict[str, str]) -> Optional[Dict[str, str]]:
+        url = result.get("url", "")
+        try:
+            resp = mcp_client.call_jsonrpc("web_fetch", {"url": url, "keep_breaks": True})
+        except Exception:
+            self.logger.debug("web_fetch failed for %s", url, exc_info=True)
+            return None
+        payload = resp.get("response", resp) if isinstance(resp, dict) else {}
+        if isinstance(payload, dict) and "result" in payload:
+            payload = payload["result"]
+        if not resp.get("ok") or not isinstance(payload, dict) or not payload.get("content"):
+            return None
+        return {"url": url, "domain": payload.get("domain", ""), "content": payload["content"],
+                "title": payload.get("title") or result.get("title", "")}
 
     def _web_retrieve_for_recitation(
         self,
         user_input: str,
         session_id: str,
     ) -> Optional[Dict[str, str]]:
-        """Search the web for a well-known text and return {title, content} or None.
+        """The text of a named work as {title, content}, or None.
 
-        Orchestrates: web_search → sort by trust tier → web_fetch top 3 → validate.
-        Every failure path returns None so the caller can fall through gracefully.
+        Her memory palace first. Otherwise: web_search → fetch several pages →
+        keep what two sites agree on → remember it. One page alone can't be
+        told from a catalog entry about the work, so it isn't trusted.
+        Every failure path returns None so the caller can say she doesn't have it.
         """
-
+        name = work_name(user_input)
         query = self._build_recitation_search_query(user_input)
         if not query:
             return None
+
+        try:
+            remembered = self._recall_work(user_input)
+            if remembered:
+                return remembered
+        except Exception:
+            self.logger.warning("Palace recall failed for recitation", exc_info=True)
 
         # Determine content_type hint from the request
         input_lower = user_input.lower()
@@ -7701,13 +7728,21 @@ RESULT: COMPLEX (reason: <brief reason>)
 
         try:
             # Try with content_type first (adds trusted-domain site: filters),
-            # then retry without if the site-filtered query returns nothing.
+            # then widen until two sites agree: which pages a search returns
+            # varies, and a site-limited one may not reach a second copy.
             search_attempts = []
             if content_type:
-                search_attempts.append({"query": query, "max_results": 5, "content_type": content_type})
-            search_attempts.append({"query": query, "max_results": 5})  # unfiltered fallback
+                search_attempts.append({"query": query, "max_results": 8, "content_type": content_type})
+            search_attempts.append({"query": query, "max_results": 8})  # unfiltered fallback
+            search_attempts.append({"query": name, "max_results": 8})
 
-            results = []
+            agreed = None
+            pages: List[Dict[str, str]] = []
+            seen_urls = set()
+            fetched = 0
+            deadline = time.monotonic() + _RECITATION_FETCH_SECONDS
+            # Sort by trust tier: trusted > reliable > unknown
+            tier_priority = {"trusted": 0, "reliable": 1, "unknown": 2}
             for search_params in search_attempts:
                 self.logger.info(f"Web recitation search: {search_params}")
                 resp = mcp_client.call_jsonrpc("web_search", search_params)
@@ -7721,60 +7756,44 @@ RESULT: COMPLEX (reason: <brief reason>)
                 if isinstance(payload, dict) and "result" in payload:
                     payload = payload["result"]
 
-                results = payload.get("results", [])
-                if results:
-                    break  # got results, stop searching
+                # Domain trust doesn't disambiguate lesson-plan/study-guide
+                # pages from the work itself (poets.org hosts both) — screen
+                # by path before spending a fetch on them.
+                results = [r for r in payload.get("results", [])
+                           if r.get("url") and r["url"] not in seen_urls
+                           and not self._is_instructional_url(r["url"])]
+                results.sort(key=lambda r: tier_priority.get(r.get("trust_tier", "unknown"), 2))
 
-            if not results:
-                self.logger.info("web_search returned no results for recitation query")
+                # One at a time: parallel fetches crashed a test process with
+                # heap corruption (native extraction code), not a risk for gaia-mcp.
+                for result in results:
+                    if fetched >= _RECITATION_FETCHES or time.monotonic() > deadline:
+                        break
+                    seen_urls.add(result["url"])
+                    if result.get("trust_tier", "unknown") == "unknown":
+                        continue  # not on the allowlist: web_fetch would refuse it
+                    fetched += 1
+                    page = self._fetch_recitation_page(result)
+                    if page:
+                        pages.append(page)
+
+                agreed = best_agreement(pages, name)
+                if agreed and self._validate_recitation_content(agreed["text"], user_input):
+                    break
+                agreed = None
+
+            if not agreed:
+                self.logger.info("No two of %d recitation pages agree on the text of %r", len(pages), name)
                 return None
 
-            # Sort by trust tier: trusted > reliable > unknown
-            tier_priority = {"trusted": 0, "reliable": 1, "unknown": 2}
-            results.sort(key=lambda r: tier_priority.get(r.get("trust_tier", "unknown"), 2))
-
-            # Domain trust doesn't disambiguate lesson-plan/study-guide pages
-            # from the work itself (poets.org hosts both) — screen by path
-            # before spending a fetch on a candidate that can't pass anyway.
-            results = [r for r in results if not self._is_instructional_url(r.get("url", ""))]
-            if not results:
-                self.logger.info("All recitation candidates were instructional/about-the-work pages")
-                return None
-
-            # Try fetching top 3 results
-            for result in results[:3]:
-                url = result.get("url", "")
-                if not url:
-                    continue
-                try:
-                    self.logger.info(f"Web recitation fetch: {url} (tier={result.get('trust_tier')})")
-                    fetch_resp = mcp_client.call_jsonrpc("web_fetch", {"url": url})
-
-                    if not fetch_resp.get("ok"):
-                        continue
-
-                    fetch_payload = fetch_resp.get("response", fetch_resp)
-                    if isinstance(fetch_payload, dict) and "result" in fetch_payload:
-                        fetch_payload = fetch_payload["result"]
-
-                    content = fetch_payload.get("content", "")
-                    title = fetch_payload.get("title") or result.get("title", "Web Document")
-
-                    if self._validate_recitation_content(content, user_input):
-                        self.logger.info(
-                            f"Web recitation content validated: {title!r} ({len(content)} chars)"
-                        )
-                        return {"title": title, "content": content}
-                    else:
-                        self.logger.info(
-                            f"Web recitation content rejected: {title!r} ({len(content)} chars)"
-                        )
-                except Exception:
-                    self.logger.debug("web_fetch failed for %s", url, exc_info=True)
-                    continue
-
-            self.logger.info("No valid recitation content found from web search")
-            return None
+            self.logger.info("Recitation text agreed by %s (%d chars)",
+                             [s["url"] for s in agreed["sources"]], len(agreed["text"]))
+            try:
+                mcp_client.call_jsonrpc("palace_store_work", {
+                    "name": name, "text": agreed["text"], "sources": agreed["sources"]})
+            except Exception:
+                self.logger.warning("Could not remember %r in the palace", name, exc_info=True)
+            return {"title": name, "content": agreed["text"]}
 
         except Exception:
             self.logger.debug("_web_retrieve_for_recitation failed", exc_info=True)

@@ -297,3 +297,29 @@ class TestAbsoluteResults:
         good = {"href": "https://www.gutenberg.org/x"}
         self._ddgs(monkeypatch, [{"href": "/url?q=a"}], [good])
         assert web_tools._ddg_search("q", 5) == [good]
+
+
+class TestTextWithBreaks:
+    """yx93: sites mark a stanza in different ways; all must come out the same."""
+
+    WANT = "One\nTwo\n\nThree\nFour"
+
+    def _check(self, html):
+        from gaia_mcp.web_tools import _text_with_breaks
+        assert _text_with_breaks(f"<html><body>{html}</body></html>") == self.WANT
+
+    def test_paragraph_of_br_lines(self):
+        self._check("<p>One<br>\nTwo</p><p>Three<br>Four</p>")
+
+    def test_line_divs_with_br_only_div_between(self):
+        self._check("<div>One<br></div><div>Two<br></div><div><br></div><div>Three<br></div><div>Four<br></div>")
+
+    def test_line_paragraphs_with_empty_paragraph_between(self):
+        self._check("<p>One</p><p>Two</p><p><br></p><p>Three</p><p>Four</p>")
+
+    def test_preformatted_text(self):
+        self._check('<pre>One\nTwo\n\nThree\nFour</pre>')
+
+    def test_inline_tags_stay_on_their_line_and_scripts_go(self):
+        from gaia_mcp.web_tools import _text_with_breaks
+        assert _text_with_breaks("<body><script>x()</script><p><em>One</em> two</p></body>") == "One two"

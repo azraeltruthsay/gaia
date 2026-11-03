@@ -122,3 +122,28 @@ def test_recall_accepts_the_words_she_uses_and_browses_without_one(palace):
     browse = tools._palace_recall_impl({})
     assert browse["ok"] and browse["results"][0]["fact"] == LADY["snippet"]
     assert "No query given" in browse["note"]
+
+
+# ── yx93: work memory ────────────────────────────────────────────────
+
+POEM = "One two three four five six seven eight.\n\nNine ten eleven twelve thirteen fourteen."
+
+
+def test_store_work_requires_two_sources(palace):
+    assert not tools._palace_store_work_impl({"name": "Numbers", "text": POEM, "sources": [{"url": "a"}]})["ok"]
+    assert tools._palace_store_work_impl({"name": "Numbers", "text": POEM, "sources": [{"url": "a"}, {"url": "b"}]})["ok"]
+
+
+def test_recall_work_whole_part_and_unknown(palace):
+    tools._palace_store_work_impl({"name": "Numbers", "text": POEM, "sources": [{"url": "a"}, {"url": "b"}]})
+    assert tools._palace_recall_work_impl({"query": "Numbers"})["text"] == POEM
+    assert tools._palace_recall_work_impl({"query": "the last stanza of Numbers"})["text"].startswith("Nine")
+    assert tools._palace_recall_work_impl({"query": "Letters"})["found"] is False
+    assert not tools._palace_recall_work_impl({})["ok"]
+
+
+def test_palace_recall_brings_the_work_along(palace):
+    tools._palace_store_work_impl({"name": "Numbers", "text": POEM, "sources": [{"url": "a"}, {"url": "b"}]})
+    out = palace.recall("Numbers")
+    assert out["works"][0]["text"] == POEM and out["works"][0]["sources"] == ["a", "b"]
+    assert palace.status()["works"] == 1

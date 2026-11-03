@@ -14,11 +14,34 @@ from unittest.mock import MagicMock, patch
 
 from gaia_core.cognition.nlu.intent_detection import (
     _has_named_work_signal,
+    _is_recite_request,
     _detect_fragmentation_request,
     _model_intent_detection_inner,
 )
 from gaia_core.cognition.nlu.router import NeuralRouter
 from gaia_core.config import get_config
+
+
+# ── _is_recite_request: said outright, the classifier doesn't get a vote (yx93) ──
+
+@pytest.mark.parametrize("text", [
+    "Recite the Gettysburg Address",
+    "Please recite The Raven",
+    "Could you recite Sonnet 18 by William Shakespeare?",
+    'recite "Ozymandias"',
+])
+def test_recite_request_true(text):
+    assert _is_recite_request(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Recite a haiku about rain",
+    "recite a poem",
+    "Why did you recite The Raven?",
+    "What does the bird say in The Raven?",
+])
+def test_recite_request_false(text):
+    assert not _is_recite_request(text)
 
 
 # ── _has_named_work_signal: the shared gate (pure, static) ──────────────

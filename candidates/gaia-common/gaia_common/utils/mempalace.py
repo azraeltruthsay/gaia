@@ -49,6 +49,7 @@ from gaia_common.utils.aaak_dialect import AAKDialect
 from gaia_common.utils.general_extractor import extract_memories
 from gaia_common.utils.knowledge_graph import KnowledgeGraph
 from gaia_common.utils.lookup_memory import LookupMemory, compact_lookup
+from gaia_common.utils.work_memory import WorkMemory, compact_work
 
 logger = logging.getLogger("GAIA.MemPalace")
 
@@ -80,6 +81,8 @@ class MemPalace:
         # 0vuz: what she has looked up, verbatim + provenance (the AAAK
         # wings keep only compressed codes, which can't answer a question).
         self.lookups = LookupMemory(self._root_dir / "knowledge" / "lookups")
+        # yx93: whole texts she knows by heart, word for word.
+        self.works = WorkMemory(self._root_dir / "knowledge" / "works")
         lifecycle = config.get("lifecycle", {}) or {}
         self._permanent = tuple(lifecycle.get("permanent", DEFAULT_PERMANENT))
         self._archive_after_days = float(lifecycle.get("archive_after_days", DEFAULT_ARCHIVE_AFTER_DAYS))
@@ -471,11 +474,19 @@ class MemPalace:
             logger.warning("MemPalace: lookup recall failed for %r: %s", query[:80], e)
             lookups = []
 
-        # Lookups first: they hold the facts, and a truncated tool result
-        # (what the model sees) should cut the AAAK codes, not them.
+        try:
+            work = self.works.recall(query)
+        except Exception as e:
+            logger.warning("MemPalace: work recall failed for %r: %s", query[:80], e)
+            work = None
+
+        # Works and lookups first: they hold the words and facts, and a
+        # truncated tool result (what the model sees) should cut the AAAK
+        # codes, not them.
         return {
             "ok": True,
             "query": query,
+            "works": [compact_work(work)] if work else [],
             "lookups": lookups,
             "results": results,
             "result_count": len(results),
@@ -609,6 +620,7 @@ class MemPalace:
             "archived": sum(1 for _ in self._archive_dir.rglob("*.aaak")) if self._archive_dir.exists() else 0,
             "pinned": len(self._pins() - {"*"}),
             "lookups": self._lookup_stats(),
+            "works": self.works.stats()["works"],
         }
 
     # ── Lifecycle ────────────────────────────────────────────────────────

@@ -416,6 +416,8 @@ def web_fetch(params: dict) -> dict:
 
     Params:
         url (str, required): The URL to fetch.
+        keep_breaks (bool, optional): Return the whole page's text with its
+            line and stanza breaks, for reading a poem or speech word for word.
 
     Returns dict with keys: ok, title, content, domain, trust_tier, bytes.
     """
@@ -494,6 +496,9 @@ def web_fetch(params: dict) -> dict:
         "title": title, "url": url, "snippet": text,
         "domain": domain, "trust_tier": tier,
     }], "fetch")
+    # After remembering: lookups keep the article, not the page's menus.
+    if params.get("keep_breaks"):
+        text = _text_with_breaks(html) or text
     return {
         "ok": True,
         "title": title,
@@ -504,6 +509,79 @@ def web_fetch(params: dict) -> dict:
         "bytes": len(text),
         "word_count": len(text.split()),
     }
+
+
+_BLOCK_TAGS = frozenset("""
+address article aside blockquote center dd details div dl dt figcaption figure
+form h1 h2 h3 h4 h5 h6 hr li main ol p pre section table tbody td th thead tr ul
+""".split())
+
+
+def _text_with_breaks(html: str) -> str:
+    """A page's text with its breaks: one line per line, a blank line between
+    stanzas. trafilatura flattens these, and sites mark a stanza in different
+    ways: a <p> of <br> lines, a <p> or <div> holding only <br>, or a blank
+    line inside pre-formatted text."""
+    try:
+        from bs4 import BeautifulSoup, NavigableString, Tag
+    except ImportError:
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript", "template", "svg", "nav", "header", "footer", "aside", "form"]):
+        tag.decompose()
+
+    lines = []
+    current = []
+
+    def end_line():
+        text = " ".join("".join(current).replace("\xa0", " ").split())
+        current.clear()
+        if text:
+            lines.append(text)
+
+    def blank():
+        end_line()
+        if lines and lines[-1] != "":
+            lines.append("")
+
+    def walk(node):
+        for child in node.children:
+            if isinstance(child, NavigableString):
+                if type(child) is NavigableString:
+                    parts = re.split(r"\n[ \t\xa0]*\n", str(child))
+                    for i, part in enumerate(parts):
+                        if i:
+                            blank()
+                        pieces = part.split("\n") if _is_preformatted(node) else [part]
+                        for j, piece in enumerate(pieces):
+                            if j:
+                                end_line()
+                            current.append(piece)
+            elif isinstance(child, Tag):
+                if child.name == "br":
+                    end_line()
+                elif child.name in _BLOCK_TAGS:
+                    end_line()
+                    before = len(lines)
+                    walk(child)
+                    had_br = child.find("br") is not None
+                    end_line()
+                    if not child.get_text(strip=True).replace("\xa0", ""):
+                        if had_br:
+                            blank()
+                    elif had_br and len(lines) - before > 1 and child.name in ("p", "blockquote", "div"):
+                        blank()
+                else:
+                    walk(child)
+
+    walk(soup.body or soup)
+    end_line()
+    return "\n".join(lines).strip()
+
+
+def _is_preformatted(node) -> bool:
+    style = (node.get("style") or "") if hasattr(node, "get") else ""
+    return getattr(node, "name", "") == "pre" or "pre-" in style or "pre;" in style
 
 
 def _extract_content(html: str, url: str) -> Tuple[str, str]:

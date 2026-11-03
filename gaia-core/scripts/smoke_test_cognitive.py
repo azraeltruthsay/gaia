@@ -387,9 +387,12 @@ TEST_CASES = [
         prompt="Please recite the first three stanzas of The Raven by Edgar Allan Poe.",
         validators=[
             v_non_empty,
-            v_min_length(300),
-            v_contains_any("midnight dreary", "midnight", "dreary"),
-            v_contains_any("nevermore", "nothing more"),
+            # Real lines from each end of what was asked: a guess at the poem
+            # and a page about it both contain "nevermore" (yx93).
+            v_contains_any("Once upon a midnight dreary"),
+            # Editions differ in the commas before this.
+            v_contains_any("uncertain rustling of each purple curtain"),
+            v_excludes_all("Presently my soul grew stronger"),
         ],
     ),
     TestCase(

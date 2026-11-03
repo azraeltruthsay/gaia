@@ -320,6 +320,9 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         # 0vuz: lookup memory — what GAIA has looked up, with provenance
         "palace_store_lookup": lambda p: _palace_store_lookup_impl(p),
         "palace_recall_lookup": lambda p: _palace_recall_lookup_impl(p),
+        # yx93: work memory — whole texts she knows word for word
+        "palace_store_work": lambda p: _palace_store_work_impl(p),
+        "palace_recall_work": lambda p: _palace_recall_work_impl(p),
         "palace_dispute_lookup": lambda p: _palace_dispute_lookup_impl(p),
         # 6afh: did a lookup actually answer? + pin/archive lifecycle
         "palace_lookup_feedback": lambda p: _palace_lookup_feedback_impl(p),
@@ -1152,6 +1155,40 @@ def _palace_recall_impl(params: dict) -> dict:
     top_k = int(params.get("top_k", 5))
     return palace.recall(query, top_k=top_k, include_archive=bool(params.get("include_archive")),
                          include_lookups=params.get("include_lookups", True) is not False)
+
+
+def _palace_store_work_impl(params: dict) -> dict:
+    """Keep a whole text, already verified by the caller against two sources."""
+    name, text = params.get("name"), params.get("text")
+    sources = params.get("sources")
+    if not name or not text or not isinstance(sources, list) or len(sources) < 2:
+        return {"ok": False, "error": "name, text and at least two sources required"}
+    rid = _get_palace().works.remember(name, text, sources)
+    return {"ok": bool(rid), "id": rid}
+
+
+def _palace_recall_work_impl(params: dict) -> dict:
+    """A work she knows, whole or the part asked for ('first three stanzas of
+    The Raven'). `recited` counts the use; `mentioned` also finds a work a
+    question only names in passing."""
+    from gaia_common.utils.work_memory import excerpt, requested_part
+    query = _query_param(params)
+    if not query:
+        return {"ok": False, "error": "query parameter required"}
+    works = _get_palace().works
+    rec = works.recall(query) or (works.mentioned(query) if params.get("mentioned") else None)
+    if not rec:
+        return {"ok": True, "found": False, "query": query}
+    if params.get("recited"):
+        works.note_recited(rec["id"])
+    part = requested_part(query)
+    cut = excerpt(rec["text"], part)
+    return {
+        "ok": True, "found": True, "id": rec["id"], "name": rec["name"],
+        "text": cut if cut is not None else rec["text"],
+        "part": part if cut is not None else None,
+        "sources": rec.get("sources", []), "learned": (rec.get("learned_at") or "")[:10],
+    }
 
 
 def _palace_store_lookup_impl(params: dict) -> dict:

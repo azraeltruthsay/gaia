@@ -246,6 +246,7 @@ _AAAK_RECORD_RE = re.compile(r"^\w+\|\w+\|\d{4}-\d{2}-\d{2}\|")
 # Excalibur pages stored for "where did he get it" never say where). So
 # memory alone answers only when a record was confirmed — an earlier answer
 # from it held up (lookup_memory.feedback) — for much the same question.
+MAX_WORK_GROUNDING_CHARS = 2500  # Of a whole poem or speech, in Core's 4K context
 # Unconfirmed memory rides along with a fresh search; records that failed
 # this question before are dropped.
 LOOKUP_MIN_SCORE = 0.34
@@ -263,11 +264,31 @@ def _mcp_result(raw: Any) -> Any:
     return inner
 
 
+def _query_work_memory(query: str) -> List[GroundingResult]:
+    """The words of a work she knows, when a question names it. Two sites
+    agreed on them when she learned it, so they need no fresh search."""
+    try:
+        from gaia_core.utils import mcp_client
+        hit = _mcp_result(mcp_client.call_jsonrpc("palace_recall_work", {"query": query, "mentioned": True}))
+    except Exception as e:
+        logger.debug("Work memory recall failed: %s", e)
+        return []
+    if not (isinstance(hit, dict) and hit.get("found") and hit.get("text")):
+        return []
+    sources = hit.get("sources") or [{}]
+    return [GroundingResult(
+        source="memory", trust_tier="remembered", content=hit["text"][:MAX_WORK_GROUNDING_CHARS],
+        url=sources[0].get("url", ""), query=query, title=hit.get("name", ""),
+        retrieved_at=hit.get("learned", ""), score=1.0,
+        question_match=1.0, confirmed_match=1.0,
+    )]
+
+
 def _query_lookup_memory(query: str, top_k: int = 3,
                          min_score: float = LOOKUP_MIN_SCORE) -> List[GroundingResult]:
     """What GAIA looked up before that bears on ``query`` (gaia-mcp captures
     every web search/fetch into the palace's lookup memory)."""
-    results: List[GroundingResult] = []
+    results: List[GroundingResult] = _query_work_memory(query)
     try:
         from gaia_core.utils import mcp_client
         inner = _mcp_result(mcp_client.call_jsonrpc("palace_recall_lookup", {

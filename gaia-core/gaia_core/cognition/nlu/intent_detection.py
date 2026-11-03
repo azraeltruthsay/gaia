@@ -107,10 +107,21 @@ def _has_named_work_signal(text: str) -> bool:
     # (a global IGNORECASE flag here would make [A-Z] match lowercase too,
     # defeating the whole point of the capitalization check — see the
     # pre-existing bug this replaces at the old rule-4 title_pattern below).
-    if re.search(r'(?i:recite)\s+["\']?([A-Z][^"\'.]+)["\']?', text or ""):
+    if re.search(r'(?i:recite)\s+(?:(?i:the)\s+)?["\']?([A-Z][^"\'.]+)["\']?', text or ""):
         return True
 
     return False
+
+
+_RECITE_REQUEST_RE = re.compile(
+    r"(?i)^\s*(?:(?:hey|hi|ok|okay|gaia|please|can you|could you|would you|will you)[,\s]+)*recite\b"
+)
+
+
+def _is_recite_request(text: str) -> bool:
+    """'Recite <named work>', said outright. The embedding classifier called
+    'Recite the Gettysburg Address' brainstorming, and Core invented a speech."""
+    return bool(_RECITE_REQUEST_RE.match(text or "")) and _has_named_work_signal(text)
 
 
 # ── Nano injection confirmation ─────────────────────────────────────────
@@ -1081,6 +1092,9 @@ def _model_intent_detection_inner(text, config, lite_llm=None, full_llm=None, fa
         if classifier.ready:
             threshold = embed_intent_cfg.get("confidence_threshold", 0.42)
             _embed_intent, _embed_score = classifier.classify(text, confidence_threshold=threshold)
+            if source != "heartbeat" and _embed_intent != "injection" and _is_recite_request(text):
+                logger.info("Recite request names a work: recitation (embed said %s, %.3f)", _embed_intent, _embed_score)
+                return "recitation"
             if _embed_intent != "other" and _embed_score >= _HIGH_CONFIDENCE:
                 # File-keyword guard: downgrade to "chat" if no file references
                 if _embed_intent in {"read_file", "write_file"} and not _mentions_file_like_action(text):
