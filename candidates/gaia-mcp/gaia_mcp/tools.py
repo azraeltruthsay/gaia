@@ -322,6 +322,8 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "palace_store_lookup": lambda p: _palace_store_lookup_impl(p),
         "palace_recall_lookup": lambda p: _palace_recall_lookup_impl(p),
         "palace_validate_lookup": lambda p: _palace_validate_lookup_impl(p),
+        "palace_told_to_check": lambda p: {"ok": True, "results": _get_palace().lookups.told_to_check(limit=int(p.get("limit", 3)))},
+        "palace_record_check": lambda p: {"ok": bool(_get_palace().lookups.record_check(str(p["id"]), str(p["outcome"]), p.get("blanks") or []))},
         # yx93: work memory — whole texts she knows word for word
         "palace_store_work": lambda p: _palace_store_work_impl(p),
         "palace_recall_work": lambda p: _palace_recall_work_impl(p),

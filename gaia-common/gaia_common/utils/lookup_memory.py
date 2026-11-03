@@ -55,6 +55,8 @@ logger = logging.getLogger("GAIA.LookupMemory")
 MIN_SNIPPET_CHARS = 40
 MIN_TOLD_CHARS = 8
 MAX_TELLERS = 20
+RECHECK_TOLD_DAYS = 30
+MAX_CHECKS = 5
 # Page fetches are long; keep the opening, which is what grounding shows.
 MAX_SNIPPET_CHARS = 1500
 MAX_QUERIES_PER_RECORD = 10
@@ -295,8 +297,11 @@ def provenance_note(rec: dict) -> str:
     level = trust_level(rec)
     if level == "validated":
         return f"{note}; checked by {rec['validated'].get('by', 'someone')}"
+    last = (rec.get("checks") or [{}])[-1]
     if level == "disputed":
-        return f"{note}; disputed"
+        return f"{note}; web sources say otherwise" if last.get("outcome") == "contradicted" else f"{note}; disputed"
+    if last.get("outcome") == "no_evidence":
+        return f"{note}; looked for independent evidence on {last['when'][:10]} and couldn't confirm it"
     return f"{note}; not independently checked" if tellers or rec.get("kind") == "told" else note
 
 
@@ -326,6 +331,8 @@ def compact_lookup(rec: dict) -> dict:
         out["source"] = provenance_note(rec)
     if rec.get("validated"):
         out["validated"] = rec["validated"]
+    if rec.get("checks"):
+        out["last_check"] = {k: rec["checks"][-1].get(k) for k in ("when", "outcome")}
     return out
 
 
@@ -488,6 +495,42 @@ class LookupMemory:
             rec.pop("disputed_at", None)
 
         return self._update(ids, change, "validate")
+
+    def told_to_check(self, limit: int = 3, now: Optional[datetime] = None) -> List[dict]:
+        """Told facts due an independent check, oldest check first: not about
+        the teller (nothing online could confirm someone's favorite color), not
+        validated, and not looked into in the last RECHECK_TOLD_DAYS."""
+        now = now or _now()
+        due = []
+        for _p, rec, _a in self._records(False):
+            if rec.get("kind") != "told" or rec.get("about_teller") or rec.get("validated"):
+                continue
+            checks = rec.get("checks") or []
+            since = _days_since(checks[-1].get("when"), now) if checks else None
+            if since is None or since >= RECHECK_TOLD_DAYS:
+                due.append((checks[-1].get("when", "") if checks else "", rec))
+        due.sort(key=lambda t: t[0])
+        return [rec for _w, rec in due[:limit]]
+
+    def record_check(self, rid: str, outcome: str, blanks: list, by: str = "GAIA",
+                     now: Optional[datetime] = None) -> int:
+        """Keep what an independent check found. Backing validates and answers
+        a dispute; a contrary result disputes, whoever told her. Nothing either
+        way only notes that she looked."""
+        stamp = _iso(now or _now())
+
+        def change(rec):
+            rec["checks"] = (rec.get("checks") or [])[-(MAX_CHECKS - 1):] + [
+                {"when": stamp, "by": by, "outcome": outcome, "blanks": blanks}]
+            if outcome == "supported":
+                sites = sorted({u for b in blanks for u in b.get("supports") or []})
+                rec["validated"] = {"by": by, "how": "filled in blanked words from pages, without seeing the claim",
+                                    "evidence": sites, "when": stamp}
+                rec.pop("disputed_at", None)
+            elif outcome == "contradicted":
+                rec["disputed_at"] = stamp
+
+        return self._update([rid], change, "record a check on")
 
     def mark_disputed(self, ids: Iterable[str], now: Optional[datetime] = None) -> int:
         """Flag records as needing revalidation (e.g. the user pushed back on

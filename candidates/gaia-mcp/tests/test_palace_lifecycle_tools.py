@@ -263,6 +263,33 @@ def test_the_architect_has_a_level_of_their_own_and_still_needs_checking(palace)
     assert hit["trust"] == "validated" and "checked by GAIA" in hit["source"]
 
 
+def test_she_cannot_validate_by_calling_a_tool():
+    from gaia_common.utils.domain_tools import DOMAIN_ACTIONS
+    assert "validate" not in DOMAIN_ACTIONS["palace"]
+
+
+def test_which_told_facts_are_due_a_check(palace):
+    rid = tools._knowledge_add_impl({"fact": LANTERN, "_told_by": AZ}, None)["id"]
+    tools._knowledge_add_impl({"fact": "My favorite color is cerulean.", "_told_by": AZ}, None)
+    assert [r["id"] for r in palace.lookups.told_to_check()] == [rid]
+    palace.lookups.record_check(rid, "no_evidence", [])
+    assert palace.lookups.told_to_check() == []
+    hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
+    assert hit["trust"] == "told" and "couldn't confirm it" in hit["source"]
+
+
+def test_a_check_validates_or_disputes_whoever_told_her(palace):
+    blanks = [{"term": "attic", "supports": ["https://a.org/x", "https://b.org/y"], "contrary": []}]
+    rid = tools._knowledge_add_impl({"fact": LANTERN, "_told_by": ARCHITECT}, None)["id"]
+    palace.lookups.record_check(rid, "contradicted", [])
+    hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
+    assert hit["trust"] == "disputed" and "web sources say otherwise" in hit["source"]
+    palace.lookups.record_check(rid, "supported", blanks)
+    hit = palace.recall("Where is the north lantern kept?")["lookups"][0]
+    assert hit["trust"] == "validated" and hit["validated"]["evidence"] == ["https://a.org/x", "https://b.org/y"]
+    assert palace.lookups.told_to_check() == []
+
+
 def test_the_ladder_orders_that_word_between_one_site_and_two():
     from gaia_common.utils.lookup_memory import TRUST_LEVELS
     assert TRUST_LEVELS.index("looked_up") < TRUST_LEVELS.index("told_by_architect") < TRUST_LEVELS.index("corroborated")

@@ -1418,6 +1418,10 @@ class SleepTaskScheduler:
             # Re-checking is optional; the sweep still runs.
             logger.warning("Memory lifecycle re-check failed: %s", e)
         try:
+            self._check_told_facts(mcp_client)
+        except Exception as e:
+            logger.warning("Told-fact check failed: %s", e)
+        try:
             raw = mcp_client.call_jsonrpc("palace_lifecycle_sweep", {})
             inner = raw.get("response", raw) if isinstance(raw, dict) else {}
             res = inner.get("result", inner) if isinstance(inner, dict) else {}
@@ -1435,6 +1439,29 @@ class SleepTaskScheduler:
                         f"; errors: {res['errors']}" if res.get("errors") else "")
         except Exception as e:
             logger.warning("Memory lifecycle sweep failed: %s", e)
+
+    def _check_told_facts(self, mcp_client) -> None:
+        """Look for independent evidence on what she has been told (aym9)."""
+        from gaia_core.cognition.told_fact_checker import check_told_facts
+
+        def call(method: str, params: dict) -> dict:
+            raw = mcp_client.call_jsonrpc(method, params)
+            inner = raw.get("response", raw) if isinstance(raw, dict) else {}
+            res = inner.get("result", inner) if isinstance(inner, dict) else {}
+            if not raw.get("ok", True):
+                return {"ok": False, "error": raw.get("error", "call failed")}
+            return res if isinstance(res, dict) else {}
+
+        def generate(messages: list) -> str:
+            model = self.model_pool.acquire_model("core")
+            try:
+                out = model.create_chat_completion(messages=messages, max_tokens=14, temperature=0.0,
+                                                   chat_template_kwargs={"enable_thinking": False})
+                return out["choices"][0]["message"]["content"] or ""
+            finally:
+                self.model_pool.release_model("core")
+
+        check_told_facts(call, generate)
 
     # ------------------------------------------------------------------
     # skill_creator_cycle (SELF_IMPROVE) — auto-draft skills from failures
