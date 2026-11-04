@@ -161,6 +161,31 @@ def _self_facts_for_observer(history: list) -> str:
 _SECOND_MIND_SECONDS = 20.0
 
 
+def _packet_source(packet_data: dict) -> str:
+    """Where a packet came from, as _run_loop_inner reads it: web unless it says."""
+    routing = ((packet_data or {}).get("header") or {}).get("output_routing") or {}
+    return routing.get("source_destination") or "web"
+
+
+def _wake_for_turn(lifecycle_client, orchestrator_url, source: str) -> bool:
+    """Someone spoke while she is parked: bring up the mind on the GPU before
+    answering. Parked, Core answered on the CPU from its short prompt and nothing
+    woke her ("capital of Australia" got "Can you check the weather forecast?",
+    2026-11-04). If the wake fails the turn goes on with what is there."""
+    if source not in ("web", "discord") or not lifecycle_client or not orchestrator_url:
+        return False
+    try:
+        state = lifecycle_client.get_state_sync(timeout=3.0).state
+        if getattr(state, "value", str(state)).lower() != "parked":
+            return False
+        import httpx
+        logger.info("Main: parked and spoken to; waking first")
+        return bool(httpx.post(f"{orchestrator_url}/gpu/wake", json={}, timeout=120).json().get("ok"))
+    except Exception as e:
+        logger.warning("Main: could not wake for this turn: %s", e)
+        return False
+
+
 def _second_mind_followup(agent_core, question: str, reply: str, known: str, session_id: str,
                           ran_tool: bool, had_source: bool) -> str:
     """Hand a reply to whichever mind isn't generating. Returns its follow-up,
@@ -1178,6 +1203,10 @@ async def process_packet(packet_data: Dict[str, Any]):
         logger.info("Main: _run_loop generator started")
         async with _turn_semaphore:
             logger.info("Main: acquired turn semaphore")
+            if await asyncio.to_thread(_wake_for_turn, getattr(app.state, "lifecycle_client", None),
+                                       os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410"),
+                                       _packet_source(packet_data)):
+                yield json.dumps({"type": "status", "value": "awake"}) + "\n"
             async for chunk in _run_loop_inner():
                 yield chunk
         # b9ts: her reply is out and the turn is free, so the next message never

@@ -50,7 +50,7 @@ GAIA uses a **two-tier** architecture: a **Gemma 4 Core** and a **Qwen3-8B Prime
 | **Groq** | qwen/qwen3.8-27b | — | Groq API | — | Cloud escalation / external fallback |
 | ~~Oracle~~ | ~~gpt-4o-mini~~ | — | — | — | **Retired** — OpenAI no longer used for any task. Groq is the cloud fallback. |
 
-**Routing**: Core handles all requests directly. Prime is loaded on GPU only when deep reasoning is needed (FOCUSING state). The orchestrator manages gear shifts via the consciousness matrix.
+**Routing**: the mind on the GPU generates, and the other observes from the CPU. Since 2026-11-04 she wakes into gear 2 (`RESTING_STATE` in `lifecycle/states.py`, env `GAIA_RESTING_GEAR`): Prime is the default voice until a new Core is found (`2qus`). Gear 1 is still an explicit `POST /consciousness/awake`. The orchestrator manages gear shifts via the consciousness matrix.
 
 **LoRA adapters**: Loaded dynamically via GAIA Engine `POST /adapter/load`. Active adapter set via `POST /adapter/set`.
 

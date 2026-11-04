@@ -9,7 +9,7 @@ States map to "gears" in the transmission metaphor:
   Gear 0  = OFF          All containers stopped. 0 GPU. (~415 MB host baseline)
   Gear P  = PARKED       Core on CPU (GGUF). GPU empty. Sentinel standby.
   Gear 1  = AWAKE        Core E4B on GPU (NF4, ~8.8 GB). Prime on CPU (GGUF).
-  Gear 2  = FOCUSING     Prime 26B-A4B on GPU (Expert Buffered, ~4.6 GB). Core on CPU.
+  Gear 2  = FOCUSING     Prime on GPU (~6.4 GB). Core on CPU. The resting gear (RESTING_STATE).
   ---
   SLEEP                  Core on CPU. Prime unloaded. Low-power standby.
   DEEP_SLEEP             Everything unloaded. GPU empty. Groq fallback only.
@@ -29,6 +29,7 @@ VRAM budget (measured on RTX 5080 16GB):
   Both on GPU simultaneously:   NOT FEASIBLE on 16 GB (13.4 GB + KV cache = OOM)
 """
 
+import os
 from enum import Enum
 from typing import Dict, List, Optional, Set
 
@@ -92,6 +93,11 @@ class TierExpectation:
 #                    │
 #                    └──extended_idle──→ DEEP_SLEEP
 
+# The gear she wakes into and comes back to. Prime is the default voice until a
+# new Core is found: Prime matched or beat Core on every yardstick and on speed
+# (Azrael, 2026-11-04; 2qus). Gear 1 stays one explicit request away.
+RESTING_STATE = LifecycleState(os.getenv("GAIA_RESTING_GEAR", LifecycleState.FOCUSING.value))
+
 TRANSITIONS: Dict[LifecycleState, Dict[TransitionTrigger, LifecycleState]] = {
     LifecycleState.AWAKE: {
         TransitionTrigger.VOICE_JOIN: LifecycleState.LISTENING,
@@ -101,7 +107,7 @@ TRANSITIONS: Dict[LifecycleState, Dict[TransitionTrigger, LifecycleState]] = {
         # USER_REQUEST handled in validate_transition
     },
     LifecycleState.LISTENING: {
-        TransitionTrigger.VOICE_LEAVE: LifecycleState.AWAKE,
+        TransitionTrigger.VOICE_LEAVE: RESTING_STATE,
         TransitionTrigger.ESCALATION_NEEDED: LifecycleState.FOCUSING,
     },
     LifecycleState.FOCUSING: {
@@ -111,23 +117,23 @@ TRANSITIONS: Dict[LifecycleState, Dict[TransitionTrigger, LifecycleState]] = {
         TransitionTrigger.IDLE_TIMEOUT: LifecycleState.PARKED,
     },
     LifecycleState.MEDITATION: {
-        TransitionTrigger.TRAINING_COMPLETE: LifecycleState.AWAKE,
-        TransitionTrigger.PREEMPT: LifecycleState.AWAKE,
-        TransitionTrigger.WAKE_SIGNAL: LifecycleState.AWAKE,
+        TransitionTrigger.TRAINING_COMPLETE: RESTING_STATE,
+        TransitionTrigger.PREEMPT: RESTING_STATE,
+        TransitionTrigger.WAKE_SIGNAL: RESTING_STATE,
     },
     LifecycleState.SLEEP: {
-        TransitionTrigger.WAKE_SIGNAL: LifecycleState.AWAKE,
+        TransitionTrigger.WAKE_SIGNAL: RESTING_STATE,
         TransitionTrigger.EXTENDED_IDLE: LifecycleState.DEEP_SLEEP,
         TransitionTrigger.TRAINING_SCHEDULED: LifecycleState.MEDITATION,
         TransitionTrigger.USER_REQUEST: LifecycleState.PARKED,
     },
     LifecycleState.DEEP_SLEEP: {
-        TransitionTrigger.WAKE_SIGNAL: LifecycleState.AWAKE,
+        TransitionTrigger.WAKE_SIGNAL: RESTING_STATE,
         TransitionTrigger.USER_REQUEST: LifecycleState.PARKED,
     },
     LifecycleState.PARKED: {
-        TransitionTrigger.WAKE_SIGNAL: LifecycleState.AWAKE,
-        TransitionTrigger.ENGAGE_CLUTCH: LifecycleState.AWAKE,
+        TransitionTrigger.WAKE_SIGNAL: RESTING_STATE,
+        TransitionTrigger.ENGAGE_CLUTCH: RESTING_STATE,
         TransitionTrigger.TRAINING_SCHEDULED: LifecycleState.MEDITATION,
         TransitionTrigger.EXTENDED_IDLE: LifecycleState.DEEP_SLEEP,
     },
@@ -151,13 +157,13 @@ USER_REQUEST_TARGETS: Dict[LifecycleState, Set[LifecycleState]] = {
         LifecycleState.PARKED,
     },
     LifecycleState.MEDITATION: {
-        LifecycleState.AWAKE,
+        LifecycleState.AWAKE, LifecycleState.FOCUSING,
     },
     LifecycleState.SLEEP: {
-        LifecycleState.AWAKE, LifecycleState.DEEP_SLEEP, LifecycleState.PARKED,
+        LifecycleState.AWAKE, LifecycleState.FOCUSING, LifecycleState.DEEP_SLEEP, LifecycleState.PARKED,
     },
     LifecycleState.DEEP_SLEEP: {
-        LifecycleState.AWAKE, LifecycleState.SLEEP, LifecycleState.PARKED,
+        LifecycleState.AWAKE, LifecycleState.FOCUSING, LifecycleState.SLEEP, LifecycleState.PARKED,
     },
     LifecycleState.PARKED: {
         LifecycleState.AWAKE, LifecycleState.FOCUSING,

@@ -76,3 +76,12 @@ def test_reading_it_through_means_all_of_it():
 def test_a_word_finds_its_relatives():
     text = "### Evolution with Consent\nShe shall not retrain without permission.\n\n" + "### Other\nfiller words. " * 200
     assert "retrain without" in excerpt_for(text, "What does it say about retraining?", limit=300)
+
+
+def test_she_wakes_into_the_resting_gear_and_gear_one_stays_on_request():
+    from gaia_common.lifecycle.states import LifecycleState as S, RESTING_STATE, TransitionTrigger as T, validate_transition
+    assert RESTING_STATE == S.FOCUSING
+    for state in (S.PARKED, S.SLEEP, S.DEEP_SLEEP, S.MEDITATION):
+        assert validate_transition(state, T.WAKE_SIGNAL) == RESTING_STATE
+        assert validate_transition(state, T.USER_REQUEST, target=S.FOCUSING) == S.FOCUSING
+    assert validate_transition(S.PARKED, T.USER_REQUEST, target=S.AWAKE) == S.AWAKE

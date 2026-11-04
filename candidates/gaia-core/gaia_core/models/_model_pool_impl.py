@@ -1139,7 +1139,7 @@ class ModelPool:
         if not name or name not in self.models:
             if role in ('prime', 'gpu_prime', 'cpu_prime', 'thinker'):
                 # Oracle (OpenAI/Gemini) retired — Groq is the only cloud fallback.
-                fallback_chain = ['groq_fallback']
+                fallback_chain = self._INFERENCE_FALLBACK_CHAIN
                 for fallback in fallback_chain:
                     if fallback in self.models:
                         logger.warning(f"🔄 Using {fallback} as fallback for {role}")
@@ -1173,7 +1173,9 @@ class ModelPool:
 
     # Fallback chain for inference-level failures (model acquired but fails mid-call).
     # Oracle (OpenAI/Gemini) retired — Groq is the only cloud fallback.
-    _INFERENCE_FALLBACK_CHAIN = ['groq_fallback']
+    # Local first: while Prime loaded after a wake, a turn went to the cloud with Core
+    # idle on the same machine (2026-11-04).
+    _INFERENCE_FALLBACK_CHAIN = ['core', 'groq_fallback']
 
     @staticmethod
     def _tee_to_generation_log(result, model_name: str, role: str):
@@ -1259,9 +1261,12 @@ class ModelPool:
                     continue  # Skip the model that just failed
                 fallback_model = self.models.get(fallback_name)
                 if not fallback_model:
-                    # Try lazy loading
-                    if self.ensure_model_loaded(fallback_name):
-                        fallback_model = self.models.get(fallback_name)
+                    # Try lazy loading; one that can't load mustn't stop the next
+                    try:
+                        if self.ensure_model_loaded(fallback_name):
+                            fallback_model = self.models.get(fallback_name)
+                    except Exception as load_exc:
+                        logger.warning("Fallback '%s' could not load: %s", fallback_name, load_exc)
                 if not fallback_model:
                     continue
                 try:

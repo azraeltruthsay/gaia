@@ -146,3 +146,31 @@ class TestPoolFallbackRecord:
         pool = self._pool(primary_exc=False)
         pool.forward_to_model("prime", messages=[])
         assert pool.consume_last_fallback() is None
+
+
+def test_the_retired_nano_route_is_labelled_core():
+    header = _make_agent_core()._build_response_header("nano", _make_packet(), None, None, None)
+    assert header == "[Core]\n\n"
+
+
+def test_a_failed_prime_falls_back_to_core_before_the_cloud():
+    from unittest.mock import MagicMock
+    from gaia_core.models._model_pool_impl import ModelPool
+    pool = ModelPool.__new__(ModelPool)
+    prime = MagicMock()
+    prime.create_chat_completion.side_effect = RuntimeError("503")
+    core, groq = MagicMock(), MagicMock()
+    core.create_chat_completion.return_value = {"choices": []}
+    pool.models = {"prime": prime, "core": core, "groq_fallback": groq}
+    pool.config = MagicMock()
+    pool.ensure_model_loaded = MagicMock(return_value=True)
+    pool.set_status = MagicMock()
+    pool.release_model = MagicMock()
+    pool._tee_to_generation_log = lambda result, name, role: result
+    import threading
+    pool._fallback_local = threading.local()
+    pool._resolve_model_name_for_role = lambda role: role
+    pool.forward_to_model("prime", messages=[{"role": "user", "content": "hi"}])
+    core.create_chat_completion.assert_called_once()
+    groq.create_chat_completion.assert_not_called()
+    assert pool.consume_last_fallback() == "core"

@@ -149,3 +149,37 @@ def test_a_section_the_document_lacks_means_she_carried_on_writing_it():
     text = "### Thought seeds\nA thought can be saved. Memory holds it and a heartbeat reviews it."
     assert sm.keeps_to_text("A thought can be saved. ### not a heading here", text, "q", opinion=True)
     assert not sm.keeps_to_text("A thought can be saved.\n\n### The spiral\nA heartbeat reviews it.", text, "q", opinion=True)
+
+
+def _lifecycle(state):
+    from types import SimpleNamespace
+    return SimpleNamespace(get_state_sync=lambda timeout: SimpleNamespace(state=state))
+
+
+@pytest.mark.parametrize("state,source,wakes", [
+    ("parked", "discord", True), ("parked", "web", True), ("parked", "heartbeat", False),
+    ("focusing", "discord", False), ("awake", "web", False), ("sleep", "web", False),
+])
+def test_a_person_speaking_wakes_her_from_parked(state, source, wakes, monkeypatch):
+    import httpx
+    from unittest.mock import MagicMock
+    from gaia_core.main import _wake_for_turn
+    post = MagicMock(return_value=MagicMock(json=lambda: {"ok": True}))
+    monkeypatch.setattr(httpx, "post", post)
+    assert _wake_for_turn(_lifecycle(state), "http://o", source) is wakes
+    assert post.called is wakes
+
+
+def test_a_failed_wake_does_not_stop_the_turn(monkeypatch):
+    import httpx
+    from gaia_core.main import _wake_for_turn
+    def boom(*a, **k):
+        raise httpx.ConnectError("down")
+    monkeypatch.setattr(httpx, "post", boom)
+    assert _wake_for_turn(_lifecycle("parked"), "http://o", "discord") is False
+
+
+def test_a_packet_says_where_it_came_from():
+    from gaia_core.main import _packet_source
+    assert _packet_source({"header": {"output_routing": {"source_destination": "discord"}}}) == "discord"
+    assert _packet_source({}) == "web"
