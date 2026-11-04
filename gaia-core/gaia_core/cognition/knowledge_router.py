@@ -19,7 +19,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from gaia_common.utils.lookup_memory import provenance_note
+from gaia_common.utils.lookup_memory import LOW_TRUST, TRUST_WORDS, provenance_note, trust_level, trust_rank
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("GAIA.KnowledgeRouter")
@@ -29,7 +29,7 @@ logger = logging.getLogger("GAIA.KnowledgeRouter")
 class GroundingResult:
     """Result from a knowledge retrieval attempt."""
     source: str           # "mempalace", "journal", "kg", "vector", "web", "system", "memory"
-    trust_tier: str       # "verified_local", "verified_external", "unverified", "remembered"
+    trust_tier: str       # a level of gaia_common.utils.lookup_memory.TRUST_LEVELS
     content: str          # The actual knowledge text
     url: str = ""         # Source URL (for web results)
     utility_score: float = 1.0  # Memento-style trust score (0-1)
@@ -65,9 +65,8 @@ class GroundingContext:
     def best_result(self) -> Optional[GroundingResult]:
         if not self.results:
             return None
-        # Highest trust tier, then highest utility score
-        tier_order = {"verified_local": 3, "verified_external": 2, "remembered": 2, "unverified": 1}
-        return max(self.results, key=lambda r: (tier_order.get(r.trust_tier, 0), r.utility_score))
+        # Highest trust, then highest utility score
+        return max(self.results, key=lambda r: (trust_rank(r.trust_tier), r.utility_score))
 
     def format_for_prompt(self, max_chars: int = 600) -> str:
         """Format grounding results for injection into the model prompt."""
@@ -75,8 +74,8 @@ class GroundingContext:
             return ""
         parts = []
         remaining = max_chars
-        for r in sorted(self.results, key=lambda x: x.utility_score, reverse=True):
-            entry = f"[{r.trust_tier.upper()}] {r.content[:remaining]}"
+        for r in sorted(self.results, key=lambda x: (trust_rank(x.trust_tier), x.utility_score), reverse=True):
+            entry = f"({TRUST_WORDS.get(r.trust_tier, 'unknown source')}) {r.content[:remaining]}"
             if r.url:
                 entry += f" (Source: {r.url})"
             parts.append(entry)
@@ -146,9 +145,9 @@ def _query_journal(query: str, k: int = 3, body_chars: int = 320) -> List[Ground
 
     Phase D of vam — surfaces consolidation/reflection entries when a
     user references past events ("remember when...", "that day we...").
-    Trust tier is verified_local because these entries are GAIA's own
-    grounded narrative, written from LiteJournal ticks + samvega
-    artifacts (not free-form recollection).
+    Trust level is own_record: these entries are GAIA's own narrative, written
+    from LiteJournal ticks + samvega artifacts, firsthand about her and
+    unchecked about anything else.
     """
     results: List[GroundingResult] = []
     try:
@@ -180,7 +179,7 @@ def _query_journal(query: str, k: int = 3, body_chars: int = 320) -> List[Ground
             utility = min(1.0, score / 6.0 + 0.2)
             results.append(GroundingResult(
                 source="journal",
-                trust_tier="verified_local",
+                trust_tier="own_record",
                 content=content,
                 utility_score=utility,
                 query=query,
@@ -217,14 +216,14 @@ def _query_mempalace(query: str, timeout: float = 2.0) -> List[GroundingResult]:
             content = mem.get("content", mem.get("body", "")) if isinstance(mem, dict) else str(mem)
             if _AAAK_RECORD_RE.match(content or ""):
                 # 0vuz: AAAK-only memories ("0:ACT+KIN+ART|actually_king_arthur|…")
-                # hold codes, not facts; as verified_local they also satisfied
+                # hold codes, not facts; they also satisfied
                 # ground_query's local_has_answer and switched off the web.
                 logger.debug("MemPalace: skipping AAAK-only memory %s", mem.get("palace_id", "?") if isinstance(mem, dict) else "?")
                 continue
             if content and len(content) > 10:
                 results.append(GroundingResult(
                     source="mempalace",
-                    trust_tier="verified_local",
+                    trust_tier="own_record",
                     content=content[:300],
                     utility_score=get_utility_score("general", "mempalace"),
                     query=query,
@@ -278,7 +277,7 @@ def _query_work_memory(query: str) -> List[GroundingResult]:
         return []
     sources = hit.get("sources") or [{}]
     return [GroundingResult(
-        source="memory", trust_tier="remembered", content=hit["text"][:MAX_WORK_GROUNDING_CHARS],
+        source="memory", trust_tier="corroborated", content=hit["text"][:MAX_WORK_GROUNDING_CHARS],
         url=sources[0].get("url", ""), query=query, title=hit.get("name", ""),
         retrieved_at=hit.get("learned", ""), score=1.0,
         question_match=1.0, confirmed_match=1.0,
@@ -301,7 +300,7 @@ def _query_lookup_memory(query: str, top_k: int = 3,
                 continue
             results.append(GroundingResult(
                 source="memory",
-                trust_tier="remembered",
+                trust_tier=trust_level(hit),
                 # A told fact says so wherever it's read: anyone can tell her anything.
                 content=f"{hit['snippet']} ({provenance_note(hit)})" if hit.get("told_by") else hit["snippet"],
                 url=hit.get("url", ""),
@@ -324,9 +323,30 @@ def _query_lookup_memory(query: str, top_k: int = 3,
     return [r for r in results if r.unhelpful_match < STRONG_QUESTION_MATCH]
 
 
+_ABOUT_HER_RE = re.compile(r"\b(?:you|your|yours|yourself|gaia|we|our|us)\b", re.IGNORECASE)
+
+
+def _local_answers(results: List[GroundingResult], query: str) -> bool:
+    """Whether what she already has saves a web search. What she measured does.
+    Her own notes do only for a question about her: as "verified_local", any
+    journal line mentioning a word in the question switched off the web."""
+    if any(r.trust_tier == "observed" and len(r.content) > 50 for r in results):
+        return True
+    return bool(_ABOUT_HER_RE.search(query or "")) and any(
+        r.trust_tier == "own_record" and len(r.content) > 50 for r in results)
+
+
+def weakest_last(results: List[GroundingResult]) -> List[GroundingResult]:
+    """Only the first few results reach her, so what is merely told or disputed
+    goes behind the rest. Otherwise the order stands: a journal entry can be the
+    right answer to a question about herself, whatever a web page outranks."""
+    return sorted(results, key=lambda r: r.trust_tier in LOW_TRUST)
+
+
 def _strong_memory(results: List[GroundingResult]) -> bool:
     """A fresh, relevant record already confirmed for (nearly) this question."""
-    return any(r.source == "memory" and not r.stale and r.score >= STRONG_MEMORY_SCORE
+    return any(r.source == "memory" and not r.stale and r.trust_tier not in LOW_TRUST
+               and r.score >= STRONG_MEMORY_SCORE
                and r.question_match >= STRONG_QUESTION_MATCH
                and r.confirmed_match >= STRONG_QUESTION_MATCH for r in results)
 
@@ -385,7 +405,7 @@ def _query_knowledge_graph(query: str) -> List[GroundingResult]:
             if content and len(content) > 5:
                 results.append(GroundingResult(
                     source="kg",
-                    trust_tier="verified_local",
+                    trust_tier="own_record",
                     content=content[:200],
                     utility_score=get_utility_score("general", "kg"),
                     query=query,
@@ -419,7 +439,7 @@ def _query_web(query: str, max_results: int = 2, snippet_chars: int = 250) -> Li
                 if snippet:
                     results.append(GroundingResult(
                         source="web",
-                        trust_tier="verified_external",
+                        trust_tier="looked_up",
                         content=f"{title}: {snippet[:snippet_chars]}",
                         url=url,
                         utility_score=get_utility_score("general", "web"),
@@ -452,7 +472,7 @@ def _query_system_context(query: str) -> List[GroundingResult]:
             _utc = _now.astimezone(timezone.utc).strftime("%H:%M UTC")
             results.append(GroundingResult(
                 source="system_clock",
-                trust_tier="verified_local",
+                trust_tier="observed",
                 content=f"The current time is {_display} ({_utc}).",
                 utility_score=1.0,
                 query=query,
@@ -469,7 +489,7 @@ def _query_system_context(query: str) -> List[GroundingResult]:
             mins = int((uptime_secs % 3600) // 60)
             results.append(GroundingResult(
                 source="system_uptime",
-                trust_tier="verified_local",
+                trust_tier="observed",
                 content=f"System uptime: {hours} hours, {mins} minutes ({int(uptime_secs)} seconds total).",
                 utility_score=1.0,
                 query=query,
@@ -580,8 +600,7 @@ def ground_query(
     # 3. Web Search — external knowledge (lowest trust, always cite)
     # Only search if local sources didn't provide enough
     elapsed = (time.time() - t0) * 1000
-    local_has_answer = _strong_memory(ctx.results) or any(
-        r.trust_tier == "verified_local" and len(r.content) > 50 for r in ctx.results)
+    local_has_answer = _strong_memory(ctx.results) or _local_answers(ctx.results, query)
     if not skip_web and not local_has_answer and elapsed < max_total_ms * 0.8:
         try:
             web_results = _query_web(query)
@@ -793,7 +812,7 @@ def recall_conversation(session_id: str, question: str,
         hits =[h for h in hits if (h.get("user") or "").strip() not in visible][:top_k]
         for h in hits:
             ctx.results.append(GroundingResult(
-                source="conversation", trust_tier="remembered",
+                source="conversation", trust_tier="own_record",
                 content=(f"On {(h.get('ts') or '')[:10]}, they said: \"{h.get('user', '')}\""
                          f" — and you replied: \"{h.get('reply', '')}\""),
                 title="earlier conversation", retrieved_at=h.get("ts", ""),

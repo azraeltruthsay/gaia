@@ -59,6 +59,7 @@ from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detec
 from gaia_common.utils.tool_call_parser import tool_answer_messages
 from gaia_core.cognition.reply_scrub import claims_success, honest_about_failure, own_words
 from gaia_common.utils.lookup_memory import provenance_note
+from gaia_core.cognition.knowledge_router import weakest_last
 from gaia_core.cognition.told_facts import (
     MIN_MATCH,
     asks_if_checked,
@@ -3540,15 +3541,15 @@ class AgentCore:
                             "results": [
                                 {"title": r.title or r.source, "snippet": r.content, "url": r.url,
                                  "remembered": True, "retrieved_at": r.retrieved_at, "stale": r.stale,
-                                 "memory_id": r.memory_id}
+                                 "memory_id": r.memory_id, "trust": r.trust_tier}
                                 if r.source == "memory" else
                                 # 6qzb: a past exchange, kept apart from sources
                                 {"title": r.title, "snippet": r.content, "url": "",
                                  "conversation": True, "retrieved_at": r.retrieved_at}
                                 if r.source == "conversation" else
                                 {"title": r.source, "snippet": r.content, "url": r.url,
-                                 "memory_id": r.memory_id}
-                                for r in _grounding_ctx.results[:3]],
+                                 "memory_id": r.memory_id, "trust": r.trust_tier}
+                                for r in weakest_last(_grounding_ctx.results)[:3]],
                             "source": f"knowledge_router:{','.join(_grounding_ctx.sources_queried)}",
                             "query": user_input[:120],
                             # 6afh: the question lookup memory was asked;
@@ -7578,7 +7579,7 @@ RESULT: COMPLEX (reason: <brief reason>)
             # ── Confidence-Gated Epistemic Grounding ─────────────────
             # Before returning, check if the response shows low confidence
             # or self-conflation. If so, auto-search and regenerate grounded.
-            # SKIP if the Knowledge Router already injected verified_local
+            # SKIP if the Knowledge Router already injected measured
             # data AND the response uses that data (avoids double-grounding).
             _already_grounded = False
             if _grounding_text:

@@ -11,6 +11,7 @@ import re
 from typing import Any, List, Dict, Optional
 
 # [GCP v0.3] Import the new packet structure
+from gaia_common.utils.lookup_memory import TRUST_WORDS
 from gaia_common.protocols.cognition_packet import CognitionPacket, ToolExecutionStatus
 from gaia_core.config import Config
 from gaia_common.utils.tokenizer import count_tokens
@@ -1797,8 +1798,14 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                                     _n_remembered += 1
                                     _when = (r.get("retrieved_at") or "")[:10]
                                     _note = ", may be out of date" if r.get("stale") else ""
+                                    # A level above the plain one earns a word;
+                                    # a told fact already says so in its text.
+                                    if r.get("trust") in ("disputed", "corroborated", "validated"):
+                                        _note += f", {TRUST_WORDS[r['trust']]}"
                                     _cite = ", ".join(x for x in (title, f"looked up {_when}" if _when else "") if x)
                                     parts.append(f"- {snippet[:600]} ({_cite}{_note}; {url})")
+                                elif r.get("trust") == "own_record":
+                                    parts.append(f"- {snippet[:_snip]} ({TRUST_WORDS['own_record']})")
                                 else:
                                     parts.append(f"- {title}: {snippet[:_snip]} ({url})")
                     if _n_remembered and _n_remembered == _n_shown and not disputed:

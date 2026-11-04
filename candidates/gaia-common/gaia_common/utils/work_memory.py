@@ -402,6 +402,7 @@ def compact_work(rec: dict, max_chars: int = 1500) -> dict:
         "text": text[:max_chars],
         "sources": [s.get("url", "") for s in rec.get("sources", [])],
         "learned": (rec.get("learned_at") or "")[:10],
+        "trust": "corroborated",  # two sites agreed on the words before she kept them
     }
     if len(text) > max_chars:
         out["truncated_from_chars"] = len(text)

@@ -213,7 +213,7 @@ class SkillGateway:
                         display = now.strftime("%-I:%M %p %Z, %A %B %d, %Y")
                         results.append({
                             "source": "system_clock",
-                            "trust": "verified_local",
+                            "trust": "observed",
                             "content": f"The current time is {display}.",
                             "type": "knowledge",
                         })
@@ -229,7 +229,7 @@ class SkillGateway:
                             if content:
                                 results.append({
                                     "source": "mempalace",
-                                    "trust": "verified_local",
+                                    "trust": "own_record",
                                     "content": content[:300],
                                     "type": "knowledge",
                                 })

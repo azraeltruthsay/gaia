@@ -11,7 +11,7 @@ from gaia_core.cognition.knowledge_router import GroundingResult
 
 def _mem(score=0.9, stale=False, rid="m1", qmatch=0.8, confirmed=0.8, unhelpful=0.0):
     return GroundingResult(
-        source="memory", trust_tier="remembered", query="q",
+        source="memory", trust_tier="looked_up", query="q",
         content="The Lady of the Lake gives King Arthur the sword Excalibur.",
         url="https://en.wikipedia.org/wiki/Lady_of_the_Lake",
         title="Lady of the Lake - Wikipedia", retrieved_at="2026-10-27T12:00:00+00:00",
@@ -20,7 +20,7 @@ def _mem(score=0.9, stale=False, rid="m1", qmatch=0.8, confirmed=0.8, unhelpful=
 
 
 def _web():
-    return GroundingResult(source="web", trust_tier="verified_external",
+    return GroundingResult(source="web", trust_tier="looked_up",
                            content="Excalibur was given by the Lady of the Lake.", url="https://w")
 
 

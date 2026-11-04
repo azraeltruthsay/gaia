@@ -94,7 +94,7 @@ def test_conversation_query_caps_length():
 
 def test_ground_pushback_uses_web_only():
     web = [knowledge_router.GroundingResult(
-        source="web", trust_tier="verified_external",
+        source="web", trust_tier="looked_up",
         content="Lady of the Lake: gives Arthur the sword Excalibur.", query="q")]
     with patch.object(knowledge_router, "_query_web", return_value=web) as qw, \
             patch.object(knowledge_router, "_query_journal") as qj, \

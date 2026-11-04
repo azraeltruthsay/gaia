@@ -242,10 +242,33 @@ def _days_since(ts: Optional[str], now: datetime) -> Optional[float]:
 # How much a memory can be leaned on, lowest first. Worked out from the evidence
 # each time, so every record has a level without a migration, and a level can
 # never claim more than the record shows.
+# own_record is what she wrote down herself (journal, palace, knowledge graph):
+# firsthand about her own experience, unchecked about the world. It was labelled
+# "verified_local". observed is what she measured just now (clock, uptime).
 # The architect has a level of their own, and that word still needs checking:
 # it is not "validated", and it can be disputed like anyone's. Above one website
 # for firsthand knowledge of this system, below two independent ones.
-TRUST_LEVELS = ("disputed", "told", "told_by_several", "looked_up", "told_by_architect", "corroborated", "validated")
+TRUST_LEVELS = ("disputed", "told", "told_by_several", "own_record", "looked_up", "told_by_architect",
+                "corroborated", "validated", "observed")
+# Not enough to stand in for a fresh look, or to crowd out what is better.
+LOW_TRUST = frozenset(("disputed", "told", "told_by_several"))
+# How a level reads, as her own record of it. Lowercase prose: all-caps labels
+# get quoted back by Core.
+TRUST_WORDS = {
+    "disputed": "disputed",
+    "told": "someone told me, not checked",
+    "told_by_several": "several people told me, not checked",
+    "own_record": "my own notes",
+    "looked_up": "one web page",
+    "told_by_architect": "the architect told me, not checked",
+    "corroborated": "more than one source agrees",
+    "validated": "checked against other sources",
+    "observed": "measured just now",
+}
+
+
+def trust_rank(level: str) -> int:
+    return TRUST_LEVELS.index(level) if level in TRUST_LEVELS else -1
 
 
 def _site(url: str) -> str:
@@ -269,7 +292,7 @@ def trust_level(rec: dict) -> str:
     sites = {_site(u) for u in [rec.get("url", "")] + list(rec.get("also_at") or [])} - {""}
     if len(sites) >= 2:
         return "corroborated"
-    if sites:
+    if sites or (rec.get("kind") != "told" and not rec.get("told_by")):
         return "looked_up"
     if any(t.get("operator") for t in rec.get("told_by") or []):
         return "told_by_architect"
