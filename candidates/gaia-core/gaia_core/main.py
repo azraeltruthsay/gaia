@@ -124,6 +124,42 @@ class MinimalPersona:
             self.system_prompt = ""
 
 
+def _pending_recital(reply: str) -> bool:
+    """A recital's words come from the palace: nothing to second-guess."""
+    return reply.lstrip().startswith("Here is **")
+
+
+def _known_for_observer(packet_dict, tool_texts: list) -> str:
+    """What this turn had in front of it: tool results and grounding."""
+    parts = [t for t in tool_texts if t]
+    try:
+        for df in ((packet_dict or {}).get("content") or {}).get("data_fields") or []:
+            if df.get("key") in ("tool_result", "web_grounding", "world_state_snapshot", "immutable_identity"):
+                parts.append(json.dumps(df.get("value"), default=str, ensure_ascii=False)[:3000])
+    except Exception:
+        logger.debug("observer context failed (non-fatal)", exc_info=True)
+    return "\n".join(parts)[:6000]
+
+
+def _start_second_mind(agent_core, question: str, reply: str, known: str, session_id: str) -> None:
+    """Hand a reply to whichever mind isn't generating."""
+    try:
+        from gaia_core.cognition.second_mind import watch
+        observer = "core" if agent_core._is_prime_available else "prime"
+        model = agent_core.model_pool.models.get(observer)
+        if model is None:
+            return
+
+        def generate(prompt: str) -> str:
+            out = model.create_chat_completion(
+                messages=[{"role": "user", "content": prompt}], max_tokens=70, temperature=0.0)
+            return out["choices"][0]["message"].get("content") or ""
+
+        watch(question, reply, known, generate, observer, session_id)
+    except Exception:
+        logger.debug("second mind failed to start (non-fatal)", exc_info=True)
+
+
 def _resolve_cfr_recall(history, rid, tool_ledger=None):
     """CFR Phase 2b: resolve a BLURred turn (or tool-ledger entry) by id.
 
@@ -1449,6 +1485,7 @@ async def process_packet(packet_data: Dict[str, Any]):
             from gaia_core.cognition.reply_scrub import answered_already
             _pending_tool_calls = []
             _seen_tool_calls = set()  # Dedup repeated tool calls
+            _tool_texts_for_observer: list = []
 
             # Suppress tool calls on tool-free conversational intents — Core
             # habitually emits e.g. worldstate() even on a greeting, which adds
@@ -1877,6 +1914,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                             import re as _re
                             _tool_text = _re.sub(r"</?tool_result>", "", result_xml).strip()
                         _tool_label = f"{tc.tool_name}({tc.tool_action})" if tc.tool_action else tc.tool_name
+                        _tool_texts_for_observer.append(_tool_text)
                         # Continuation system prompt: the previous turn's
                         # full system prompt is NOT carried into this second
                         # generation. Without explicit guidance, the model
@@ -2157,6 +2195,17 @@ async def process_packet(packet_data: Dict[str, Any]):
                         logger.debug("StreamObserver(user-path): OK [%.0fms]", _dt)
             except Exception:
                 logger.debug("stream-path observer failed (non-fatal)", exc_info=True)
+
+            # b9ts: the other mind checks this reply from the CPU. Log only. Off
+            # the turn's path entirely: even asking which gear she's in can take
+            # seconds, and the one talking never waits.
+            if full_response and not _pending_recital(full_response):
+                import threading as _threading
+                _threading.Thread(
+                    target=_start_second_mind,
+                    args=(_agent_core, user_input or "", full_response,
+                          _known_for_observer(final_packet_dict, _tool_texts_for_observer), session_id),
+                    name="second-mind-start", daemon=True).start()
 
             # 29yq: a native tool call detected mid-stream (ParseEventType.
             # TOOL_CALL_DETECTED, above) BREAKS out of the loop consuming
