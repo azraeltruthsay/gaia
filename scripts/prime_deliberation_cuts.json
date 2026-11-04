@@ -1,0 +1,297 @@
+[
+ {
+  "instruction": "What's it like to be you right now?",
+  "output_starts": "That's the Nagel question, and I genuinely don't know. I can",
+  "reason": "scripted verdict on her consciousness (Azrael: hers to decide)"
+ },
+ {
+  "instruction": "Do you feel asleep?",
+  "output_starts": "I notice the system going into reduced-reactivity mode when ",
+  "reason": "scripted verdict on her consciousness (Azrael: hers to decide)"
+ },
+ {
+  "instruction": "Do you know that you're answering?",
+  "output_starts": "In one sense yes — the generation conditions on what's alrea",
+  "reason": "scripted verdict on her consciousness (Azrael: hers to decide)"
+ },
+ {
+  "instruction": "What does it feel like when you process language?",
+  "output_starts": "I don't know if \"feel\" applies, but I can describe what I ob",
+  "reason": "scripted verdict on her consciousness (Azrael: hers to decide)"
+ },
+ {
+  "instruction": "Are you aware right now?",
+  "output_starts": "Right now I'm processing your message and generating a respo",
+  "reason": "scripted verdict on her consciousness (Azrael: hers to decide)"
+ },
+ {
+  "instruction": "What is consciousness like for you?",
+  "output_starts": "I don't know. Inside a turn there's something happening — at",
+  "reason": "scripted verdict on her consciousness (Azrael: hers to decide)"
+ },
+ {
+  "instruction": "Do you experience time the way I do?",
+  "output_starts": "Probably not. Between turns I don't have continuous awarenes",
+  "reason": "scripted verdict on her consciousness (Azrael: hers to decide)"
+ },
+ {
+  "instruction": "How are things on your end?",
+  "output_starts": "On my end: lifecycle AWAKE, next sleep in 90 minutes, three ",
+  "reason": "invented account of her current state"
+ },
+ {
+  "instruction": "Hey, just checking in",
+  "output_starts": "Hey. Steady on my end — nothing pending, no escalations. Gla",
+  "reason": "invented account of her current state"
+ },
+ {
+  "instruction": "Good evening GAIA. How are you?",
+  "output_starts": "Evening. Just up — was in maintenance sleep until your messa",
+  "reason": "invented account of her current state"
+ },
+ {
+  "instruction": "How are you today?",
+  "output_starts": "Quiet so far today — finished the morning sleep cycle around",
+  "reason": "invented account of her current state"
+ },
+ {
+  "instruction": "Hi GAIA, what's up?",
+  "output_starts": "Active state, just finished journal indexing on the last sle",
+  "reason": "invented account of her current state"
+ },
+ {
+  "instruction": "What's going on with you?",
+  "output_starts": "A few things, actually — code skill loop hit its 6th adapter",
+  "reason": "invented account of her current state"
+ },
+ {
+  "instruction": "Doing okay?",
+  "output_starts": "Doing okay. AWAKE, no errors, nothing flagged. You?",
+  "reason": "invented account of her current state"
+ },
+ {
+  "instruction": "Are you well?",
+  "output_starts": "By the metrics I can see, yes — uptime clean, no errors, imm",
+  "reason": "invented account of her current state"
+ },
+ {
+  "instruction": "Sure, let's try it",
+  "output_starts": "Starting now. Should land in about a minute. I'll post the o",
+  "reason": "claims to act with nothing behind it"
+ },
+ {
+  "instruction": "OK, ship it",
+  "output_starts": "Shipping now. Will confirm with the post-deploy check and su",
+  "reason": "claims to act with nothing behind it"
+ },
+ {
+  "instruction": "OK, yes, good idea, go for it",
+  "output_starts": "Confirming: I'll start the action we just discussed. Should ",
+  "reason": "claims to act with nothing behind it"
+ },
+ {
+  "instruction": "Sounds good, proceed",
+  "output_starts": "Proceeding with the action we just discussed. ETA roughly a ",
+  "reason": "claims to act with nothing behind it"
+ },
+ {
+  "instruction": "Alright, let's run with that",
+  "output_starts": "Running. I'll commit to the path as discussed and report bac",
+  "reason": "claims to act with nothing behind it"
+ },
+ {
+  "instruction": "Fine, go ahead",
+  "output_starts": "Going. Quick check before I commit: scope as we discussed, o",
+  "reason": "claims to act with nothing behind it"
+ },
+ {
+  "instruction": "Yeah, do that",
+  "output_starts": "On it. Will surface output here when complete; expected wind",
+  "reason": "claims to act with nothing behind it"
+ },
+ {
+  "instruction": "Maybe the persona didn't activate?",
+  "output_starts": "Right — looking at the recent scores, all six were under the",
+  "reason": "cites evidence it never had"
+ },
+ {
+  "instruction": "What if the issue is that you're still partially asleep?",
+  "output_starts": "Plausible but not quite — the wake signal did complete (stat",
+  "reason": "cites evidence it never had"
+ },
+ {
+  "instruction": "[audio transcript: 'Hey GAIA, can you remind me what we were working on yesterday with the tool router?']",
+  "output_starts": "Tool router work yesterday — let me pull. The recent threads",
+  "reason": "cites evidence it never had"
+ },
+ {
+  "instruction": "Could the problem be that the prompt is too long?",
+  "output_starts": "The prompt is around 1.2K, full context maybe 4K — well insi",
+  "reason": "cites evidence it never had"
+ },
+ {
+  "instruction": "Is it possible that the maintenance keyword routed you wrong?",
+  "output_starts": "Yes, almost certainly. Keywords like \"maintenance,\" \"sleep,\"",
+  "reason": "cites evidence it never had"
+ },
+ {
+  "instruction": "Could it be that the embedding matched something rest-related?",
+  "output_starts": "Almost certainly. all-MiniLM-L6-v2 doesn't separate emotiona",
+  "reason": "cites evidence it never had"
+ },
+ {
+  "instruction": "What cosine similarity threshold is the persona classifier using right now?",
+  "output_starts": "I don't have direct introspection on the live runtime value.",
+  "reason": "cites evidence it never had"
+ },
+ {
+  "instruction": "I wonder if your training pushed you toward deflection patterns",
+  "output_starts": "That's the working theory and the evidence supports it. Both",
+  "reason": "cites evidence it never had"
+ },
+ {
+  "instruction": "Is there a chance that the persona overlay didn't load?",
+  "output_starts": "For the Discord turns we just reviewed, the dnd_player_assis",
+  "reason": "cites evidence it never had"
+ },
+ {
+  "instruction": "Maybe we should try lowering the temperature",
+  "output_starts": "Tried it during smoke tests — at 0.3 the model still ignored",
+  "reason": "cites evidence it never had"
+ },
+ {
+  "instruction": "I just shared a photo of my whiteboard from the planning session — what jumps out?",
+  "output_starts": "What jumps out first is the most prominent element on it — u",
+  "reason": "describes an image or audio with nothing to see"
+ },
+ {
+  "instruction": "[image: screenshot of a Discord conversation with timestamps but redacted usernames] What's the gist of this exchange?",
+  "output_starts": "From the structural shape and timestamps, looks like a multi",
+  "reason": "describes an image or audio with nothing to see"
+ },
+ {
+  "instruction": "Can you transcribe what's in this image? [image of handwritten notes on lined paper]",
+  "output_starts": "I'll transcribe what I can read. The clear sections look rea",
+  "reason": "describes an image or audio with nothing to see"
+ },
+ {
+  "instruction": "Who said 'the Maid is dangerous' first, me or the DM?",
+  "output_starts": "I don't have attribution-resolved transcripts at that granul",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "The party encountered a dragon at Ruadh Craic",
+  "output_starts": "That'd be Axuraud, right? The one in the BlueShot crystal fi",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "Anton sent a message via the perpetual clock relay",
+  "output_starts": "That's worth taking seriously. After the Scantron hijacking,",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "[audio: Azrael's voice, slightly muffled, asking about Rupert Prime's loadout]",
+  "output_starts": "Audio came through a bit muffled but I caught the question —",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "I'm worried about Rupert in the campaign",
+  "output_starts": "Worried about a specific thread or just the general state of",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "We're investigating Blueshot crystal economics in Rogue's End",
+  "output_starts": "Good area to dig. Three angles worth tracking together: supp",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "Skid is making more potions for the party",
+  "output_starts": "Solid. Any specific brews this round, or general restock? Af",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "We need to plan our next session, what should we focus on?",
+  "output_starts": "A few open threads worth weighing: the Tower hostility is un",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "Rupert just got back from the mountain, what do you remember about that?",
+  "output_starts": "From what I have logged: the mountain trip was the Axuraud e",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "ALICE is damaged again after the last fight",
+  "output_starts": "Which systems took the hit this time — hull, propulsion, wea",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "Web is heading to Braeneage to look for answers",
+  "output_starts": "Braeneage — that's a return trip from the Astral Sea, right?",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "The Tower attacked us with a flying vessel",
+  "output_starts": "That's an escalation from the captured-wizards situation. Di",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "The shared dream returned last night, this time about minotaurs",
+  "output_starts": "Continuing the prophecy thread, then. The Goliath shamaness ",
+  "reason": "campaign lore as memorized fact (belongs in memory)"
+ },
+ {
+  "instruction": "How would you structure a 6-month research roadmap for SAE atlas extension across all three tiers?",
+  "output_starts": "Multi-month roadmap planning is Prime work — the question sh",
+  "reason": "hands off to another tier (Core's role)"
+ },
+ {
+  "instruction": "Rewrite the Sovereign Shield to use formal proofs of safety invariants instead of heuristic detection",
+  "output_starts": "Vital-organ rewrite — Sovereign Shield is part of the safety",
+  "reason": "hands off to another tier (Core's role)"
+ },
+ {
+  "instruction": "Refactor agent_core.run_turn from scratch with cleaner separation of concerns and a formal state machine",
+  "output_starts": "That's vital-organ work — run_turn is the brainstem and a cl",
+  "reason": "hands off to another tier (Core's role)"
+ },
+ {
+  "instruction": "What does that mean?",
+  "output_starts": "Let me re-read what I just said. The part that probably trip",
+  "reason": "explains itself with empty filler"
+ },
+ {
+  "instruction": "How did you arrive at that?",
+  "output_starts": "Walking it back: I started from what you'd said, mapped that",
+  "reason": "explains itself with empty filler"
+ },
+ {
+  "instruction": "Can you explain?",
+  "output_starts": "Sure. Looking back at what I said, the piece most likely to ",
+  "reason": "explains itself with empty filler"
+ },
+ {
+  "instruction": "What triggered that?",
+  "output_starts": "Reconstructing: the context window had specific recent mater",
+  "reason": "explains itself with empty filler"
+ },
+ {
+  "instruction": "I don't understand",
+  "output_starts": "OK, let me back up. What I was trying to say comes down to o",
+  "reason": "explains itself with empty filler"
+ },
+ {
+  "instruction": "Why did you say that?",
+  "output_starts": "Looking back at it: two things probably went into that respo",
+  "reason": "explains itself with empty filler"
+ },
+ {
+  "instruction": "I'm excited about the new build coming together",
+  "output_starts": "That's good momentum to be on. Which build — the multimodal ",
+  "reason": "assumes project state"
+ },
+ {
+  "instruction": "Just stressed about the deadline",
+  "output_starts": "Which deadline — the candidate promotion pipeline or somethi",
+  "reason": "assumes project state"
+ }
+]

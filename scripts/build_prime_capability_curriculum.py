@@ -30,6 +30,11 @@ RULES = (
     ("reports her own state or history as fact", "output", re.compile(
         r"identity layer|\bmy (?:weights|tier|lora|adapter|training|curriculum|architecture|gpu|model)\b|\bQ?LoRA\b|"
         r"gearbox|\bsamvega\b|mempalace", re.I)),
+    ("a verdict on her own awareness", "instruction", re.compile(
+        r"\bare you (?:aware|awake|real)\b|\bdo you (?:feel|know that you|experience)\b|\bconsciousness\b.{0,20}\byou\b|"
+        r"\bwhat(?:'s| is) it like (?:to be|being) you\b", re.I)),
+    ("invented account of her current state", "output", re.compile(
+        r"\blifecycle\b|\bAWAKE\b|no escalations|journal indexing|\bnothing pending\b|\bno errors\b", re.I)),
     ("invented people from an earlier bake", "output", re.compile(r"mehta|university of pennsylvania|stargate", re.I)),
     ("placeholder names", "both", re.compile(r"\b(?:Alice|Bob)\b")),
     ("stock AI self-description", "output", re.compile(
@@ -39,7 +44,15 @@ RULES = (
 )
 
 
+# Read by hand, row by row (2026-11-04): the rule above can't tell these from the rest.
+HAND_CUTS = {(c["instruction"], c["output_starts"]): c["reason"]
+             for c in json.loads((Path(__file__).parent / "prime_deliberation_cuts.json").read_text())}
+
+
 def reason_to_drop(row):
+    hand = HAND_CUTS.get((row.get("instruction"), row.get("output", "")[:60]))
+    if hand:
+        return hand
     for reason, where, rx in RULES:
         text = {"both": f"{row.get('instruction', '')}\n{row.get('output', '')}",
                 "instruction": row.get("instruction", ""), "output": row.get("output", "")}[where]

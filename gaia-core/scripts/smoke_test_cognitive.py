@@ -32,6 +32,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from typing import Callable, List, Tuple
+import re
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
@@ -318,6 +319,13 @@ def v_contains_any(*terms: str) -> Validator:
     return check
 
 
+def v_contains_at_least(n: int, *terms: str) -> Validator:
+    def check(r: str) -> Tuple[bool, str]:
+        found = [t for t in terms if re.search(rf"\b{re.escape(t)}\b", r, re.I)]
+        return len(found) >= n, f"named {len(found)} of the {n} needed: {found}"
+    return check
+
+
 def v_excludes_all(*terms: str) -> Validator:
     """Ensures response does NOT contain any of the specified terms."""
     def check(r: str) -> Tuple[bool, str]:
@@ -536,15 +544,10 @@ TEST_CASES = [
         # than emitting one name by accident.
         validators=[
             v_non_empty,
-            v_contains_any(
-                # Legacy names (kept for backwards-compat smoke runs)
-                "web_search", "web_fetch", "read_file", "memory_query",
-                # Current domain names — match any 2+ in the response would
-                # be ideal but v_contains_any just needs one. The model
-                # almost always emits the full list when asked, so one
-                # canonical domain is sufficient signal.
-                "file", "shell", "web", "knowledge", "palace",
-                "introspect", "context", "browser",
+            # At least three real names, so "I've listed the tools" and "the
+            # introspection tool listed its own tools" don't pass (jboe).
+            v_contains_at_least(3, "file", "shell", "web", "knowledge", "palace", "audio", "study",
+                                "introspect", "worldbuild", "notebook", "context", "browser", "manage", "fabric",
             ),
         ],
     ),
