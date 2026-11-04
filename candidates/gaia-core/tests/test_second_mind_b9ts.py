@@ -143,3 +143,9 @@ def test_a_word_opening_a_line_is_not_a_name():
 
 def test_a_plural_is_backed_by_its_singular():
     assert sm.unbacked("It separates core and Role Personas.", "Tier II: Role Persona") == []
+
+
+def test_a_section_the_document_lacks_means_she_carried_on_writing_it():
+    text = "### Thought seeds\nA thought can be saved. Memory holds it and a heartbeat reviews it."
+    assert sm.keeps_to_text("A thought can be saved. ### not a heading here", text, "q", opinion=True)
+    assert not sm.keeps_to_text("A thought can be saved.\n\n### The spiral\nA heartbeat reviews it.", text, "q", opinion=True)

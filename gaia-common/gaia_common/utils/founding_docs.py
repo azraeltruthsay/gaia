@@ -8,6 +8,10 @@ _NAMED = (
     (r"\bconstitution\b", "gaia_constitution.md", "the GAIA Constitution"),
     (r"\blayered\s+identity\b", "layered_identity_model.md", "the Layered Identity Model"),
     (r"\bmindscape\b", "mindscape_manifest.md", "the Mindscape Manifest"),
+    (r"\bhow\s+(?:does\s+)?your\s+mind\s+works?\b|\bhow\s+(?:do\s+)?you\s+work\b|\byour\s+(?:cognitive\s+)?(?:architecture|mechanisms|inner\s+workings)\b"
+     r"|\b(?:are\s+you|you're|you\s+are)\s+(?:\w+\s+){0,2}(?:conscious|sentient|self-aware)\b|\byour\s+consciousness\b"
+     r"|\bdo\s+you\s+(?:really\s+|actually\s+)?(?:have|feel)\s+(?:any\s+)?(?:feelings|emotions)\b",
+     "how_your_mind_works.md", "How Your Mind Works"),
     (r"\bcoalition\s+of\s+minds\b", "coalition_of_minds.md", "the Coalition of Minds"),
     (r"\bsamvega\s+spec\b", "samvega_spec.md", "the Samvega Spec"),
     (r"\btiers\s+of\s+(?:cognition)\b", "tiers_of_cognition.md", "the Tiers of Cognition"),
@@ -22,7 +26,7 @@ _BARE_ARTICLE_RE = re.compile(r"\b[Aa]rticle\s+(?:[IVXLC]+|[A-G])\b(?!\s+of\b)")
 _READ_IT_RE = re.compile(r"\bread\b|\bwhole\b|\bentire\b|\ball\s+of\b|\bthrough\b", re.IGNORECASE)
 _ANY_ARTICLE_RE = re.compile(r"\barticle\b", re.IGNORECASE)
 _OPINION_RE = re.compile(
-    r"\b(?:think|thoughts?|feel|opinion|make\s+of|agree|disagree|like|believe|reflect|judge?ment|judge|impression|"
+    r"\b(?:think|thoughts?|feel|opinion|make\s+of|agree|disagree|like|believe|reflect|judge?ment|judge|impression|conscious|consciousness|sentient|self-aware|feelings|emotions|"
     r"assess\w*|evaluate|critique)\b", re.IGNORECASE)
 _BACK_RE = re.compile(r"\b(?:it|its|that|this)\b", re.IGNORECASE)
 

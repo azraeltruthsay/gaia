@@ -272,6 +272,17 @@ def test_the_mind_on_the_gpu_answers_from_tool_results(gear2, first, monkeypatch
     assert core.model_pool.forward_to_model.call_args.args[0] == first
 
 
+@pytest.mark.parametrize("question,hers", [
+    ("Are you conscious?", True), ("Do you think you are truly conscious?", True), ("How does your mind work?", True),
+    ("Do you have feelings?", True), ("What are your mechanisms?", True),
+    ("Do you think dogs are conscious?", False), ("How does a car engine work?", False),
+])
+def test_asked_about_her_own_workings_she_reads_them(question, hers):
+    from gaia_common.utils.founding_docs import named_document
+    named = named_document(question)
+    assert bool(named and named[0].endswith("how_your_mind_works.md")) is hers
+
+
 def test_if_it_cannot_be_read_the_turn_goes_on():
     core = _doc_core("x", read=(False, {"error": "nope"}))
     assert core._founding_doc_reply("What does your constitution say?", "s") is None

@@ -56,7 +56,7 @@ from gaia_common.protocols.cognition_packet import (
     OutputDestination, OutputRouting, DestinationTarget,
 )
 from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detect_fragmentation_request, _has_named_work_signal
-from gaia_common.utils.tool_call_parser import tool_answer_messages
+from gaia_common.utils.tool_call_parser import document_answer_messages, tool_answer_messages
 from gaia_core.cognition.reply_scrub import claims_success, honest_about_failure, own_words
 from gaia_common.utils.lookup_memory import provenance_note
 from gaia_common.utils.doc_sections import excerpt_for
@@ -7755,12 +7755,12 @@ RESULT: COMPLEX (reason: <brief reason>)
             return None
         opinion = asks_opinion(user_input)
         whole = wants_whole(user_input) or (opinion and not asked_articles(user_input))
-        part = content[:WHOLE_DOC_CHARS] if whole else excerpt_for(content, user_input, limit=6000)
+        part = content[:WHOLE_DOC_CHARS] if whole else excerpt_for(content, user_input, limit=7000)
         if not hasattr(self, "_docs_read"):
             self._docs_read = {}
         self._docs_read[session_id] = named
         events = self.generate_continuation(
-            messages=tool_answer_messages(user_input, f"reading {title}", part), session_id=session_id,
+            messages=document_answer_messages(user_input, title, part), session_id=session_id,
             max_tokens=600 if opinion else 320, temperature=0.3)
         reply = "".join(e.get("value", "") for e in events if isinstance(e, dict) and e.get("type") == "token").strip()
         keep = keeps_to_text(reply, part, user_input, opinion=opinion)

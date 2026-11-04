@@ -55,11 +55,17 @@ def _loops(reply: str) -> bool:
     return bool(seen) and max(seen.values()) >= 3
 
 
+def _adds_a_section(reply: str, text: str) -> bool:
+    """A heading the text doesn't have: she has carried on writing the document."""
+    return any(h.strip().lower() not in (text or "").lower()
+               for h in re.findall(r"^#{1,6}\s+(.+)$", reply or "", re.MULTILINE))
+
+
 def keeps_to_text(reply: str, text: str, question: str, opinion: bool = False) -> bool:
     """Whether a reply about a document stays with it: no invented names, enough
     of its words from the text, and any article asked for under its real title.
     An opinion can range further, but still has to be about the text."""
-    if not (reply or "").strip() or _loops(reply) or unbacked(reply, f"{question}\n{text}"):
+    if not (reply or "").strip() or _loops(reply) or _adds_a_section(reply, text) or unbacked(reply, f"{question}\n{text}"):
         return False
     from gaia_common.utils.doc_sections import asked_articles, sections
     from gaia_common.utils.lookup_memory import content_terms

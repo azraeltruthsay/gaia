@@ -479,6 +479,19 @@ def tool_answer_messages(user_input: str, tool_label: str, tool_text: str) -> li
     ]
 
 
+def document_answer_messages(user_input: str, title: str, text: str) -> list:
+    """System + user messages for answering from one of her own documents, marked
+    off so she doesn't carry on writing it. On "How does your mind work?" the tool
+    shape failed 3/3 (she fell back on her weights' account of herself); this one
+    kept to the text 9/9 across three questions on Prime (2026-11-04)."""
+    return [
+        {"role": "system", "content": TOOL_ANSWER_SYSTEM},
+        {"role": "user", "content": (
+            f"You just read {title}.\n\n<document>\n{text}\n</document>\n\n"
+            f'Someone asks you: "{user_input}"\n\nAnswer them in your own words, as yourself.')},
+    ]
+
+
 def is_tool_answer(messages: list) -> bool:
     """Whether `messages` are the tool-answer shape: the reply is written from
     a result already in hand. Core answers those bare — the deliberation
