@@ -21,11 +21,13 @@ _CUE_RE = re.compile(
 )
 _WRAPPER_RE = re.compile(r'\{\s*"(?:content|response|output|text)"\s*:\s*"')
 _WRAPPER_END = '"}'
-_JUNK = (_TAG_RE, _CLOCK_RE, _CUE_RE, _WRAPPER_RE)
+# Her own turn marker, written back at the start of a reply.
+_TURN_RE = re.compile(r"(?:<\|im_start\|>\s*)?assistant\s*(?:\n|:)\s*", re.IGNORECASE)
+_JUNK = (_TAG_RE, _CLOCK_RE, _CUE_RE, _WRAPPER_RE, _TURN_RE)
 # What may open a reply without being the reply: the tier label, a status line.
 _LABEL_RE = re.compile(r"(?:\[(?!Clock:)[^\]\n]{1,40}\]|\*\[[^\n]*\]\*)\s+")
 
-_OPENINGS = ("<nooutput>", "<blockquote>", "[clock:", "they asked", "the user asked",
+_OPENINGS = ("<nooutput>", "<blockquote>", "<|im_start|>", "assistant", "[clock:", "they asked", "the user asked",
              "you already did that", '{"content"', '{"response"',
              '{"output"', '{"text"')
 _TAGS = ("<nooutput>", "</nooutput>", "<blockquote>", "</blockquote>")
@@ -38,6 +40,10 @@ def _may_grow_into_something(body: str) -> bool:
     if len(body) >= _MAX_HOLD:
         return False
     low = body.lower()
+    if low.startswith("assistant") and len(low) > len("assistant") and low[len("assistant")] not in " \n:":
+        return False
+    if low.startswith(("assistant ",)) and low[len("assistant"):].strip(" ")[:1] not in ("", "\n", ":"):
+        return False
     if any(o.startswith(low) or low.startswith(o) for o in _OPENINGS):
         return True
     if body.startswith("["):
