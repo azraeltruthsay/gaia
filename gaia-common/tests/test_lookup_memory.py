@@ -377,3 +377,32 @@ def test_proven_records_rank_first_when_rummaging(tmp_path):
     assert m.recall("Excalibur", now=T0)[0]["url"] == divers["url"]
     m.feedback(Q, "The Lady of the Lake.", [{"memory_id": card}], now=T0)
     assert m.recall("Excalibur", now=T0)[0]["id"] == card
+
+
+def _crowded_memory(tmp_path):
+    mem = LookupMemory(tmp_path)
+    for i in range(210):
+        mem.remember(f"q{i}", [{"url": f"https://s{i}.org", "title": f"Page {i}",
+                                "snippet": f"The speed of the weather front number {i} in the city today."}])
+    return mem
+
+
+def test_common_words_alone_are_not_a_match_in_a_full_memory(tmp_path):
+    mem = _crowded_memory(tmp_path)
+    assert mem.recall("What is the speed of light?") == []
+
+
+def test_the_rare_word_is_what_counts(tmp_path):
+    mem = _crowded_memory(tmp_path)
+    mem.remember("x", [{"url": "https://l.org", "title": "Light", "snippet": "The speed of light is 299,792 km per second."}])
+    assert [h["title"] for h in mem.recall("What is the speed of light?")] == ["Light"]
+
+
+def test_a_memory_confirmed_for_the_question_survives(tmp_path):
+    mem = _crowded_memory(tmp_path)
+    rid = mem.remember("x", [{"url": "https://w.org", "title": "Weather", "snippet": "The speed of the wind is high in the city."}])[0]
+    assert mem.recall("What is the speed of light?") == []
+    rec = mem._load(mem._find(rid))
+    rec["confirmed_queries"] = ["What is the speed of light?"]
+    mem._save(rec)
+    assert mem.recall("What is the speed of light?")

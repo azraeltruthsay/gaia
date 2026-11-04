@@ -43,6 +43,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -55,6 +56,8 @@ logger = logging.getLogger("GAIA.LookupMemory")
 MIN_SNIPPET_CHARS = 40
 MIN_TOLD_CHARS = 8
 MAX_TELLERS = 20
+MIN_RARITY_RECORDS = 200
+MIN_RARE_COVERAGE = 0.6
 RECHECK_TOLD_DAYS = 30
 MAX_CHECKS = 5
 # Page fetches are long; keep the opening, which is what grounding shows.
@@ -357,6 +360,14 @@ def compact_lookup(rec: dict) -> dict:
     if rec.get("checks"):
         out["last_check"] = {k: rec["checks"][-1].get(k) for k in ("when", "outcome")}
     return out
+
+
+def _rarity_weights(terms: set, documents: List[set]) -> Dict[str, float]:
+    """How much each word of a question says, by how few records hold it. Empty
+    until there are enough records for rarity to mean anything."""
+    if len(documents) < MIN_RARITY_RECORDS:
+        return {}
+    return {t: math.log(1 + len(documents) / (1 + sum(t in d for d in documents))) for t in terms}
 
 
 def _may_see(rec: dict, asker: str) -> bool:
@@ -721,13 +732,19 @@ class LookupMemory:
         if not terms:
             return []
         scored = []
-        for path, rec, archived in self._records(include_archive):
-            if not _may_see(rec, asker):
-                continue
-            text_terms = content_terms(f"{rec.get('title', '')} {rec.get('snippet', '')}")
+        records = [(path, rec, archived, content_terms(f"{rec.get('title', '')} {rec.get('snippet', '')}"))
+                   for path, rec, archived in self._records(include_archive) if _may_see(rec, asker)]
+        weight = _rarity_weights(terms, [t for *_r, t in records])
+        for path, rec, archived, text_terms in records:
             text_hit = terms & text_terms
             text_score = len(text_hit) / len(terms)
             if text_score < min_score:
+                continue
+            # Sharing the common words isn't being about the same thing: at 1,272
+            # records "speed of light" led with "Current Weather in Portland".
+            # A record confirmed for this question has already proved itself.
+            if weight and sum(weight[t] for t in text_hit) / sum(weight.values()) < MIN_RARE_COVERAGE \
+                    and question_match(query, rec.get("confirmed_queries", [])) < 0.6:
                 continue
             query_only = (terms & content_terms(" ".join(rec.get("queries", [])))) - text_hit
             score = min(1.0, text_score + 0.5 * len(query_only) / len(terms))
