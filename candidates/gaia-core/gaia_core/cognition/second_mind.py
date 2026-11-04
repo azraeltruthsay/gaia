@@ -38,12 +38,19 @@ def _words(text: str) -> set:
 def unbacked(reply: str, known: str) -> List[str]:
     """Names and numbers in a reply that `known` doesn't hold."""
     words = _words(known)
+    lowered = (known or "").lower()
     body = _LABEL_RE.sub("", reply or "", count=1)
     out = []
     for claim in _CLAIM_RE.findall(body):
-        if not _words(claim) <= words and claim not in out:
+        # Also as a substring: "9950" is backed by "9950X3D", "Gemma" by "Gemma4".
+        if not _words(claim) <= words and claim.lower() not in lowered and claim not in out:
             out.append(claim)
     return out
+
+
+def states_something(reply: str) -> bool:
+    """Whether a reply holds any name or number at all."""
+    return bool(_CLAIM_RE.findall(_LABEL_RE.sub("", reply or "", count=1)))
 
 
 def check(question: str, reply: str, known: str, generate: Callable[[str], str]) -> Optional[dict]:
@@ -65,6 +72,9 @@ def check(question: str, reply: str, known: str, generate: Callable[[str], str])
 
 
 _ABOUT_HER_RE = re.compile(r"\b(?:you|your|yours|yourself|gaia)\b", re.IGNORECASE)
+# A name in the question means it's about that, whatever "you" it also has:
+# "What is in your memory palace about The Raven?"
+_NAMES_SOMETHING_RE = re.compile(r"(?<![.!?]\s)(?<!^)\b[A-Z][a-z]{2,}")
 # A short answer with a few specifics can be doubted. A long one from her weights
 # ("the history of Tashkent") flags everything, true or not.
 _MAX_CLAIMS_FOR_DOUBT = 3
@@ -79,7 +89,8 @@ def is_necessary(question: str, result: Optional[dict], ran_tool: bool, had_sour
         return not ran_tool
     if result["verdict"] != "unbacked" or not result.get("unbacked"):
         return False
-    if had_source or _ABOUT_HER_RE.search(question or ""):
+    q = question or ""
+    if had_source or (_ABOUT_HER_RE.search(q) and not _NAMES_SOMETHING_RE.search(q.replace("GAIA", ""))):
         return True
     return "?" in (question or "") and len(result["unbacked"]) <= _MAX_CLAIMS_FOR_DOUBT
 

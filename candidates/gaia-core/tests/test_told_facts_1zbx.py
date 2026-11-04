@@ -172,3 +172,34 @@ def test_her_reply_cannot_give_the_architect_credit_they_did_not_earn():
     real = {"kind": "told", "snippet": FACT, "told_by": [{"who": "Azrael", "operator": True}]}
     core = _core((True, {"results": [real]}), said="Azrael told me Poe wrote it.")
     assert core._told_fact_reply("Who was The Raven written by?", "s") == "Azrael told me Poe wrote it."
+
+
+FACTS = "This machine: Test GPU with 16.0 GB; Test Chip, 32 threads."
+
+
+def _host_core(said, monkeypatch):
+    import gaia_core.cognition.agent_core as ac
+    monkeypatch.setattr(ac, "host_facts_text", lambda: FACTS)
+    return _core((True, {}), said=said)
+
+
+def test_asked_what_she_runs_on_she_answers_from_the_machine(monkeypatch):
+    core = _host_core("A Test GPU with 16.0 GB, and a Test Chip.", monkeypatch)
+    assert core._host_fact_reply("What hardware are you running on?", "s") == "A Test GPU with 16.0 GB, and a Test Chip."
+    assert FACTS in core.generate_continuation.call_args.kwargs["messages"][1]["content"]
+
+
+def test_if_she_adds_hardware_the_machine_did_not_report_the_facts_stand(monkeypatch):
+    core = _host_core("A Core i7-8500B with an RTX 4060 Ti.", monkeypatch)
+    assert core._host_fact_reply("What hardware are you running on?", "s") == FACTS
+
+
+def test_other_questions_are_left_alone(monkeypatch):
+    core = _host_core("x", monkeypatch)
+    assert core._host_fact_reply("Who wrote The Raven?", "s") is None
+    core.generate_continuation.assert_not_called()
+
+
+def test_words_that_say_nothing_give_way_to_the_facts(monkeypatch):
+    core = _host_core("Your environment is as reported.", monkeypatch)
+    assert core._host_fact_reply("Tell me about your environment.", "s") == FACTS

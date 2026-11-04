@@ -59,7 +59,9 @@ from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detec
 from gaia_common.utils.tool_call_parser import tool_answer_messages
 from gaia_core.cognition.reply_scrub import claims_success, honest_about_failure, own_words
 from gaia_common.utils.lookup_memory import provenance_note
+from gaia_common.utils.host_facts import asks_about_host, host_facts_text
 from gaia_core.cognition.knowledge_router import weakest_last
+from gaia_core.cognition.second_mind import states_something, unbacked
 from gaia_core.cognition.told_facts import (
     MIN_MATCH,
     asks_if_checked,
@@ -1464,7 +1466,8 @@ class AgentCore:
         # Facts she was told, kept and recalled. Ahead of research and the
         # old save-to-file route, which get these turns otherwise (1zbx).
         try:
-            _palace_reply = self._told_fact_reply(user_input, session_id, source, _metadata)
+            _palace_reply = (self._told_fact_reply(user_input, session_id, source, _metadata)
+                             or self._host_fact_reply(user_input, session_id))
             if _palace_reply:
                 if not _user_msg_persisted:
                     self.session_manager.add_message(session_id, "user", user_input)
@@ -7701,6 +7704,24 @@ RESULT: COMPLEX (reason: <brief reason>)
             fits = bool
         reply = "".join(e.get("value", "") for e in events if isinstance(e, dict) and e.get("type") == "token").strip()
         return reply if fits(reply) else plain
+
+    def _host_fact_reply(self, user_input: str, session_id: str) -> Optional[str]:
+        """Her reply when asked what she runs on, from what the machine says right
+        now. She words it; if her words add a name or number the machine didn't
+        give, the plain facts stand. Asked directly she made up an i7 and an RTX
+        4060 Ti."""
+        if not asks_about_host(user_input):
+            return None
+        facts = host_facts_text()
+        if not facts:
+            return None
+        events = self.generate_continuation(
+            messages=tool_answer_messages(user_input, "reading this machine", facts), session_id=session_id,
+            max_tokens=160, temperature=0.3)
+        reply = "".join(e.get("value", "") for e in events if isinstance(e, dict) and e.get("type") == "token").strip()
+        keep = states_something(reply) and not unbacked(reply, f"{user_input}\n{facts}")
+        self.logger.info("Host facts: answered from the machine (her words kept: %s)", keep)
+        return reply if keep else facts
 
     def _palace_call(self, method: str, params: dict) -> tuple:
         try:

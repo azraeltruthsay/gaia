@@ -20,7 +20,7 @@ Configuration (all optional, env vars):
   GAIA_LOCALE_CITY    Human place name, e.g. "the Los Angeles area"
   GAIA_LOCALE_LAT     Latitude  (float) — enables live weather when paired w/ lon
   GAIA_LOCALE_LON     Longitude (float)
-  GAIA_LOCALE_MACHINE Body description, default "this workstation (RTX 5080, 16 GB)"
+  GAIA_LOCALE_MACHINE Body description; default read from the machine (host_facts)
   GAIA_OPERATOR_NAME  Operator's name, default "Azrael"
   GAIA_LOCALE_WEATHER "0" to force-disable the weather fetch even with lat/lon
 """
@@ -170,6 +170,16 @@ def _fetch_weather(lat: float, lon: float) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _sensed_machine() -> str:
+    try:
+        from gaia_common.utils.host_facts import machine_description
+        body = machine_description()
+    except Exception:
+        logger.debug("Could not read the machine", exc_info=True)
+        body = ""
+    return f"this workstation ({body})" if body else "this workstation"
+
+
 def locality_snapshot() -> Dict[str, Any]:
     """Structured locality data (for callers that want the parts, not prose)."""
     dt_local = _local_now()
@@ -187,7 +197,7 @@ def locality_snapshot() -> Dict[str, Any]:
         is_day = 6 <= dt_local.hour < 20
 
     return {
-        "machine": _env("GAIA_LOCALE_MACHINE", "this workstation (RTX 5080, 16 GB)"),
+        "machine": _env("GAIA_LOCALE_MACHINE") or _sensed_machine(),
         "operator": _env("GAIA_OPERATOR_NAME", "Azrael"),
         "city": _locale_city(),
         "season": _season(dt_local, lat),

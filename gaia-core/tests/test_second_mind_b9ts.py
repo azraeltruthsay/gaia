@@ -12,6 +12,10 @@ def test_names_and_numbers_nothing_backs():
     assert sm.unbacked("It's 6:47 PM.", "It is 6:47 PM") == []
 
 
+def test_part_of_a_known_word_is_backed():
+    assert sm.unbacked("It has a Ryzen 9950 and runs Gemma.", "AMD Ryzen 9 9950X3D. Gemma4-E4B.") == []
+
+
 def test_labels_and_sentence_openings_are_not_claims():
     assert sm.unbacked("[Prime]\n\nSteady, thanks. Nothing to report.", "") == []
     assert sm.unbacked("*[Searched the web for: x]*\n\nThe answer is yes.", "") == []
@@ -58,6 +62,8 @@ def _review(tmp_path, monkeypatch, question, reply, generate, **kw):
     ("What are you running on?", ["Intel Xeon"], False, True),
     ("What did the page say?", ["Ahab"], True, True),
     ("Where did Arthur get his sword?", ["Nimue"], False, True),
+    ("What is in your memory palace about The Raven?", ["Allen", "Poe", "Baltimore", "Boston"], False, False),
+    ("What do you know about The Raven?", ["Perplexity", "Want", "Create", "Norway"], False, False),
     ("Tell me about the history of Tashkent.", ["Sogdians"], False, False),
     ("What is the history of Tashkent?", ["Sogdians", "Buddhism", "Central Asia", "Asian"], False, False),
 ])

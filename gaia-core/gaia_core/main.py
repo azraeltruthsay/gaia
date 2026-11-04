@@ -144,9 +144,11 @@ def _sources_for_observer(packet_dict, tool_texts: list) -> str:
 def _self_facts_for_observer(history: list) -> str:
     """What is true of her and of this conversation: a reply can use these
     without anyone having to look them up."""
-    parts = ["GAIA, created by Azrael. Tiers: Core (Gemma 4 E4B), Prime (Qwen3-VL-8B). RTX 5080 GPU, 16 GB."]
+    parts = ["GAIA, created by Azrael."]
     try:
+        from gaia_common.utils.host_facts import host_facts_text
         from gaia_common.utils.locality import locality_snapshot
+        parts.append(host_facts_text())
         from gaia_core.utils.world_state import format_world_state_snapshot
         parts.append(json.dumps(locality_snapshot(), default=str))
         parts.append(format_world_state_snapshot(max_lines=4))
