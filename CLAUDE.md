@@ -52,6 +52,8 @@ GAIA uses a **two-tier** architecture: a **Gemma 4 Core** and a **Qwen3-8B Prime
 
 **Routing**: the mind on the GPU generates, and the other observes from the CPU. Since 2026-11-04 she wakes into gear 2 (`RESTING_STATE` in `lifecycle/states.py`, env `GAIA_RESTING_GEAR`): Prime is the default voice until a new Core is found (`2qus`). Gear 1 is still an explicit `POST /consciousness/awake`. The orchestrator manages gear shifts via the consciousness matrix.
 
+**Prime's GPU weights**: the engine loads `/models/prime-nf4`, NF4 saved from `/models/prime` and verified bit-identical (logits and hidden states): 4 s against 40. `/models/prime` keeps the full weights for training and merges. After changing them, save NF4 again or Prime keeps the old mind.
+
 **LoRA adapters**: Loaded dynamically via GAIA Engine `POST /adapter/load`. Active adapter set via `POST /adapter/set`.
 
 ## The Gearbox (Lifecycle States)

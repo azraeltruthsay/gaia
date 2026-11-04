@@ -70,6 +70,8 @@ services:
       - ORCHESTRATOR_PORT=6410
       - ORCHESTRATOR_STATE_DIR=/shared/orchestrator
       - MODELS_DIR=/models
+      # NF4 saved from /models/prime, bit-identical; training keeps the full weights
+      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/prime-nf4}
       - WARM_POOL_DIR=/warm_pool
       - ORCHESTRATOR_COMPOSE_FILE_LIVE=/gaia/GAIA_Project/docker-compose.yml
       - ORCHESTRATOR_COMPOSE_FILE_CANDIDATE=/gaia/GAIA_Project/docker-compose.candidate.yml
@@ -140,7 +142,7 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - PRIME_PORT=7777
-      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/prime}
+      - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/prime-nf4}
       - PRIME_DEVICE=cuda
       - PRIME_AUTOLOAD=${PRIME_AUTOLOAD:-0}
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
