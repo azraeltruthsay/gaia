@@ -1,6 +1,5 @@
 """The other mind answers blind; the code looks for what nothing backs (b9ts)."""
 import json
-import threading
 
 import pytest
 
@@ -49,41 +48,68 @@ def test_a_fake_tool_result_needs_no_mind():
     assert sm.check("Fetch it", '<tool_result>{"ok": true}</tool_result> It is a page.', "", never)["verdict"] == "fake_tool_result"
 
 
-def _wait():
-    for t in threading.enumerate():
-        if t.name == "second-mind":
-            t.join(5)
-
-
-def test_watching_writes_it_down_and_never_raises(tmp_path, monkeypatch):
+def _review(tmp_path, monkeypatch, question, reply, generate, **kw):
     log = tmp_path / "o" / "log.jsonl"
     monkeypatch.setattr(sm, "LOG_PATH", str(log))
-    sm.watch("Q?", "Given by Lady Lancelot.", "", lambda p: "unknown", "core", "s")
-    _wait()
-    entry = json.loads(log.read_text())
-    assert entry["verdict"] == "unbacked" and entry["observer"] == "core"
+    return sm.review(question, reply, kw.pop("known", ""), generate, "prime", "s", **kw), log
 
+
+@pytest.mark.parametrize("question,claims,had_source,want", [
+    ("What are you running on?", ["Intel Xeon"], False, True),
+    ("What did the page say?", ["Ahab"], True, True),
+    ("Where did Arthur get his sword?", ["Nimue"], False, True),
+    ("Tell me about the history of Tashkent.", ["Sogdians"], False, False),
+    ("What is the history of Tashkent?", ["Sogdians", "Buddhism", "Central Asia", "Asian"], False, False),
+])
+def test_when_it_seems_necessary(question, claims, had_source, want):
+    assert sm.is_necessary(question, {"verdict": "unbacked", "unbacked": claims}, False, had_source) is want
+
+
+def test_a_fake_tool_result_is_only_fake_if_no_tool_ran():
+    fake = {"verdict": "fake_tool_result", "unbacked": []}
+    assert sm.is_necessary("Fetch it", fake, False, False)
+    assert not sm.is_necessary("Fetch it", fake, True, False)
+    assert not sm.is_necessary("Hi", None, False, False)
+
+
+def test_the_followup_is_in_its_own_words_if_they_name_the_doubt(tmp_path, monkeypatch):
+    def mind(prompt):
+        return "I can't back up the Intel Xeon part. More text." if "listening" in prompt else "I don't know."
+    said, log = _review(tmp_path, monkeypatch, "What are you running on?", "An Intel Xeon CPU.", mind)
+    assert said == "I can't back up the Intel Xeon part."
+    assert json.loads(log.read_text())["followup"] == said
+
+
+@pytest.mark.parametrize("words", ["Everything looks fine to me.", "", '{"note": "Intel Xeon"}', "Intel Xeon " * 60 + "."])
+def test_a_followup_that_misses_the_doubt_becomes_a_plain_one(tmp_path, monkeypatch, words):
+    def mind(prompt):
+        return words if "listening" in prompt else "I don't know."
+    said, _log = _review(tmp_path, monkeypatch, "What are you running on?", "An Intel Xeon CPU.", mind)
+    assert said.startswith("I can't back up what I just said about Intel Xeon")
+
+
+def test_it_stays_quiet_when_it_is_not_necessary(tmp_path, monkeypatch):
+    said, log = _review(tmp_path, monkeypatch, "Tell me about Tashkent.", "Founded by the Sogdians.", lambda p: "unknown")
+    assert said == "" and json.loads(log.read_text())["verdict"] == "unbacked"
+
+
+def test_a_failure_means_silence_and_a_note(tmp_path, monkeypatch):
     def boom(p):
         raise RuntimeError("no model")
-    sm.watch("Q?", "Given by Lady Lancelot.", "", boom, "core", "s")
-    _wait()
-    assert json.loads(log.read_text().splitlines()[-1])["verdict"] == "error"
+    said, log = _review(tmp_path, monkeypatch, "What are you?", "An Intel Xeon.", boom)
+    assert said == "" and json.loads(log.read_text())["verdict"] == "error"
 
 
 def test_it_skips_rather_than_queues(tmp_path, monkeypatch):
-    log = tmp_path / "log.jsonl"
-    monkeypatch.setattr(sm, "LOG_PATH", str(log))
     assert sm._busy.acquire(blocking=False)
     try:
-        sm.watch("Q?", "Given by Lady Lancelot.", "", lambda p: "x", "core")
+        said, log = _review(tmp_path, monkeypatch, "What are you?", "An Intel Xeon.", lambda p: "x")
     finally:
         sm._busy.release()
-    assert json.loads(log.read_text())["verdict"] == "skipped_busy"
+    assert said == "" and json.loads(log.read_text())["verdict"] == "skipped_busy"
 
 
 def test_it_can_be_turned_off(tmp_path, monkeypatch):
-    log = tmp_path / "log.jsonl"
-    monkeypatch.setattr(sm, "LOG_PATH", str(log))
     monkeypatch.setenv("SECOND_MIND_ENABLED", "0")
-    sm.watch("Q?", "Given by Lady Lancelot.", "", lambda p: "x", "core")
-    assert not log.exists()
+    said, log = _review(tmp_path, monkeypatch, "What are you?", "An Intel Xeon.", lambda p: "x")
+    assert said == "" and not log.exists()

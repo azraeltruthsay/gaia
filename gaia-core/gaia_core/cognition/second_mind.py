@@ -7,7 +7,9 @@ question itself, blind to the reply, and the code looks for names and numbers in
 the reply that neither that answer nor what is known can back: 9/12 caught on
 either mind, with 2-3 false alarms on 12 good replies (2026-11-03).
 
-For now it only writes down what it would have said, for the architect to read.
+It never interrupts. Her reply goes out whole; if it seems necessary, the other
+mind then adds a follow-up in its own words (Azrael, 2026-11-03). It voices doubt
+rather than correcting: it can be wrong too. Everything else is only logged.
 """
 import json
 import logging
@@ -62,6 +64,72 @@ def check(question: str, reply: str, known: str, generate: Callable[[str], str])
     return {"verdict": "unbacked", "unbacked": remaining, "own_answer": own}
 
 
+_ABOUT_HER_RE = re.compile(r"\b(?:you|your|yours|yourself|gaia)\b", re.IGNORECASE)
+# A short answer with a few specifics can be doubted. A long one from her weights
+# ("the history of Tashkent") flags everything, true or not.
+_MAX_CLAIMS_FOR_DOUBT = 3
+_MAX_SENTENCE_CHARS = 280
+
+
+def is_necessary(question: str, result: Optional[dict], ran_tool: bool, had_source: bool) -> bool:
+    """Whether what the check found is worth saying out loud."""
+    if not result:
+        return False
+    if result["verdict"] == "fake_tool_result":
+        return not ran_tool
+    if result["verdict"] != "unbacked" or not result.get("unbacked"):
+        return False
+    if had_source or _ABOUT_HER_RE.search(question or ""):
+        return True
+    return "?" in (question or "") and len(result["unbacked"]) <= _MAX_CLAIMS_FOR_DOUBT
+
+
+def _plain_followup(result: dict) -> str:
+    if result["verdict"] == "fake_tool_result":
+        return "That tool result wasn't real: no tool ran, so please don't rely on it."
+    return f"I can't back up what I just said about {', '.join(result['unbacked'][:3])}, so please check that."
+
+
+def followup(reply: str, known: str, result: dict, generate: Callable[[str], str]) -> str:
+    """The follow-up, in the other mind's words if they name the actual doubt."""
+    plain = _plain_followup(result)
+    if result["verdict"] != "unbacked":
+        return plain
+    doubts = ", ".join(result["unbacked"][:3])
+    context = f"What is known: {known[:1500]}\n" if known.strip() else ""
+    said = generate(
+        f"{context}You are the part of GAIA that was listening. She just said: {reply[:600]}\n"
+        f"Nothing you have can back up: {doubts}.\n"
+        "Write one short sentence to the person, in the first person, saying which part you can't back up.")
+    first = re.split(r"(?<=[.!?])\s|\n", (said or "").strip(), maxsplit=1)[0].strip()
+    named = any(_words(d) & _words(first) for d in result["unbacked"][:3])
+    return first if named and 0 < len(first) <= _MAX_SENTENCE_CHARS and first[0] not in '<{["*' else plain
+
+
+def review(question: str, reply: str, known: str, generate: Callable[[str], str], observer: str,
+           session_id: str = "", ran_tool: bool = False, had_source: bool = False) -> str:
+    """Check a reply and write down what was found. Returns a follow-up if one
+    seems necessary, else "". One at a time: a CPU mind skips rather than queues."""
+    if os.environ.get("SECOND_MIND_ENABLED", "1").lower() not in ("1", "true", "yes", "on"):
+        return ""
+    if not _busy.acquire(blocking=False):
+        _write({"ts": time.time(), "session_id": session_id, "observer": observer, "verdict": "skipped_busy"})
+        return ""
+    t0 = time.time()
+    entry = {"ts": t0, "session_id": session_id, "observer": observer, "question": question[:300], "reply": reply[:600]}
+    try:
+        result = check(question, reply, known, generate)
+        said = followup(reply, known, result, generate) if is_necessary(question, result, ran_tool, had_source) else ""
+        _write({**entry, "seconds": round(time.time() - t0, 1), **(result or {"verdict": "ok"}), "followup": said})
+        return said
+    except Exception as e:
+        logger.info("Second mind: check failed: %s", e)
+        _write({**entry, "verdict": "error", "error": str(e)[:200]})
+        return ""
+    finally:
+        _busy.release()
+
+
 def _write(entry: dict) -> None:
     try:
         os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
@@ -71,29 +139,3 @@ def _write(entry: dict) -> None:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except OSError as e:
         logger.debug("Second mind: could not log: %s", e)
-
-
-def watch(question: str, reply: str, known: str, generate: Callable[[str], str], observer: str, session_id: str = "") -> None:
-    """Check a reply in the background; the turn never waits. If the last check
-    is still running this one is skipped: a CPU mind can't fall behind by more
-    than a reply, and it must never delay the one talking."""
-    if os.environ.get("SECOND_MIND_ENABLED", "1").lower() not in ("1", "true", "yes", "on"):
-        return
-    if not _busy.acquire(blocking=False):
-        _write({"ts": time.time(), "session_id": session_id, "observer": observer, "verdict": "skipped_busy"})
-        return
-
-    def run():
-        t0 = time.time()
-        try:
-            result = check(question, reply, known, generate)
-            _write({"ts": t0, "session_id": session_id, "observer": observer, "question": question[:300],
-                    "reply": reply[:600], "seconds": round(time.time() - t0, 1),
-                    **(result or {"verdict": "ok"})})
-        except Exception as e:
-            logger.info("Second mind: check failed: %s", e)
-            _write({"ts": t0, "session_id": session_id, "observer": observer, "verdict": "error", "error": str(e)[:200]})
-        finally:
-            _busy.release()
-
-    threading.Thread(target=run, name="second-mind", daemon=True).start()

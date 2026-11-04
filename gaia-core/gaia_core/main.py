@@ -129,35 +129,52 @@ def _pending_recital(reply: str) -> bool:
     return reply.lstrip().startswith("Here is **")
 
 
-def _known_for_observer(packet_dict, tool_texts: list) -> str:
-    """What this turn had in front of it: tool results and grounding."""
+def _sources_for_observer(packet_dict, tool_texts: list) -> str:
+    """What this turn was given to answer from: tool results and grounding."""
     parts = [t for t in tool_texts if t]
     try:
         for df in ((packet_dict or {}).get("content") or {}).get("data_fields") or []:
-            if df.get("key") in ("tool_result", "web_grounding", "world_state_snapshot", "immutable_identity"):
+            if df.get("key") in ("tool_result", "web_grounding"):
                 parts.append(json.dumps(df.get("value"), default=str, ensure_ascii=False)[:3000])
     except Exception:
         logger.debug("observer context failed (non-fatal)", exc_info=True)
     return "\n".join(parts)[:6000]
 
 
-def _start_second_mind(agent_core, question: str, reply: str, known: str, session_id: str) -> None:
-    """Hand a reply to whichever mind isn't generating."""
+def _self_facts_for_observer(history: list) -> str:
+    """What is true of her and of this conversation: a reply can use these
+    without anyone having to look them up."""
+    parts = ["GAIA, created by Azrael. Tiers: Core (Gemma 4 E4B), Prime (Qwen3-VL-8B). RTX 5080 GPU, 16 GB."]
     try:
-        from gaia_core.cognition.second_mind import watch
-        observer = "core" if agent_core._is_prime_available else "prime"
-        model = agent_core.model_pool.models.get(observer)
-        if model is None:
-            return
-
-        def generate(prompt: str) -> str:
-            out = model.create_chat_completion(
-                messages=[{"role": "user", "content": prompt}], max_tokens=70, temperature=0.0)
-            return out["choices"][0]["message"].get("content") or ""
-
-        watch(question, reply, known, generate, observer, session_id)
+        from gaia_common.utils.locality import locality_snapshot
+        from gaia_core.utils.world_state import format_world_state_snapshot
+        parts.append(json.dumps(locality_snapshot(), default=str))
+        parts.append(format_world_state_snapshot(max_lines=4))
     except Exception:
-        logger.debug("second mind failed to start (non-fatal)", exc_info=True)
+        logger.debug("observer self-facts failed (non-fatal)", exc_info=True)
+    parts.extend(str(m.get("content", ""))[:400] for m in (history or [])[-6:] if isinstance(m, dict))
+    return "\n".join(parts)[:3000]
+
+
+_SECOND_MIND_SECONDS = 20.0
+
+
+def _second_mind_followup(agent_core, question: str, reply: str, known: str, session_id: str,
+                          ran_tool: bool, had_source: bool) -> str:
+    """Hand a reply to whichever mind isn't generating. Returns its follow-up,
+    if it seems necessary. Runs after the turn, off the event loop."""
+    from gaia_core.cognition.second_mind import review
+    observer = "core" if agent_core._is_prime_available else "prime"
+    model = agent_core.model_pool.models.get(observer)
+    if model is None:
+        return ""
+
+    def generate(prompt: str) -> str:
+        out = model.create_chat_completion(
+            messages=[{"role": "user", "content": prompt}], max_tokens=70, temperature=0.0)
+        return out["choices"][0]["message"].get("content") or ""
+
+    return review(question, reply, known, generate, observer, session_id, ran_tool, had_source)
 
 
 def _resolve_cfr_recall(history, rid, tool_ledger=None):
@@ -1153,12 +1170,33 @@ async def process_packet(packet_data: Dict[str, Any]):
     except ImportError:
         pass  # httpx not available — skip gate
 
+    _after_turn: dict = {}
+
     async def _run_loop():
         logger.info("Main: _run_loop generator started")
         async with _turn_semaphore:
             logger.info("Main: acquired turn semaphore")
             async for chunk in _run_loop_inner():
                 yield chunk
+        # b9ts: her reply is out and the turn is free, so the next message never
+        # waits on this. The other mind adds a follow-up if it seems necessary.
+        args = _after_turn.get("second_mind")
+        if args:
+            try:
+                said = await asyncio.wait_for(
+                    asyncio.get_running_loop().run_in_executor(None, _second_mind_followup, *args),
+                    timeout=_SECOND_MIND_SECONDS)
+            except Exception as e:
+                logger.info("Second mind: no follow-up (%s)", type(e).__name__)
+                said = ""
+            if said:
+                text = f"*[Second mind]* {said}"
+                yield json.dumps({"type": "token", "value": text}) + "\n"
+                yield json.dumps({"type": "flush"}) + "\n"
+                try:
+                    args[0].session_manager.add_message(args[4], "assistant", text)
+                except Exception:
+                    logger.debug("Second mind: follow-up not kept in history", exc_info=True)
 
     async def _run_loop_inner():
         try:
@@ -2196,16 +2234,13 @@ async def process_packet(packet_data: Dict[str, Any]):
             except Exception:
                 logger.debug("stream-path observer failed (non-fatal)", exc_info=True)
 
-            # b9ts: the other mind checks this reply from the CPU. Log only. Off
-            # the turn's path entirely: even asking which gear she's in can take
-            # seconds, and the one talking never waits.
-            if full_response and not _pending_recital(full_response):
-                import threading as _threading
-                _threading.Thread(
-                    target=_start_second_mind,
-                    args=(_agent_core, user_input or "", full_response,
-                          _known_for_observer(final_packet_dict, _tool_texts_for_observer), session_id),
-                    name="second-mind-start", daemon=True).start()
+            # b9ts: the other mind reads this reply once the turn is over.
+            if full_response.strip() and source in ("web", "discord") and not _pending_recital(full_response):
+                _sources = _sources_for_observer(final_packet_dict, _tool_texts_for_observer)
+                _after_turn["second_mind"] = (
+                    _agent_core, user_input or "", full_response,
+                    "\n".join(x for x in (_self_facts_for_observer(history), _sources) if x),
+                    session_id, bool(_tool_texts_for_observer), bool(_sources))
 
             # 29yq: a native tool call detected mid-stream (ParseEventType.
             # TOOL_CALL_DETECTED, above) BREAKS out of the loop consuming
