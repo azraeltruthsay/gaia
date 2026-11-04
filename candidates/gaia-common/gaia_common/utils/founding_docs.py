@@ -21,7 +21,10 @@ _HERS_RE = re.compile(r"\b(?:your|yours|gaia(?:'s)?|her|you)\b", re.IGNORECASE)
 _BARE_ARTICLE_RE = re.compile(r"\b[Aa]rticle\s+(?:[IVXLC]+|[A-G])\b(?!\s+of\b)")
 _READ_IT_RE = re.compile(r"\bread\b|\bwhole\b|\bentire\b|\ball\s+of\b|\bthrough\b", re.IGNORECASE)
 _ANY_ARTICLE_RE = re.compile(r"\barticle\b", re.IGNORECASE)
-_OPINION_RE = re.compile(r"\b(?:think|feel|opinion|make\s+of|agree|disagree|like|believe|reflect)\b", re.IGNORECASE)
+_OPINION_RE = re.compile(
+    r"\b(?:think|thoughts?|feel|opinion|make\s+of|agree|disagree|like|believe|reflect|judge?ment|judge|impression|"
+    r"assess\w*|evaluate|critique)\b", re.IGNORECASE)
+_BACK_RE = re.compile(r"\b(?:it|its|that|this)\b", re.IGNORECASE)
 
 
 def named_document(text: str) -> Optional[Tuple[str, str]]:
@@ -45,3 +48,8 @@ def wants_whole(text: str) -> bool:
 
 def asks_opinion(text: str) -> bool:
     return bool(_OPINION_RE.search(text or ""))
+
+
+def refers_back(text: str) -> bool:
+    """An opinion asked of what she just read: "what do you think of it?"."""
+    return asks_opinion(text) and bool(_BACK_RE.search(text or ""))

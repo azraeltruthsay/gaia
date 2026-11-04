@@ -17,6 +17,7 @@ import os
 import re
 import threading
 import time
+from collections import Counter
 from typing import Callable, List, Optional
 
 logger = logging.getLogger("GAIA.SecondMind")
@@ -24,8 +25,8 @@ logger = logging.getLogger("GAIA.SecondMind")
 LOG_PATH = os.environ.get("SECOND_MIND_LOG", "/shared/observer/second_mind.jsonl")
 _MAX_LOG_BYTES = 5 * 1024 * 1024
 _MAX_REPLY_CHARS = 4000
-# A capital not opening a sentence, or a number.
-_CLAIM_RE = re.compile(r"(?<![.!?]\s)(?<!^)\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+)*|\d[\d:.,]*\d|\d")
+# A capital not opening a sentence, line or list item, or a number.
+_CLAIM_RE = re.compile(r"(?<![.!?]\s)(?<!^)(?<!\n)(?<![-*:]\s)\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+)*|\d[\d:.,]*\d|\d")
 _LABEL_RE = re.compile(r"^\s*(?:\[[^\]\n]{1,80}\]\s*|\*\[[^\n]*\]\*\s*)+")
 _FAKE_RESULT_RE = re.compile(r"</?tool_(?:result|response)>", re.IGNORECASE)
 _busy = threading.Lock()
@@ -37,22 +38,28 @@ def _words(text: str) -> set:
 
 def unbacked(reply: str, known: str) -> List[str]:
     """Names and numbers in a reply that `known` doesn't hold."""
-    words = _words(known)
+    words = {w.rstrip("s") for w in _words(known)}
     lowered = (known or "").lower()
     body = _LABEL_RE.sub("", reply or "", count=1)
     out = []
     for claim in _CLAIM_RE.findall(body):
         # Also as a substring: "9950" is backed by "9950X3D", "Gemma" by "Gemma4".
-        if not _words(claim) <= words and claim.lower() not in lowered and claim not in out:
+        if not {w.rstrip("s") for w in _words(claim)} <= words and claim.lower() not in lowered and claim not in out:
             out.append(claim)
     return out
+
+
+def _loops(reply: str) -> bool:
+    """The same sentence three times or more: Core on the CPU can fall into this."""
+    seen = Counter(s.strip().lower() for s in re.split(r"[.!?]+\s+", reply or "") if len(s.split()) >= 3)
+    return bool(seen) and max(seen.values()) >= 3
 
 
 def keeps_to_text(reply: str, text: str, question: str, opinion: bool = False) -> bool:
     """Whether a reply about a document stays with it: no invented names, enough
     of its words from the text, and any article asked for under its real title.
     An opinion can range further, but still has to be about the text."""
-    if not (reply or "").strip() or unbacked(reply, f"{question}\n{text}"):
+    if not (reply or "").strip() or _loops(reply) or unbacked(reply, f"{question}\n{text}"):
         return False
     from gaia_common.utils.doc_sections import asked_articles, sections
     from gaia_common.utils.lookup_memory import content_terms

@@ -226,6 +226,52 @@ def test_an_invented_article_gives_way_to_the_text():
     assert out.startswith("From the GAIA Constitution:") and "Consent must be freely given" in out
 
 
+def test_an_opinion_is_never_answered_with_a_quotation():
+    core = _doc_core("It is a very good document. " * 5)
+    out = core._founding_doc_reply("What do you think of your constitution?", "s")
+    assert "Consent must be" not in out and "couldn't put a view" in out
+
+
+def test_what_do_you_think_of_it_means_what_she_just_read():
+    core = _doc_core("I think freely given consent is the right principle.")
+    core._founding_doc_reply("What does your constitution say?", "s")
+    out = core._founding_doc_reply("Right, but what do you think of it?", "s")
+    assert out.startswith("I think freely given") and core._palace_call.call_count == 2
+
+
+def test_it_means_nothing_once_the_talk_has_moved_on():
+    core = _doc_core("x")
+    core._founding_doc_reply("What does your constitution say?", "s")
+    assert core._founding_doc_reply("Who wrote The Raven?", "s") is None
+    assert core._founding_doc_reply("What do you think of it?", "s") is None
+
+
+def test_her_opinion_is_of_the_whole_document_not_a_matched_scrap():
+    long_doc = "### Article I: A\nfirst part.\n\n### Article II: B\n" + "second part. " * 600 + "\nlast words"
+    core = _doc_core("I think it holds up.", read=(True, {"content": long_doc}))
+    core._founding_doc_reply("Give me your thoughts about your constitution.", "s")
+    prompt = core.generate_continuation.call_args.kwargs["messages"][1]["content"]
+    assert "first part" in prompt and "last words" in prompt
+
+
+def test_what_the_plain_text_says_of_itself_is_not_held_against_her():
+    long_doc = "### Article I: A\n" + "words here. " * 900
+    core = _doc_core("Article VII: invented.", read=(True, {"content": long_doc}))
+    out = core._founding_doc_reply("What does Article I of your constitution say?", "s")
+    assert "characters" in out and out in core.take_turn_source("s")
+
+
+@pytest.mark.parametrize("gear2,first", [(True, "prime"), (False, "core")])
+def test_the_mind_on_the_gpu_answers_from_tool_results(gear2, first, monkeypatch):
+    from gaia_core.cognition.agent_core import AgentCore
+    core = AgentCore.__new__(AgentCore)
+    core.logger, core.config, core.model_pool = MagicMock(), MagicMock(), MagicMock()
+    monkeypatch.setattr(AgentCore, "_is_prime_available", property(lambda self: gear2))
+    core.model_pool.forward_to_model.return_value = {"choices": [{"message": {"content": "ok"}}]}
+    assert [e["value"] for e in core.generate_continuation(messages=[], max_tokens=5)] == ["ok"]
+    assert core.model_pool.forward_to_model.call_args.args[0] == first
+
+
 def test_if_it_cannot_be_read_the_turn_goes_on():
     core = _doc_core("x", read=(False, {"error": "nope"}))
     assert core._founding_doc_reply("What does your constitution say?", "s") is None

@@ -129,7 +129,17 @@ ARTICLES = "### Article VII: Consent Principle\n- Consent must be freely given, 
     ("Article VII: Sovereignty and Independence. GAIA holds all powers.", False, False),
     ("Article VII covers rules for everything in general and many unrelated topics.", False, False),
     ("", False, False),
+    ("Consent must be freely given here. " * 3, True, False),
     ("The Consent Principle matters to me: consent freely given feels right, and specific is wise.", True, True),
 ])
 def test_keeping_to_the_text(reply, opinion, want):
     assert sm.keeps_to_text(reply, ARTICLES, "What does Article VII say?", opinion=opinion) is want
+
+
+def test_a_word_opening_a_line_is_not_a_name():
+    assert sm.unbacked("It is good.\n\nThat said, it holds.\n- While true, it is long.", "") == []
+    assert sm.unbacked("It is good.\n\nWritten by Titus Tatius.", "") == ["Titus Tatius"]
+
+
+def test_a_plural_is_backed_by_its_singular():
+    assert sm.unbacked("It separates core and Role Personas.", "Tier II: Role Persona") == []

@@ -60,7 +60,8 @@ from gaia_common.utils.tool_call_parser import tool_answer_messages
 from gaia_core.cognition.reply_scrub import claims_success, honest_about_failure, own_words
 from gaia_common.utils.lookup_memory import provenance_note
 from gaia_common.utils.doc_sections import excerpt_for
-from gaia_common.utils.founding_docs import asks_opinion, named_document, wants_whole
+from gaia_common.utils.doc_sections import asked_articles
+from gaia_common.utils.founding_docs import asks_opinion, named_document, refers_back, wants_whole
 from gaia_common.utils.host_facts import asks_about_host, host_facts_text
 from gaia_core.cognition.knowledge_router import weakest_last
 from gaia_core.cognition.second_mind import keeps_to_text, states_something, unbacked
@@ -457,6 +458,7 @@ class AgentCore:
         "cpu_prime": "Prime",
         "core": "Core",
         "lite": "Core",
+        "nano": "Core",  # the retired tier's name: this is Core, on its short prompt
         "oracle": "Oracle",
         "groq_fallback": "Groq",
     }
@@ -1478,7 +1480,8 @@ class AgentCore:
                     self.session_manager.add_message(session_id, "user", user_input)
                     self._emit_timeline_message(session_id, "user", source)
                     _user_msg_persisted = True
-                yield {"type": "token", "value": _palace_reply}
+                yield {"type": "token", "value": self._build_response_header(
+                    self.__dict__.pop("_continuation_model", "core"), None, None, None, None) + _palace_reply}
                 yield {"type": "flush"}
                 self.session_manager.add_message(session_id, "assistant", _palace_reply)
                 return
@@ -2375,7 +2378,7 @@ class AgentCore:
                         # never reached the casual prompt built for them (7n3,
                         # rbc9). Core's prompt carries both.
                         from gaia_core.utils.prompt_builder import is_social_turn
-                        if is_social_turn(_route.intent, user_input):
+                        if is_social_turn(_route.intent, user_input) or asks_opinion(user_input):
                             selected_model_name = "core"
                             logger.info("[CASCADE] Social turn — Core's casual prompt instead of Nano's few-shot")
             except Exception:
@@ -6698,7 +6701,9 @@ class AgentCore:
         0.7) — a summary of what a tool returned needs neither: at those
         settings Core free-wrote pages of invented backstory.
         """
-        candidates = ["core", "prime", "cpu_prime"]
+        # The mind on the GPU answers in its gear: in gear 2 these went to Core on
+        # the CPU with Prime idle (seen live 2026-11-03, 0 requests to Prime).
+        candidates = ["prime", "core", "cpu_prime"] if self._is_prime_available else ["core", "prime", "cpu_prime"]
         last_err: Exception | None = None
         for cand in candidates:
             model = None
@@ -6710,6 +6715,7 @@ class AgentCore:
                 continue
             try:
                 self.logger.info("Continuation generation with %s (%d messages)", cand, len(messages))
+                self._continuation_model = cand
                 result = self.model_pool.forward_to_model(
                     cand,
                     messages=messages,
@@ -7737,7 +7743,8 @@ RESULT: COMPLEX (reason: <brief reason>)
         document itself, read through her own file tool. Asked directly, she
         invented an Article VII and said she doesn't really have a constitution.
         Her words stand if they keep to the text; else the text does (g47g)."""
-        named = named_document(user_input)
+        last_read = getattr(self, "_docs_read", {}).pop(session_id, None)
+        named = named_document(user_input) or (last_read if refers_back(user_input) else None)
         if not named:
             return None
         path, title = named
@@ -7746,17 +7753,28 @@ RESULT: COMPLEX (reason: <brief reason>)
         if not content:
             self.logger.warning("Founding documents: could not read %s: %s", path, result.get("error"))
             return None
-        part = content[:WHOLE_DOC_CHARS] if wants_whole(user_input) else excerpt_for(content, user_input, limit=6000)
-        if not hasattr(self, "_turn_sources"):
-            self._turn_sources = {}
-        self._turn_sources[session_id] = part
+        opinion = asks_opinion(user_input)
+        whole = wants_whole(user_input) or (opinion and not asked_articles(user_input))
+        part = content[:WHOLE_DOC_CHARS] if whole else excerpt_for(content, user_input, limit=6000)
+        if not hasattr(self, "_docs_read"):
+            self._docs_read = {}
+        self._docs_read[session_id] = named
         events = self.generate_continuation(
             messages=tool_answer_messages(user_input, f"reading {title}", part), session_id=session_id,
-            max_tokens=320, temperature=0.3)
+            max_tokens=600 if opinion else 320, temperature=0.3)
         reply = "".join(e.get("value", "") for e in events if isinstance(e, dict) and e.get("type") == "token").strip()
-        keep = keeps_to_text(reply, part, user_input, opinion=asks_opinion(user_input))
+        keep = keeps_to_text(reply, part, user_input, opinion=opinion)
         self.logger.info("Founding documents: answered from %s (her words kept: %s)", title, keep)
-        return reply if keep else f"From {title}:\n\n{excerpt_for(part, user_input, limit=PLAIN_DOC_CHARS)}"
+        if keep:
+            answer = reply
+        elif opinion:  # the words of the document aren't a view of it
+            answer = f"I read {title}, but I couldn't put a view of it together that I can stand behind just now."
+        else:
+            answer = f"From {title}:\n\n{excerpt_for(part, user_input, limit=PLAIN_DOC_CHARS)}"
+        if not hasattr(self, "_turn_sources"):
+            self._turn_sources = {}
+        self._turn_sources[session_id] = f"{part}\n{answer}"
+        return answer
 
     def _palace_call(self, method: str, params: dict) -> tuple:
         try:
