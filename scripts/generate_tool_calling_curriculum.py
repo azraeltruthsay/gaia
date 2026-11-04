@@ -874,7 +874,6 @@ def gen_no_tool(rng) -> list[dict]:
         ("Who wrote Hamlet?", "William Shakespeare."),
         ("What's the speed of light?", "Approximately 299,792 kilometers per second in a vacuum."),
         ("Convert 100 Celsius to Fahrenheit.", "212°F."),
-        ("What is your name?", "I'm GAIA, a sovereign AI agent built on Google's Gemma 4 E4B by Azrael."),
         ("What's 15 squared?", "225."),
         ("Capital of Japan?", "Tokyo."),
         ("Capital of Australia?", "Canberra."),

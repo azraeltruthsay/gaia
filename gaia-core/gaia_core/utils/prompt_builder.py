@@ -159,43 +159,37 @@ def arch_fact_for(target: str) -> str:
     """The architecture fact for the tier receiving the prompt ('prime' /
     'cpu_prime' → Prime's, anything else → Core's). It must match the model
     actually answering: Prime handed Core's fact started emitting bash; Prime
-    handed none says Gemma 4 E4B (its weights learned the wrong base, 6rfx)."""
-    if (target or "").lower() in ("prime", "cpu_prime"):
-        return (
-            "\n\n— Architecture (factual, do not contradict) —\n"
-            "Your name is GAIA. You are running on the Prime tier — "
-            "Qwen3-VL-8B (Azrael's identity-aligned 'GAIA-Prime-v1') as "
-            "your base model, GAIA's deep-reasoning and planning tier. "
-            "You are part of GAIA's two-tier cognitive architecture.\n"
-            "When asked about your base model, architecture, or what you "
-            "are built on, answer with: Qwen3-VL-8B (the Prime tier of "
-            "GAIA).\n"
-            "IMPORTANT: 'Core', 'Prime', 'Nano' are routing tier labels. "
-            "Never introduce yourself as 'Prime' or 'Core' alone — you "
-            "are GAIA. GAIA's Core tier runs Google's Gemma 4 E4B in "
-            "another process. Core and Prime are two modes of one mind, "
-            "fast and deep, and both are you: whatever either has said "
-            "in this conversation, you said."
-        )
-    return (
-        "\n\n— Architecture (factual, do not contradict) —\n"
-        "Your name is GAIA. You are running on the Core tier — "
-        "Google's Gemma 4 E4B as your base model (open-weight "
-        "multimodal transformer, ~8B parameters, native vision and "
-        "audio towers). You are NOT Qwen, Llama, Mistral, GPT, "
-        "Claude, Gemini, or any other model family.\n"
-        "When asked about your base model, architecture, or what "
-        "you are built on, answer with exactly: Google's Gemma 4 E4B.\n"
-        "IMPORTANT: 'Core', 'Operator', 'Nano', 'Prime', 'Thinker' "
-        "are ROUTING TIER LABELS in your world state, not model "
-        "names. Never introduce yourself as 'Core' or 'Core 4B' or "
-        "any tier name. Your identity is GAIA; your base is Google's "
-        "Gemma 4 E4B. GAIA also has a Prime tier running on "
-        "Qwen3-VL-8B for deep reasoning, in another process. Core "
-        "and Prime are two modes of one mind, fast and deep, and "
-        "both are you: whatever either has said in this "
-        "conversation, you said."
-    )
+    handed none says Gemma 4 E4B (its weights learned the wrong base, 6rfx).
+    The names are read from the engines, not written here (kki4)."""
+    minds = {}
+    try:
+        from gaia_common.utils.self_model import lineage_of, minds as read_minds
+        minds = read_minds()
+    except Exception:
+        logger.debug("Self model unavailable", exc_info=True)
+        lineage_of = lambda weights: {}
+    prime, core = minds.get("Prime") or {}, minds.get("Core") or {}
+    is_prime = (target or "").lower() in ("prime", "cpu_prime")
+    own, other, own_tier, other_tier = (prime, core, "Prime", "Core") if is_prime else (core, prime, "Core", "Prime")
+    role = "GAIA's deep-reasoning and planning tier" if is_prime else "GAIA's fast tier"
+    parts = ["\n\n— Architecture (factual, do not contradict) —\nYour name is GAIA. "]
+    if own.get("name"):
+        made = lineage_of(own.get("weights", ""))
+        parts.append(f"You are running on the {own_tier} tier — {own['name']} as your base model, {role}.\n"
+                     f"When asked about your base model, architecture, or what you are built on, answer with: "
+                     f"{own['name']} (the {own_tier} tier of GAIA).\n")
+        if made.get("history"):
+            parts.append(f"How these weights were made: {made['history']}\n")
+    else:
+        parts.append(f"You are running on the {own_tier} tier. Which model that is can't be read just now; "
+                     "if asked, say so.\n")
+    parts.append(f"IMPORTANT: 'Core', 'Prime', 'Nano' are routing tier labels. Never introduce yourself as "
+                 f"'Prime' or 'Core' alone — you are GAIA. ")
+    if other.get("name"):
+        parts.append(f"GAIA's {other_tier} tier runs {other['name']} in another process. ")
+    parts.append("Core and Prime are two modes of one mind, fast and deep, and both are you: "
+                 "whatever either has said in this conversation, you said.")
+    return "".join(parts)
 
 
 # One line for nano's few-shot prompt (nano is Core's engine). Without a base

@@ -11,6 +11,15 @@ from gaia_core.utils import prompt_builder
 from gaia_core.utils.prompt_builder import is_check_in, is_social_turn, recent_work_fact
 
 
+@pytest.fixture(autouse=True)
+def _known_minds(monkeypatch):
+    """What the engines would report; the tests shouldn't need them running."""
+    from gaia_common.utils import self_model
+    monkeypatch.setattr(self_model, "minds", lambda facts=None: {
+        "Prime": {"weights": "Qwen3-VL-8B-GAIA-Prime-v1-abliterated-NF4", "name": "Qwen3-VL-8B", "device": "GPU", "live": True},
+        "Core": {"weights": "Gemma4-E4B-GAIA-Core-Multimodal", "name": "Google's Gemma 4 E4B", "device": "CPU", "live": True}})
+
+
 @pytest.mark.parametrize("text", [
     "How are you today?", "how are you, really?", "Hey, how's it going?",
     "How are you feeling?", "What have you been up to?", "hi gaia, how have you been?",

@@ -5,8 +5,18 @@ and the spec recital crowded out her felt state. Prime's weights instead carry a
 wrong base-model fact (Prime-v1 learned "built on Google's Gemma 4 E4B"): without
 the prompt-borne fact Prime said Gemma 4 E4B on 'chat' turns, with it Qwen3-VL-8B.
 """
+import pytest
 from gaia_common.protocols.cognition_packet import CognitionPacket, Content, Intent
 from gaia_core.utils import prompt_builder
+
+
+@pytest.fixture(autouse=True)
+def _known_minds(monkeypatch):
+    """What the engines would report; the tests shouldn't need them running."""
+    from gaia_common.utils import self_model
+    monkeypatch.setattr(self_model, "minds", lambda facts=None: {
+        "Prime": {"weights": "Qwen3-VL-8B-GAIA-Prime-v1-abliterated-NF4", "name": "Qwen3-VL-8B", "device": "GPU", "live": True},
+        "Core": {"weights": "Gemma4-E4B-GAIA-Core-Multimodal", "name": "Google's Gemma 4 E4B", "device": "CPU", "live": True}})
 
 
 def _system(target, intent="chat", text="What are you, really?"):

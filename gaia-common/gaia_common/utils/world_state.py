@@ -316,13 +316,13 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
     except Exception:
         pass
 
-    models = snap.get("models", {})
-    model_bits = []
-    for k, v in models.items():
-        if v:
-            model_bits.append(f"{k}={v}")
-    if model_bits:
-        lines.append("Models: " + "; ".join(model_bits))
+    try:
+        from gaia_common.utils.self_model import self_model_text
+        minds = self_model_text()
+        if minds:
+            lines.append("Minds: " + minds)
+    except Exception:
+        logger.debug("Self model unavailable", exc_info=True)
 
     tools = snap.get("mcp_tools") or []
     if tools:

@@ -235,13 +235,13 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
         lines.append(f"Clock: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime(snap['ts']))}")
     lines.append(f"Uptime: {snap['uptime_s']}s | {snap['load']} | {snap['mem']}")
 
-    models = snap.get("models", {})
-    model_bits = []
-    for k, v in models.items():
-        if v:
-            model_bits.append(f"{k}={v}")
-    if model_bits:
-        lines.append("Models: " + "; ".join(model_bits))
+    try:
+        from gaia_common.utils.self_model import self_model_text
+        minds = self_model_text()
+        if minds:
+            lines.append("Minds: " + minds)
+    except Exception:
+        logger.debug("Self model unavailable", exc_info=True)
 
     tools = snap.get("mcp_tools") or []
     extra_count = snap.get("mcp_extra_count", 0)
