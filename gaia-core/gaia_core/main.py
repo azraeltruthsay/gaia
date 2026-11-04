@@ -1949,7 +1949,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # runs (so the retry ran nearly every time) and
                         # summarised the page loosely ("a fable, folks").
                         if rpc_result.get("ok"):
-                            _tool_text = tool_result_text(actual_result)
+                            _tool_text = tool_result_text(actual_result, question=user_input or "")
                         else:
                             import re as _re
                             _tool_text = _re.sub(r"</?tool_result>", "", result_xml).strip()
@@ -2238,7 +2238,9 @@ async def process_packet(packet_data: Dict[str, Any]):
 
             # b9ts: the other mind reads this reply once the turn is over.
             if full_response.strip() and source in ("web", "discord") and not _pending_recital(full_response):
-                _sources = _sources_for_observer(final_packet_dict, _tool_texts_for_observer)
+                _sources = "\n".join(x for x in (
+                    _sources_for_observer(final_packet_dict, _tool_texts_for_observer),
+                    _agent_core.take_turn_source(session_id)) if x)
                 _after_turn["second_mind"] = (
                     _agent_core, user_input or "", full_response,
                     "\n".join(x for x in (_self_facts_for_observer(history), _sources) if x),

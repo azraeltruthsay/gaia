@@ -59,9 +59,11 @@ from gaia_core.cognition.nlu.intent_detection import detect_intent, Plan, _detec
 from gaia_common.utils.tool_call_parser import tool_answer_messages
 from gaia_core.cognition.reply_scrub import claims_success, honest_about_failure, own_words
 from gaia_common.utils.lookup_memory import provenance_note
+from gaia_common.utils.doc_sections import excerpt_for
+from gaia_common.utils.founding_docs import asks_opinion, named_document, wants_whole
 from gaia_common.utils.host_facts import asks_about_host, host_facts_text
 from gaia_core.cognition.knowledge_router import weakest_last
-from gaia_core.cognition.second_mind import states_something, unbacked
+from gaia_core.cognition.second_mind import keeps_to_text, states_something, unbacked
 from gaia_core.cognition.told_facts import (
     MIN_MATCH,
     asks_if_checked,
@@ -101,6 +103,8 @@ from gaia_core.cognition.loop_recovery import (
 
 logger = logging.getLogger("GAIA.AgentCore")
 HISTORY_SUMMARY_THRESHOLD = 20
+WHOLE_DOC_CHARS = 9000
+PLAIN_DOC_CHARS = 1200
 _RECITATION_FETCHES = 8  # Pages compared when learning a work from the web
 _RECITATION_FETCH_SECONDS = 30  # Enough for eight; a slow site must not hold the turn
 _MIN_WORK_CHARS = 50  # Short poems are short: The Red Wheelbarrow is ~100
@@ -1467,7 +1471,8 @@ class AgentCore:
         # old save-to-file route, which get these turns otherwise (1zbx).
         try:
             _palace_reply = (self._told_fact_reply(user_input, session_id, source, _metadata)
-                             or self._host_fact_reply(user_input, session_id))
+                             or self._host_fact_reply(user_input, session_id)
+                             or self._founding_doc_reply(user_input, session_id))
             if _palace_reply:
                 if not _user_msg_persisted:
                     self.session_manager.add_message(session_id, "user", user_input)
@@ -7722,6 +7727,36 @@ RESULT: COMPLEX (reason: <brief reason>)
         keep = states_something(reply) and not unbacked(reply, f"{user_input}\n{facts}")
         self.logger.info("Host facts: answered from the machine (her words kept: %s)", keep)
         return reply if keep else facts
+
+    def take_turn_source(self, session_id: str) -> str:
+        """What this turn answered from, for the mind listening afterward."""
+        return getattr(self, "_turn_sources", {}).pop(session_id, "")
+
+    def _founding_doc_reply(self, user_input: str, session_id: str) -> Optional[str]:
+        """Her reply when asked about her constitution or the like, from the
+        document itself, read through her own file tool. Asked directly, she
+        invented an Article VII and said she doesn't really have a constitution.
+        Her words stand if they keep to the text; else the text does (g47g)."""
+        named = named_document(user_input)
+        if not named:
+            return None
+        path, title = named
+        ok, result = self._palace_call("file", {"action": "read", "path": path})
+        content = result.get("content") if ok else None
+        if not content:
+            self.logger.warning("Founding documents: could not read %s: %s", path, result.get("error"))
+            return None
+        part = content[:WHOLE_DOC_CHARS] if wants_whole(user_input) else excerpt_for(content, user_input, limit=6000)
+        if not hasattr(self, "_turn_sources"):
+            self._turn_sources = {}
+        self._turn_sources[session_id] = part
+        events = self.generate_continuation(
+            messages=tool_answer_messages(user_input, f"reading {title}", part), session_id=session_id,
+            max_tokens=320, temperature=0.3)
+        reply = "".join(e.get("value", "") for e in events if isinstance(e, dict) and e.get("type") == "token").strip()
+        keep = keeps_to_text(reply, part, user_input, opinion=asks_opinion(user_input))
+        self.logger.info("Founding documents: answered from %s (her words kept: %s)", title, keep)
+        return reply if keep else f"From {title}:\n\n{excerpt_for(part, user_input, limit=PLAIN_DOC_CHARS)}"
 
     def _palace_call(self, method: str, params: dict) -> tuple:
         try:

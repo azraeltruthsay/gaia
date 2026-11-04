@@ -203,3 +203,35 @@ def test_other_questions_are_left_alone(monkeypatch):
 def test_words_that_say_nothing_give_way_to_the_facts(monkeypatch):
     core = _host_core("Your environment is as reported.", monkeypatch)
     assert core._host_fact_reply("Tell me about your environment.", "s") == FACTS
+
+
+CONSTITUTION = "### Article VII: Consent Principle\n- Consent must be freely given."
+
+
+def _doc_core(said, read=(True, {"content": CONSTITUTION})):
+    return _core(read, said=said)
+
+
+def test_her_constitution_is_read_with_her_tool_and_answered_from():
+    core = _doc_core("Article VII is the Consent Principle: consent must be freely given.")
+    assert core._founding_doc_reply("What does Article VII say?", "s").startswith("Article VII is the Consent")
+    assert core._palace_call.call_args.args[0] == "file"
+    assert "freely given" in core.generate_continuation.call_args.kwargs["messages"][1]["content"]
+    assert "freely given" in core.take_turn_source("s") and core.take_turn_source("s") == ""
+
+
+def test_an_invented_article_gives_way_to_the_text():
+    core = _doc_core("Article VII: Sovereignty and Independence.")
+    out = core._founding_doc_reply("What does Article VII say?", "s")
+    assert out.startswith("From the GAIA Constitution:") and "Consent must be freely given" in out
+
+
+def test_if_it_cannot_be_read_the_turn_goes_on():
+    core = _doc_core("x", read=(False, {"error": "nope"}))
+    assert core._founding_doc_reply("What does your constitution say?", "s") is None
+
+
+def test_other_questions_leave_the_documents_shut():
+    core = _doc_core("x")
+    assert core._founding_doc_reply("What does the US Constitution say?", "s") is None
+    core._palace_call.assert_not_called()

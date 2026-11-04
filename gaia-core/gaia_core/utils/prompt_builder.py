@@ -1125,7 +1125,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,
                     _action = (tr.get('params') or {}).get('action')
                     _routed_answer = (f"{tool_name}({_action})" if _action and _action not in tool_name
                                       else tool_name,
-                                      tool_result_text(output))
+                                      tool_result_text(output, question=getattr(packet.content, 'original_prompt', '') or ''))
                 break
     except Exception:
         logger.debug("Could not extract tool_result from packet.content.data_fields")

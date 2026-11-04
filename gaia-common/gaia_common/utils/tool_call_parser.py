@@ -489,7 +489,7 @@ def is_tool_answer(messages: list) -> bool:
         and messages[0].get("content") == TOOL_ANSWER_SYSTEM
 
 
-def tool_result_text(result: Any, limit: int = 4000) -> str:
+def tool_result_text(result: Any, limit: int = 4000, question: str = "") -> str:
     """A tool result as plain text for the model to answer from (ecnc).
 
     format_tool_result's XML-wrapped JSON reads as more protocol to imitate,
@@ -512,7 +512,11 @@ def tool_result_text(result: Any, limit: int = 4000) -> str:
                 text += f"\n{result['hint']}"
         elif isinstance(result.get("content") or result.get("text"), str):
             head = [x for x in (result.get("title"), result.get("url")) if x]
-            text = "\n".join(head + [result.get("content") or result.get("text")])
+            # The part asked for, and it says so: cut off without a word, both
+            # minds invented what came after (g47g).
+            from gaia_common.utils.doc_sections import excerpt_for
+            text = "\n".join(head + [excerpt_for(result.get("content") or result.get("text"), question, limit)])
+            return text.strip() or "(empty result)"
         else:
             rows = result.get("lookups") or result.get("results")
             works = [w for w in result.get("works") or [] if isinstance(w, dict) and w.get("text")]
@@ -535,7 +539,7 @@ def tool_result_text(result: Any, limit: int = 4000) -> str:
         text = str(result)
     text = text.strip() or "(empty result)"
     if len(text) > limit:
-        text = text[:limit] + "\n... (truncated)"
+        text = f"{text[:limit]}\n... (cut off here: {limit} of {len(text)} characters shown)"
     return text
 
 

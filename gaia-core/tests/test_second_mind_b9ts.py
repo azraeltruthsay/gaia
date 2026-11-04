@@ -119,3 +119,17 @@ def test_it_can_be_turned_off(tmp_path, monkeypatch):
     monkeypatch.setenv("SECOND_MIND_ENABLED", "0")
     said, log = _review(tmp_path, monkeypatch, "What are you?", "An Intel Xeon.", lambda p: "x")
     assert said == "" and not log.exists()
+
+
+ARTICLES = "### Article VII: Consent Principle\n- Consent must be freely given, reversible and specific."
+
+
+@pytest.mark.parametrize("reply,opinion,want", [
+    ("Article VII is the Consent Principle: consent must be freely given, reversible and specific.", False, True),
+    ("Article VII: Sovereignty and Independence. GAIA holds all powers.", False, False),
+    ("Article VII covers rules for everything in general and many unrelated topics.", False, False),
+    ("", False, False),
+    ("The Consent Principle matters to me: consent freely given feels right, and specific is wise.", True, True),
+])
+def test_keeping_to_the_text(reply, opinion, want):
+    assert sm.keeps_to_text(reply, ARTICLES, "What does Article VII say?", opinion=opinion) is want

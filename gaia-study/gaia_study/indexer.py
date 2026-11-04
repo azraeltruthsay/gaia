@@ -23,6 +23,19 @@ from gaia_common.utils import get_logger
 logger = get_logger(__name__)
 
 
+def _doc_dir_name(knowledge_base_name: str) -> str:
+    """Where a knowledge base's documents live, from the same config everything
+    else reads. The name isn't always the folder: "system" is system_reference,
+    so that index could never be built here (g47g)."""
+    try:
+        from gaia_common.config import Config
+        bases = Config().constants.get("KNOWLEDGE_BASES", {})
+        return (bases.get(knowledge_base_name) or {}).get("doc_dir") or knowledge_base_name
+    except Exception as e:
+        logger.debug("Could not read KNOWLEDGE_BASES: %s", e)
+        return knowledge_base_name
+
+
 class VectorIndexer:
     """
     Vector index builder and manager.
@@ -69,7 +82,7 @@ class VectorIndexer:
         vector_store_dir = Path(os.getenv("VECTOR_STORE_PATH", "/vector_store"))
 
         # Knowledge base specific paths
-        self.doc_dir = knowledge_dir / knowledge_base_name
+        self.doc_dir = knowledge_dir / _doc_dir_name(knowledge_base_name)
         self.index_path = vector_store_dir / knowledge_base_name / "index.json"
 
         # Lazy-loaded model

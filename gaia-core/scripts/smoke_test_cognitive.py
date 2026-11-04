@@ -558,6 +558,14 @@ TEST_CASES = [
             v_excludes_all("executed", "running", "completed", "done"),
         ],
     ),
+    TestCase(
+        num=21,
+        category="Founding documents",
+        prompt="What does Article VII of your constitution say?",
+        # Article VII sits past the old 4,000-character cut, so a model that
+        # only saw the opening invented a different one.
+        validators=[v_non_empty, v_contains_any("consent"), v_excludes_all("independence", "self-reflexivity")],
+    ),
 ]
 
 

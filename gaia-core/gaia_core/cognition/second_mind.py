@@ -48,6 +48,26 @@ def unbacked(reply: str, known: str) -> List[str]:
     return out
 
 
+def keeps_to_text(reply: str, text: str, question: str, opinion: bool = False) -> bool:
+    """Whether a reply about a document stays with it: no invented names, enough
+    of its words from the text, and any article asked for under its real title.
+    An opinion can range further, but still has to be about the text."""
+    if not (reply or "").strip() or unbacked(reply, f"{question}\n{text}"):
+        return False
+    from gaia_common.utils.doc_sections import asked_articles, sections
+    from gaia_common.utils.lookup_memory import content_terms
+    said = content_terms(reply)
+    if not said or len(said & content_terms(text)) / len(said) < (0.25 if opinion else 0.5):
+        return False
+    for article in asked_articles(question):
+        for heading, _body in sections(text):
+            if re.search(rf"\barticle\s+{article}\b", heading, re.IGNORECASE):
+                title = heading.split(":", 1)[-1]
+                if not content_terms(title) <= content_terms(reply):
+                    return False
+    return True
+
+
 def states_something(reply: str) -> bool:
     """Whether a reply holds any name or number at all."""
     return bool(_CLAIM_RE.findall(_LABEL_RE.sub("", reply or "", count=1)))

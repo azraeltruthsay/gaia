@@ -55,7 +55,7 @@ def test_tool_result_text_reads_as_plain_text():
     assert recall == "- From the hand of the woman in the Lake. (Quizlet, looked up 2026-10-28, https://q) [stale]"
     assert tool_result_text({"ok": False, "error": "Unknown action", "hint": "Say so."}) == "Failed: Unknown action\nSay so."
     assert tool_result_text({"results": [], "note": "Nothing remembered."}) == "Nothing remembered."
-    assert tool_result_text("x" * 5000).endswith("(truncated)")
+    assert tool_result_text("x" * 5000, limit=100).endswith("100 of 5000 characters shown)")
     assert "<tool_result>" not in page + recall
 
 
