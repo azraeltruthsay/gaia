@@ -16,6 +16,8 @@ import re
 import time
 from typing import Any, Dict, Generator, List, Optional
 
+from gaia_core.models.turn_context import turn_ids
+
 import requests
 
 logger = logging.getLogger("GAIA.VLLMRemote")
@@ -259,6 +261,8 @@ class VLLMRemoteModel:
             "temperature": temperature,
             "top_p": top_p,
         }
+
+        payload.update(turn_ids())
 
         # Forward vLLM-specific params (guided decoding, stop, etc.)
         for key in self._VLLM_EXTRA_KEYS:

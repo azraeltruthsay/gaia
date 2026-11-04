@@ -181,7 +181,7 @@ managed_http_api:
         KV cache + CUDA-graph replay of the single-token step (uapv: Core ~15 -> ~55 tok/s with a LoRA;
         p3on: Prime/Qwen3-VL ~30 -> ~60 tok/s);
         hidden states still feed the activation stream. Env GAIA_CUDA_GRAPHS=0 restores the
-        dynamic-cache loop. Vision/audio requests are unchanged. The activation stream rotates to
+        dynamic-cache loop. Vision/audio requests are unchanged. Stream rows (6k9i) carry session_id and turn_id from the request body, and per sampled layer `layers.N` with n (loud neurons), z (furthest from usual) and f (SAE features) where GAIA_SAE_ATLAS covers it. The activation stream rotates to
         <path>.1 at ACTIVATION_STREAM_MAX_MB (256)."
       notes: "Serialized through inference semaphore (max_concurrent). SSE streaming via readline proxy.
         Non-streaming errors: 500 {error} for a normal generation failure; 503

@@ -174,3 +174,16 @@ def test_a_failed_prime_falls_back_to_core_before_the_cloud():
     core.create_chat_completion.assert_called_once()
     groq.create_chat_completion.assert_not_called()
     assert pool.consume_last_fallback() == "core"
+
+
+def test_a_turn_id_stays_on_its_own_thread():
+    import threading
+    from gaia_core.models.turn_context import clear_turn, set_turn, turn_ids
+    set_turn("s", "t")
+    seen = []
+    threading.Thread(target=lambda: seen.append(turn_ids())).start()
+    import time
+    time.sleep(0.05)
+    assert seen == [{}] and turn_ids() == {"session_id": "s", "turn_id": "t"}
+    clear_turn()
+    assert turn_ids() == {}

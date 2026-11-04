@@ -25,6 +25,8 @@ try:
 except ImportError:
     logging.basicConfig(level=logging.INFO)
 
+from gaia_core.models.turn_context import clear_turn, set_turn
+
 logger = logging.getLogger("GAIA.Core.API")
 
 # ecnc: a reply grounded on a tool's result. At the config defaults (0.7,
@@ -1545,11 +1547,16 @@ async def process_packet(packet_data: Dict[str, Any]):
                 attachments=_inbound_attachments,
             )
 
+            _turn_id = getattr(packet.header, "packet_id", "") or ""
+
             def _next_event():
+                set_turn(session_id, _turn_id)
                 try:
                     return next(gen)
                 except StopIteration:
                     return None
+                finally:
+                    clear_turn()
 
             from gaia_core.cognition.reply_scrub import answered_already
             _pending_tool_calls = []
@@ -2026,6 +2033,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                             if cont_gen:
                                 def _next_cont():
                                     try:
+                                        set_turn(session_id, _turn_id)
                                         return next(cont_gen)
                                     except StopIteration:
                                         return None
@@ -2139,6 +2147,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                                         if _retry_gen:
                                             def _next_retry():
                                                 try:
+                                                    set_turn(session_id, _turn_id)
                                                     return next(_retry_gen)
                                                 except StopIteration:
                                                     return None
