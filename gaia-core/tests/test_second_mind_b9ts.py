@@ -261,3 +261,16 @@ def test_the_other_mind_answers_without_thinking(monkeypatch):
     agent = SimpleNamespace(_is_prime_available=True, model_pool=SimpleNamespace(models={"core": Model()}))
     assert main._second_mind_followup(agent, "q", "r", "", "s", False, False) == "an answer"
     assert seen["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_the_reply_under_check_does_not_back_itself():
+    # x9sw: agent_core adds her reply to the history before the check, and it
+    # backed every name it had ("Portland, Oregon" for a Richland clock).
+    from gaia_core import main
+    reply = "[Prime]\n\nIt's 11:57 AM PST in Portland, Oregon."
+    history = [{"role": "user", "content": "What time is it?"},
+               {"role": "assistant", "content": "It's 11:57 AM PST in Portland, Oregon."}]
+    known = main._self_facts_for_observer(history, reply)
+    assert "Portland" in sm.unbacked(reply, known)
+    # An earlier reply of hers still counts: she can lean on what she said before.
+    assert "Portland" not in sm.unbacked(reply, main._self_facts_for_observer(history))
