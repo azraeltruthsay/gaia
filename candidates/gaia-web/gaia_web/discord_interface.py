@@ -9,6 +9,7 @@ for processing, and responses are routed back to Discord.
 
 import math
 import os
+import re
 import time
 import uuid
 import asyncio
@@ -236,7 +237,10 @@ class DiscordInterface:
             # gaia-core as ordinary chat text — !call/!hangup/!translate/
             # !forget never actually fired in a DM. Short-circuit into the
             # command framework here instead.
-            if is_dm and message.content.strip().startswith(bot.command_prefix):
+            # Inner voice switches (!thoughts / !thinking) are hers to set: they
+            # go to gaia-core like any message (inner_voice.py).
+            _iv_switch = re.match(r"^\s*!(thoughts|thinking)\b", message.content or "", re.IGNORECASE)
+            if is_dm and message.content.strip().startswith(bot.command_prefix) and not _iv_switch:
                 await bot.process_commands(message)
                 return
 
@@ -847,6 +851,9 @@ class DiscordInterface:
         if os.environ.get("VOICE_GATE_ENABLED", "0").lower() not in ("1", "true", "yes", "on"):
             return text
         if not text or not text.strip():
+            return text
+        # Her inner voice is meant to show its workings: the gate would strip them.
+        if text.lstrip().startswith(("*[Thinking]*", "*[What I did]*")):
             return text
         try:
             async with httpx.AsyncClient(timeout=8) as client:

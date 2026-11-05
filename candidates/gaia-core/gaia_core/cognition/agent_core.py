@@ -1469,6 +1469,16 @@ class AgentCore:
         except Exception:
             logger.debug("Pending-write approval check failed, continuing", exc_info=True)
 
+        # Inner voice switches ("!thinking on"): a setting, not a message to her.
+        try:
+            from gaia_core.cognition import inner_voice
+            _iv_reply = inner_voice.handle_command(self.session_manager, session_id, user_input)
+            if _iv_reply:
+                yield {"type": "token", "value": _iv_reply}
+                return
+        except Exception:
+            logger.warning("Inner voice switch failed, continuing", exc_info=True)
+
         # Facts she was told, kept and recalled. Ahead of research and the
         # old save-to-file route, which get these turns otherwise (1zbx).
         try:
@@ -3681,6 +3691,13 @@ class AgentCore:
                                     else "conversation record" if _conv_recall
                                     else "remembered lookups")
                         _delib_casual = True
+                    # Deep focus: the person asked her to focus / think hard,
+                    # or turned thinking on for this conversation.
+                    from gaia_core.cognition import inner_voice
+                    _iv_thinking = inner_voice.mode(self.session_manager, session_id, "thinking")
+                    _delib_deep = _delib_role == "prime" and inner_voice.wants_deep_focus(
+                        _iv_thinking, _wants_focus_transition(
+                            packet.content.original_prompt or user_input or "", source))
                     _delib_result = run_deliberated_turn(
                         user_input=packet.content.original_prompt or user_input or "",
                         assembled_messages=_delib_messages,
@@ -3696,8 +3713,7 @@ class AgentCore:
                         offer_tools=offers_tools(_delib_intent, packet) and not _conv_recall,
                         # Deep focus: the person asked her to focus / think
                         # hard, so Prime thinks natively on this turn only.
-                        deep_focus=_delib_role == "prime" and _wants_focus_transition(
-                            packet.content.original_prompt or user_input or "", source),
+                        deep_focus=_delib_deep,
                     )
                     # Strip any residual <think> tags from the deliberation
                     # output before yielding. _split_think_and_response already
@@ -3726,6 +3742,21 @@ class AgentCore:
                         _delib_responding = (getattr(self, '_last_responding_model', None)
                                              or _delib_result.model_used or selected_model_name)
                         _delib_header = self._build_response_header(_delib_responding, packet, None, None, None)
+                        # Shown to the person, never kept in her history.
+                        try:
+                            _iv_items = inner_voice.trace(
+                                model=_delib_responding, deep_focus=_delib_deep, pushback=_pushback,
+                                conv_recall=_conv_recall, followup=_followup, memory_answer=_memory_answer,
+                                sources=[r.source for r in (getattr(_grounding_ctx, "results", None) or [])],
+                                tool_ran=bool(tool_already_executed),
+                                flags=_delib_result.confabulation_flags or [])
+                            if inner_voice.show_trace(
+                                    inner_voice.mode(self.session_manager, session_id, "thoughts"), _iv_items):
+                                yield {"type": "inner", "value": inner_voice.render_trace(_iv_items)}
+                            if inner_voice.show_thinking(_iv_thinking, _delib_result.thinking):
+                                yield {"type": "inner", "value": inner_voice.render_thinking(_delib_result.thinking)}
+                        except Exception:
+                            logger.debug("Inner voice failed (non-fatal)", exc_info=True)
                         yield {"type": "token", "value": _delib_header + _final_clean}
                         try:
                             if self.session_manager and session_id:
