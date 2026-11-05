@@ -103,6 +103,7 @@ class SessionManager:
 
         # Define the threshold for when to trigger long-term memory processing
         self.max_active_messages = 20
+        self.keep_after_archive = 8
         logger.info(f"SessionManager initialized. Found {len(self.sessions)} existing sessions at {self.state_file}")
 
     def _load_state(self) -> Dict[str, Session]:
@@ -342,14 +343,16 @@ class SessionManager:
             except Exception:
                 logger.debug("Conversation curation failed (non-fatal)", exc_info=True)
 
-            # 4. Clear the active history to manage context size for the next turn
-            session.history.clear()
-            logger.info(f"✅ Active history for session '{session_id}' cleared after successful archiving.")
+            # 4. Trim to the recent turns. This used to clear all of it: every 20 messages she
+            # forgot the conversation mid-sentence ("who was his true love?" right after King
+            # Arthur's sword had no Arthur left to refer to, 2026-11-05).
+            session.history = session.history[-self.keep_after_archive:]
+            logger.info(f"✅ Active history for session '{session_id}' trimmed to recent turns after archiving.")
 
         except Exception as e:
             logger.error(f"❌ Failed to archive session '{session_id}': {e}", exc_info=True)
         finally:
-            # Always save the state. This persists the cleared history.
+            # Always save the state. This persists the trimmed history.
             self._save_state()
 
     def get_session_meta(self, session_id: str, key: str, default=None):

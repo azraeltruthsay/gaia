@@ -159,8 +159,9 @@ def _self_facts_for_observer(history: list) -> str:
         parts.append(format_world_state_snapshot(max_lines=4))
     except Exception:
         logger.debug("observer self-facts failed (non-fatal)", exc_info=True)
-    parts.extend(str(m.get("content", ""))[:400] for m in (history or [])[-6:] if isinstance(m, dict))
-    return "\n".join(parts)[:3000]
+    # The talk first: this is capped, and what was just said is what a reply leans on.
+    talk = [str(m.get("content", ""))[:400] for m in (history or [])[-6:] if isinstance(m, dict)]
+    return "\n".join(talk + parts)[:3000]
 
 
 _SECOND_MIND_SECONDS = 20.0

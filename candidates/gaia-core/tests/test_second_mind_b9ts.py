@@ -206,3 +206,27 @@ def test_an_opinion_of_an_article_needn_t_quote_its_title():
 def test_a_short_opinion_with_none_of_the_documents_words_is_still_an_answer():
     assert sm.keeps_to_text("I don't disagree. It seems right to me.", ARTICLES, "Do you disagree with it?", opinion=True)
     assert not sm.keeps_to_text("Per the Azrael Protocol, yes.", ARTICLES, "Do you disagree with it?", opinion=True)
+
+
+def test_what_was_just_said_survives_the_cap_on_what_she_knows(monkeypatch):
+    from gaia_core import main
+    from gaia_common.utils import host_facts
+    monkeypatch.setattr(host_facts, "host_facts_text", lambda facts=None: "machine facts " * 400)
+    history = [{"role": "user", "content": "Tell me about King Arthur's sword."}, {"role": "assistant", "content": "Excalibur."}]
+    known = main._self_facts_for_observer(history)
+    assert "King Arthur" in known and "Excalibur" in known and len(known) <= 3000
+
+
+def test_archiving_a_long_session_keeps_the_recent_turns(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    from gaia_core.memory.session_manager import SessionManager
+    sm_ = SessionManager.__new__(SessionManager)
+    sm_.summarizer, sm_.keyword_extractor, sm_.archiver = MagicMock(), MagicMock(), MagicMock()
+    sm_.keep_after_archive = 8
+    session = MagicMock(session_id="s", persona="p")
+    session.history = [{"role": "user", "content": f"turn {i}"} for i in range(20)]
+    sm_.get_or_create_session = lambda sid: session
+    sm_._save_state = MagicMock()
+    sm_.summarize_and_archive("s")
+    assert [m["content"] for m in session.history] == [f"turn {i}" for i in range(12, 20)]
+    assert sm_.archiver.archive_conversation.call_args.kwargs["messages"] is not None
