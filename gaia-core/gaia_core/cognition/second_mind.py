@@ -72,7 +72,7 @@ def keeps_to_text(reply: str, text: str, question: str, opinion: bool = False) -
     said = content_terms(reply)
     if not said or len(said & content_terms(text)) / len(said) < (0.25 if opinion else 0.5):
         return False
-    for article in asked_articles(question):
+    for article in ([] if opinion else asked_articles(question)):  # a view needn't recite the title
         for heading, _body in sections(text):
             if re.search(rf"\barticle\s+{article}\b", heading, re.IGNORECASE):
                 title = heading.split(":", 1)[-1]

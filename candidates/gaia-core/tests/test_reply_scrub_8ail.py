@@ -217,3 +217,20 @@ def test_her_own_account_of_a_failure_stands():
     out = list(honest_about_failure(iter([{"type": "token", "value": "I couldn't reach "},
                                           {"type": "token", "value": "the page."}]), "web(fetch)"))
     assert out == [{"type": "token", "value": "I couldn't reach the page."}]
+
+
+@pytest.mark.parametrize("size", [1, 3, 7, 1000])
+def test_a_note_to_herself_never_reaches_the_person(size):
+    text = "THOUGHT_SEED: Weight status unknown\n\nI can't feel my weights directly."
+    assert scrub_reply(text) == "I can't feel my weights directly."
+
+    async def run():
+        async def chunks():
+            for i in range(0, len(text), size):
+                yield json.dumps({"type": "token", "value": text[i:i + size]}) + "\n"
+        return "".join([json.loads(line).get("value", "") async for line in scrub_stream(chunks())])
+    assert asyncio.run(run()) == "I can't feel my weights directly."
+
+
+def test_the_words_thought_seed_in_a_sentence_are_left_alone():
+    assert scrub_reply("The word THOUGHT_SEED: is a directive.") == "The word THOUGHT_SEED: is a directive."

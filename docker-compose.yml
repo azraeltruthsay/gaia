@@ -150,7 +150,7 @@ services:
       - PYTHONPATH=/gaia-common
       - GAIA_ENGINE_TIER=prime
       - GAIA_ENGINE_SAE_ENABLE=true
-      - GAIA_SAE_ATLAS=${GAIA_PRIME_ATLAS:-/shared/atlas/prime/PRIME_ABLITERATED}
+      - GAIA_SAE_ATLAS=${GAIA_PRIME_ATLAS:-/shared/atlas/prime/PRIME_V2B}
       - GAIA_SAE_ATLAS_LAYERS=12,24,35
       - GAIA_SAE_STREAM_EVERY_N=1
       - ACTIVATION_STREAM_MAX_MB=1024

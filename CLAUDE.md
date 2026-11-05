@@ -46,13 +46,13 @@ GAIA uses a **two-tier** architecture: a **Gemma 4 Core** and a **Qwen3-8B Prime
 | Tier | Model | Base | Backend | VRAM (GPU) | Role |
 |------|-------|------|---------|------------|------|
 | **Core/Operator** | Gemma4-E4B-GAIA-Core-v1 | google/gemma-4-E4B | GAIA Engine managed (GPU NF4 or CPU GGUF) | ~8.8 GB | Triage, intent, tools, vision, audio, chat |
-| **Prime/Sovereign** | Qwen3-VL-8B-GAIA-Prime-v1 (abliterated) | Qwen3-VL-8B (Azrael identity-aligned; self-abliterated 2026-06-09) | GAIA Engine managed (GPU safetensors or CPU GGUF) | ~4.6 GB | Deep reasoning, architecture, code, planning |
+| **Prime/Sovereign** | Qwen3-VL-8B-GAIA-Prime-v2b (trial since 2026-11-05; v1 kept for rollback) | Qwen3-VL-8B-Instruct: capabilities at half strength, abliterated, identity baked in the weights | GAIA Engine managed (GPU safetensors or CPU GGUF) | ~4.6 GB | Deep reasoning, architecture, code, planning |
 | **Groq** | qwen/qwen3.8-27b | — | Groq API | — | Cloud escalation / external fallback |
 | ~~Oracle~~ | ~~gpt-4o-mini~~ | — | — | — | **Retired** — OpenAI no longer used for any task. Groq is the cloud fallback. |
 
 **Routing**: the mind on the GPU generates, and the other observes from the CPU. Since 2026-11-04 she wakes into gear 2 (`RESTING_STATE` in `lifecycle/states.py`, env `GAIA_RESTING_GEAR`): Prime is the default voice until a new Core is found (`2qus`). Gear 1 is still an explicit `POST /consciousness/awake`. The orchestrator manages gear shifts via the consciousness matrix.
 
-**Prime's GPU weights**: the engine loads `/models/prime-nf4`, NF4 saved from `/models/prime` and verified bit-identical (logits and hidden states): 4 s against 40. `/models/prime` keeps the full weights for training and merges. After changing them, save NF4 again or Prime keeps the old mind.
+**Prime's GPU weights**: the engine loads `/models/prime-nf4`, NF4 saved from `/models/prime` and verified bit-identical (logits and hidden states): 4 s against 40. `/models/prime` keeps the full weights for training and merges. After changing them, save NF4 again or Prime keeps the old mind. Merge adapters with `scripts/merge_lora_full_precision.py`, never the trainer's own merge: inside 4-bit it erased an identity adapter.
 
 **LoRA adapters**: Loaded dynamically via GAIA Engine `POST /adapter/load`. Active adapter set via `POST /adapter/set`.
 

@@ -195,3 +195,9 @@ def test_a_packet_says_where_it_came_from():
 def test_a_named_poem_goes_to_recital_even_when_we_dont_know_the_name(asked, named):
     from gaia_core.cognition.nlu.intent_detection import _has_named_work_signal
     assert _has_named_work_signal(asked) is named
+
+
+def test_an_opinion_of_an_article_needn_t_quote_its_title():
+    said = "It places consent at the center: freely given, reversible and specific."
+    assert sm.keeps_to_text(said, ARTICLES, "What do you think of Article VII?", opinion=True)
+    assert not sm.keeps_to_text(said, ARTICLES, "What does Article VII say?", opinion=False)

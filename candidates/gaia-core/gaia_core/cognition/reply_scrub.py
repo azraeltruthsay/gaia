@@ -23,11 +23,13 @@ _WRAPPER_RE = re.compile(r'\{\s*"(?:content|response|output|text)"\s*:\s*"')
 _WRAPPER_END = '"}'
 # Her own turn marker, written back at the start of a reply.
 _TURN_RE = re.compile(r"(?:<\|im_start\|>\s*)?assistant\s*(?:\n|:)\s*", re.IGNORECASE)
-_JUNK = (_TAG_RE, _CLOCK_RE, _CUE_RE, _WRAPPER_RE, _TURN_RE)
+# A note to herself, which the streaming path never took out (c0rv).
+_SEED_RE = re.compile(r"THOUGHT_SEED:[^\n]*\n+\s*")
+_JUNK = (_TAG_RE, _CLOCK_RE, _CUE_RE, _WRAPPER_RE, _TURN_RE, _SEED_RE)
 # What may open a reply without being the reply: the tier label, a status line.
 _LABEL_RE = re.compile(r"(?:\[(?!Clock:)[^\]\n]{1,40}\]|\*\[[^\n]*\]\*)\s+")
 
-_OPENINGS = ("<nooutput>", "<blockquote>", "<|im_start|>", "assistant", "[clock:", "they asked", "the user asked",
+_OPENINGS = ("thought_seed:", "<nooutput>", "<blockquote>", "<|im_start|>", "assistant", "[clock:", "they asked", "the user asked",
              "you already did that", '{"content"', '{"response"',
              '{"output"', '{"text"')
 _TAGS = ("<nooutput>", "</nooutput>", "<blockquote>", "</blockquote>")
