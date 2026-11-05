@@ -36,7 +36,9 @@ REGIONS = [
     ("Broca's Area",   "prime", "Language generation, response composition",     60, 165, 18, 12, ["register_chitchat"]),
     ("Motor Cortex",   "prime", "Action planning, tool execution",               88,  46, 24, 14, ["competence_problem"]),
     # Core — operational
-    ("Somatosensory",  "core",  "Input parsing, prompt analysis",               165,  42, 18, 12, ["identity_self"]),
+    # Identity is shared: one mind, two halves. Each model keeps its own features and
+    # layers here, since feature numbers aren't comparable across models.
+    ("Somatosensory",  ("core", "prime"),  "Sense of self, identity, input parsing",  165,  42, 18, 12, ["identity_self"]),
     ("Parietal",       "core",  "Spatial / contextual reasoning, working memory",148,  48, 26, 14, ["spatial_reasoning", "register_technical"]),
     ("Wernicke's Area","core",  "Language comprehension, intent detection",      145, 155, 20, 12, ["register_chitchat"]),
     ("Temporal",       "core",  "Memory retrieval, semantic, affective residue", 108, 155, 40, 11, ["affect_laden", "neutral_factual"]),
@@ -68,29 +70,34 @@ def main():
 
     regions_out = []
     domain_to_region = defaultdict(list)
-    for i, (name, tier, fn, cx, cy, rx, ry, signals) in enumerate(REGIONS, start=1):
+    for i, (name, owner, fn, cx, cy, rx, ry, signals) in enumerate(REGIONS, start=1):
+        tiers = (owner,) if isinstance(owner, str) else owner
         lo, hi = OLD_RANGE[name]
-        scale = new_max[tier] / OLD_MAX[tier]
-        lrange = [round(lo * scale), min(new_max[tier] - 1, round(hi * scale))]
-        # Attach this signal's top discriminative features from the region's TIER.
+        ranges = {t: [round(lo * new_max[t] / OLD_MAX[t]),
+                      min(new_max[t] - 1, round(hi * new_max[t] / OLD_MAX[t]))] for t in tiers}
+        # Attach this signal's top discriminative features from each owning TIER.
         feats = []
-        sigtab = models[tier]["signals"]
+        for tier in tiers:
+            tier_feats = []
+            for sig in signals:
+                for f in models[tier]["signals"].get(sig, [])[:FEATS_PER_REGION]:
+                    tier_feats.append({
+                        "index": f["index"],
+                        "strength": f["peak_strength"],
+                        "selectivity": f["selectivity"],
+                        "label": f"{sig} · {f['exemplar'][:48]}",
+                        "layer": models[tier]["analysis_layer"],
+                        "signal": sig,
+                        "tier": tier,
+                    })
+            feats += sorted(tier_feats, key=lambda x: -x["strength"])[:FEATS_PER_REGION]
         for sig in signals:
-            for f in sigtab.get(sig, [])[:FEATS_PER_REGION]:
-                feats.append({
-                    "index": f["index"],
-                    "strength": f["peak_strength"],
-                    "selectivity": f["selectivity"],
-                    "label": f"{sig} · {f['exemplar'][:48]}",
-                    "layer": models[tier]["analysis_layer"],
-                    "signal": sig,
-                })
             domain_to_region[sig].append(name)
         regions_out.append({
-            "id": i, "name": name, "tier": tier, "function": fn,
+            "id": i, "name": name, "tier": tiers[0], "tiers": list(tiers), "function": fn,
             "cx": cx, "cy": cy, "rx": rx, "ry": ry,
-            "domains": signals, "layerRange": lrange,
-            "features": sorted(feats, key=lambda x: -x["strength"])[:FEATS_PER_REGION],
+            "domains": signals, "layerRange": ranges[tiers[0]], "layerRanges": ranges,
+            "features": feats,
         })
 
     tier_layer_map = {}

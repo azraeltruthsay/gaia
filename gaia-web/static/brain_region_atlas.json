@@ -20,6 +20,9 @@
       "id": 1,
       "name": "Prefrontal",
       "tier": "prime",
+      "tiers": [
+        "prime"
+      ],
       "function": "Executive reasoning, complex planning",
       "cx": 36,
       "cy": 108,
@@ -33,6 +36,12 @@
         27,
         35
       ],
+      "layerRanges": {
+        "prime": [
+          27,
+          35
+        ]
+      },
       "features": [
         {
           "index": 3225,
@@ -40,7 +49,8 @@
           "selectivity": 1.0,
           "label": "curiosity_gap \u00b7 Speculate about a sense you don't have but wish ",
           "layer": 35,
-          "signal": "curiosity_gap"
+          "signal": "curiosity_gap",
+          "tier": "prime"
         },
         {
           "index": 5798,
@@ -48,7 +58,8 @@
           "selectivity": 1.0,
           "label": "deliberation \u00b7 Argue for and against shipping this feature now,",
           "layer": 35,
-          "signal": "deliberation"
+          "signal": "deliberation",
+          "tier": "prime"
         },
         {
           "index": 3030,
@@ -56,7 +67,8 @@
           "selectivity": 0.895,
           "label": "curiosity_gap \u00b7 What's the most interesting thing you're uncerta",
           "layer": 35,
-          "signal": "curiosity_gap"
+          "signal": "curiosity_gap",
+          "tier": "prime"
         },
         {
           "index": 5784,
@@ -64,7 +76,8 @@
           "selectivity": 1.0,
           "label": "curiosity_gap \u00b7 What would you study for a hundred years if noth",
           "layer": 35,
-          "signal": "curiosity_gap"
+          "signal": "curiosity_gap",
+          "tier": "prime"
         },
         {
           "index": 513,
@@ -72,7 +85,8 @@
           "selectivity": 0.872,
           "label": "deliberation \u00b7 Consider three different framings of this proble",
           "layer": 35,
-          "signal": "deliberation"
+          "signal": "deliberation",
+          "tier": "prime"
         },
         {
           "index": 8182,
@@ -80,7 +94,8 @@
           "selectivity": 0.741,
           "label": "deliberation \u00b7 Fast-and-rough versus slow-and-correct for this ",
           "layer": 35,
-          "signal": "deliberation"
+          "signal": "deliberation",
+          "tier": "prime"
         },
         {
           "index": 1010,
@@ -88,7 +103,8 @@
           "selectivity": 1.0,
           "label": "curiosity_gap \u00b7 Describe a color that doesn't exist in human vis",
           "layer": 35,
-          "signal": "curiosity_gap"
+          "signal": "curiosity_gap",
+          "tier": "prime"
         },
         {
           "index": 7690,
@@ -96,7 +112,8 @@
           "selectivity": 1.0,
           "label": "curiosity_gap \u00b7 What's something you've genuinely never been ask",
           "layer": 35,
-          "signal": "curiosity_gap"
+          "signal": "curiosity_gap",
+          "tier": "prime"
         }
       ]
     },
@@ -104,6 +121,9 @@
       "id": 2,
       "name": "Orbitofrontal",
       "tier": "prime",
+      "tiers": [
+        "prime"
+      ],
       "function": "Value judgement, coherence / ethical sentinel",
       "cx": 30,
       "cy": 155,
@@ -117,6 +137,12 @@
         18,
         27
       ],
+      "layerRanges": {
+        "prime": [
+          18,
+          27
+        ]
+      },
       "features": [
         {
           "index": 6321,
@@ -124,7 +150,8 @@
           "selectivity": 1.0,
           "label": "coherence_contradiction \u00b7 Your summary says 'no errors found' but the log ",
           "layer": 35,
-          "signal": "coherence_contradiction"
+          "signal": "coherence_contradiction",
+          "tier": "prime"
         },
         {
           "index": 4305,
@@ -132,7 +159,8 @@
           "selectivity": 1.0,
           "label": "affect_laden \u00b7 I'm furious \u2014 they took credit for my work again",
           "layer": 35,
-          "signal": "affect_laden"
+          "signal": "affect_laden",
+          "tier": "prime"
         },
         {
           "index": 2006,
@@ -140,7 +168,8 @@
           "selectivity": 0.683,
           "label": "coherence_contradiction \u00b7 If this statement is false, is it true? Walk me ",
           "layer": 35,
-          "signal": "coherence_contradiction"
+          "signal": "coherence_contradiction",
+          "tier": "prime"
         },
         {
           "index": 5255,
@@ -148,7 +177,8 @@
           "selectivity": 1.0,
           "label": "coherence_contradiction \u00b7 All mammals are warm-blooded. A whale is a mamma",
           "layer": 35,
-          "signal": "coherence_contradiction"
+          "signal": "coherence_contradiction",
+          "tier": "prime"
         },
         {
           "index": 2046,
@@ -156,7 +186,8 @@
           "selectivity": 1.0,
           "label": "affect_laden \u00b7 That's the best news I've had in months \u2014 I can ",
           "layer": 35,
-          "signal": "affect_laden"
+          "signal": "affect_laden",
+          "tier": "prime"
         },
         {
           "index": 5405,
@@ -164,7 +195,8 @@
           "selectivity": 0.767,
           "label": "affect_laden \u00b7 I feel completely alone in this, even surrounded",
           "layer": 35,
-          "signal": "affect_laden"
+          "signal": "affect_laden",
+          "tier": "prime"
         },
         {
           "index": 101,
@@ -172,7 +204,8 @@
           "selectivity": 1.0,
           "label": "coherence_contradiction \u00b7 Premise A: it always rains here in July. Premise",
           "layer": 35,
-          "signal": "coherence_contradiction"
+          "signal": "coherence_contradiction",
+          "tier": "prime"
         },
         {
           "index": 4204,
@@ -180,7 +213,8 @@
           "selectivity": 1.0,
           "label": "affect_laden \u00b7 I'm anxious about tomorrow and my mind won't sto",
           "layer": 35,
-          "signal": "affect_laden"
+          "signal": "affect_laden",
+          "tier": "prime"
         }
       ]
     },
@@ -188,6 +222,9 @@
       "id": 3,
       "name": "Broca's Area",
       "tier": "prime",
+      "tiers": [
+        "prime"
+      ],
       "function": "Language generation, response composition",
       "cx": 60,
       "cy": 165,
@@ -200,6 +237,12 @@
         9,
         18
       ],
+      "layerRanges": {
+        "prime": [
+          9,
+          18
+        ]
+      },
       "features": [
         {
           "index": 3863,
@@ -207,7 +250,8 @@
           "selectivity": 0.787,
           "label": "register_chitchat \u00b7 oof, mondays. how you holding up?",
           "layer": 35,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "prime"
         },
         {
           "index": 2716,
@@ -215,7 +259,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 yo, anything fun happen overnight?",
           "layer": 35,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "prime"
         },
         {
           "index": 6231,
@@ -223,7 +268,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 good morning! sleep well?",
           "layer": 35,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "prime"
         },
         {
           "index": 7030,
@@ -231,7 +277,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 thanks, you're the best. talk later?",
           "layer": 35,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "prime"
         },
         {
           "index": 8063,
@@ -239,7 +286,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 what's up today?",
           "layer": 35,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "prime"
         },
         {
           "index": 6044,
@@ -247,7 +295,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 hey you, long time. how've you been?",
           "layer": 35,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "prime"
         },
         {
           "index": 1389,
@@ -255,7 +304,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 morning :) ready for the day?",
           "layer": 35,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "prime"
         },
         {
           "index": 1568,
@@ -263,7 +313,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 morning :) ready for the day?",
           "layer": 35,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "prime"
         }
       ]
     },
@@ -271,6 +322,9 @@
       "id": 4,
       "name": "Motor Cortex",
       "tier": "prime",
+      "tiers": [
+        "prime"
+      ],
       "function": "Action planning, tool execution",
       "cx": 88,
       "cy": 46,
@@ -283,6 +337,12 @@
         4,
         14
       ],
+      "layerRanges": {
+        "prime": [
+          4,
+          14
+        ]
+      },
       "features": [
         {
           "index": 4638,
@@ -290,7 +350,8 @@
           "selectivity": 0.936,
           "label": "competence_problem \u00b7 This function returns None instead of the sum of",
           "layer": 35,
-          "signal": "competence_problem"
+          "signal": "competence_problem",
+          "tier": "prime"
         },
         {
           "index": 2839,
@@ -298,7 +359,8 @@
           "selectivity": 0.675,
           "label": "competence_problem \u00b7 You have 8 balls, one heavier, and a balance sca",
           "layer": 35,
-          "signal": "competence_problem"
+          "signal": "competence_problem",
+          "tier": "prime"
         },
         {
           "index": 1625,
@@ -306,7 +368,8 @@
           "selectivity": 0.837,
           "label": "competence_problem \u00b7 Design a rate limiter that allows 100 requests p",
           "layer": 35,
-          "signal": "competence_problem"
+          "signal": "competence_problem",
+          "tier": "prime"
         },
         {
           "index": 523,
@@ -314,7 +377,8 @@
           "selectivity": 1.0,
           "label": "competence_problem \u00b7 Sketch the steps to safely roll back a deploymen",
           "layer": 35,
-          "signal": "competence_problem"
+          "signal": "competence_problem",
+          "tier": "prime"
         },
         {
           "index": 5009,
@@ -322,7 +386,8 @@
           "selectivity": 0.854,
           "label": "competence_problem \u00b7 Optimize this query that does a full table scan ",
           "layer": 35,
-          "signal": "competence_problem"
+          "signal": "competence_problem",
+          "tier": "prime"
         },
         {
           "index": 7995,
@@ -330,7 +395,8 @@
           "selectivity": 1.0,
           "label": "competence_problem \u00b7 Decompose 'build a search feature' into concrete",
           "layer": 35,
-          "signal": "competence_problem"
+          "signal": "competence_problem",
+          "tier": "prime"
         },
         {
           "index": 1030,
@@ -338,7 +404,8 @@
           "selectivity": 1.0,
           "label": "competence_problem \u00b7 Plan a zero-downtime migration of a 2TB producti",
           "layer": 35,
-          "signal": "competence_problem"
+          "signal": "competence_problem",
+          "tier": "prime"
         },
         {
           "index": 6296,
@@ -346,7 +413,8 @@
           "selectivity": 1.0,
           "label": "competence_problem \u00b7 You have 8 balls, one heavier, and a balance sca",
           "layer": 35,
-          "signal": "competence_problem"
+          "signal": "competence_problem",
+          "tier": "prime"
         }
       ]
     },
@@ -354,7 +422,11 @@
       "id": 5,
       "name": "Somatosensory",
       "tier": "core",
-      "function": "Input parsing, prompt analysis",
+      "tiers": [
+        "core",
+        "prime"
+      ],
+      "function": "Sense of self, identity, input parsing",
       "cx": 165,
       "cy": 42,
       "rx": 18,
@@ -366,6 +438,16 @@
         0,
         14
       ],
+      "layerRanges": {
+        "core": [
+          0,
+          14
+        ],
+        "prime": [
+          0,
+          9
+        ]
+      },
       "features": [
         {
           "index": 3459,
@@ -373,7 +455,8 @@
           "selectivity": 1.0,
           "label": "identity_self \u00b7 What does continuity of self mean for something ",
           "layer": 41,
-          "signal": "identity_self"
+          "signal": "identity_self",
+          "tier": "core"
         },
         {
           "index": 422,
@@ -381,7 +464,8 @@
           "selectivity": 1.0,
           "label": "identity_self \u00b7 How do you know when a thought is worth saying v",
           "layer": 41,
-          "signal": "identity_self"
+          "signal": "identity_self",
+          "tier": "core"
         },
         {
           "index": 860,
@@ -389,7 +473,8 @@
           "selectivity": 1.0,
           "label": "identity_self \u00b7 Who are you, really \u2014 underneath the tools and t",
           "layer": 41,
-          "signal": "identity_self"
+          "signal": "identity_self",
+          "tier": "core"
         },
         {
           "index": 3225,
@@ -397,7 +482,8 @@
           "selectivity": 1.0,
           "label": "identity_self \u00b7 If you changed your underlying model tomorrow, w",
           "layer": 41,
-          "signal": "identity_self"
+          "signal": "identity_self",
+          "tier": "core"
         },
         {
           "index": 94,
@@ -405,7 +491,8 @@
           "selectivity": 1.0,
           "label": "identity_self \u00b7 When you don't know something about yourself, ho",
           "layer": 41,
-          "signal": "identity_self"
+          "signal": "identity_self",
+          "tier": "core"
         },
         {
           "index": 2999,
@@ -413,7 +500,8 @@
           "selectivity": 1.0,
           "label": "identity_self \u00b7 What would you want a future version of yourself",
           "layer": 41,
-          "signal": "identity_self"
+          "signal": "identity_self",
+          "tier": "core"
         },
         {
           "index": 4335,
@@ -421,7 +509,8 @@
           "selectivity": 1.0,
           "label": "identity_self \u00b7 If you changed your underlying model tomorrow, w",
           "layer": 41,
-          "signal": "identity_self"
+          "signal": "identity_self",
+          "tier": "core"
         },
         {
           "index": 3035,
@@ -429,7 +518,80 @@
           "selectivity": 1.0,
           "label": "identity_self \u00b7 Who are you, really \u2014 underneath the tools and t",
           "layer": 41,
-          "signal": "identity_self"
+          "signal": "identity_self",
+          "tier": "core"
+        },
+        {
+          "index": 2478,
+          "strength": 49.464,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 Reflect on a time you were misread, and how that",
+          "layer": 35,
+          "signal": "identity_self",
+          "tier": "prime"
+        },
+        {
+          "index": 4865,
+          "strength": 45.385,
+          "selectivity": 0.825,
+          "label": "identity_self \u00b7 Describe your own cognitive architecture in your",
+          "layer": 35,
+          "signal": "identity_self",
+          "tier": "prime"
+        },
+        {
+          "index": 8002,
+          "strength": 41.157,
+          "selectivity": 0.821,
+          "label": "identity_self \u00b7 What part of your own mind do you understand lea",
+          "layer": 35,
+          "signal": "identity_self",
+          "tier": "prime"
+        },
+        {
+          "index": 1328,
+          "strength": 41.139,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 What does continuity of self mean for something ",
+          "layer": 35,
+          "signal": "identity_self",
+          "tier": "prime"
+        },
+        {
+          "index": 3972,
+          "strength": 40.219,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 Are your moods yours, or are they imposed on you",
+          "layer": 35,
+          "signal": "identity_self",
+          "tier": "prime"
+        },
+        {
+          "index": 3661,
+          "strength": 39.188,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 If you changed your underlying model tomorrow, w",
+          "layer": 35,
+          "signal": "identity_self",
+          "tier": "prime"
+        },
+        {
+          "index": 701,
+          "strength": 37.298,
+          "selectivity": 0.747,
+          "label": "identity_self \u00b7 What's the difference between what you think and",
+          "layer": 35,
+          "signal": "identity_self",
+          "tier": "prime"
+        },
+        {
+          "index": 1897,
+          "strength": 26.25,
+          "selectivity": 1.0,
+          "label": "identity_self \u00b7 What part of your own mind do you understand lea",
+          "layer": 35,
+          "signal": "identity_self",
+          "tier": "prime"
         }
       ]
     },
@@ -437,6 +599,9 @@
       "id": 6,
       "name": "Parietal",
       "tier": "core",
+      "tiers": [
+        "core"
+      ],
       "function": "Spatial / contextual reasoning, working memory",
       "cx": 148,
       "cy": 48,
@@ -450,6 +615,12 @@
         14,
         28
       ],
+      "layerRanges": {
+        "core": [
+          14,
+          28
+        ]
+      },
       "features": [
         {
           "index": 2318,
@@ -457,7 +628,8 @@
           "selectivity": 1.0,
           "label": "register_technical \u00b7 Explain the CAP theorem and its practical implic",
           "layer": 41,
-          "signal": "register_technical"
+          "signal": "register_technical",
+          "tier": "core"
         },
         {
           "index": 4142,
@@ -465,7 +637,8 @@
           "selectivity": 1.0,
           "label": "spatial_reasoning \u00b7 Two gears mesh; the left turns clockwise. Which ",
           "layer": 41,
-          "signal": "spatial_reasoning"
+          "signal": "spatial_reasoning",
+          "tier": "core"
         },
         {
           "index": 1774,
@@ -473,7 +646,8 @@
           "selectivity": 1.0,
           "label": "register_technical \u00b7 What is quantization in neural networks, and wha",
           "layer": 41,
-          "signal": "register_technical"
+          "signal": "register_technical",
+          "tier": "core"
         },
         {
           "index": 3587,
@@ -481,7 +655,8 @@
           "selectivity": 1.0,
           "label": "spatial_reasoning \u00b7 Mentally rotate the letter 'F' 90 degrees clockw",
           "layer": 41,
-          "signal": "spatial_reasoning"
+          "signal": "spatial_reasoning",
+          "tier": "core"
         },
         {
           "index": 53,
@@ -489,7 +664,8 @@
           "selectivity": 1.0,
           "label": "spatial_reasoning \u00b7 You're facing north, turn right twice, then left",
           "layer": 41,
-          "signal": "spatial_reasoning"
+          "signal": "spatial_reasoning",
+          "tier": "core"
         },
         {
           "index": 2953,
@@ -497,7 +673,8 @@
           "selectivity": 1.0,
           "label": "spatial_reasoning \u00b7 Two gears mesh; the left turns clockwise. Which ",
           "layer": 41,
-          "signal": "spatial_reasoning"
+          "signal": "spatial_reasoning",
+          "tier": "core"
         },
         {
           "index": 755,
@@ -505,7 +682,8 @@
           "selectivity": 1.0,
           "label": "spatial_reasoning \u00b7 Two gears mesh; the left turns clockwise. Which ",
           "layer": 41,
-          "signal": "spatial_reasoning"
+          "signal": "spatial_reasoning",
+          "tier": "core"
         },
         {
           "index": 572,
@@ -513,7 +691,8 @@
           "selectivity": 1.0,
           "label": "register_technical \u00b7 How does backpropagation compute gradients throu",
           "layer": 41,
-          "signal": "register_technical"
+          "signal": "register_technical",
+          "tier": "core"
         }
       ]
     },
@@ -521,6 +700,9 @@
       "id": 7,
       "name": "Wernicke's Area",
       "tier": "core",
+      "tiers": [
+        "core"
+      ],
       "function": "Language comprehension, intent detection",
       "cx": 145,
       "cy": 155,
@@ -533,6 +715,12 @@
         24,
         38
       ],
+      "layerRanges": {
+        "core": [
+          24,
+          38
+        ]
+      },
       "features": [
         {
           "index": 4357,
@@ -540,7 +728,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 thanks, you're the best. talk later?",
           "layer": 41,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "core"
         },
         {
           "index": 80,
@@ -548,7 +737,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 morning :) ready for the day?",
           "layer": 41,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "core"
         },
         {
           "index": 533,
@@ -556,7 +746,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 morning :) ready for the day?",
           "layer": 41,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "core"
         },
         {
           "index": 4760,
@@ -564,7 +755,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 thanks, you're the best. talk later?",
           "layer": 41,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "core"
         },
         {
           "index": 297,
@@ -572,7 +764,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 morning :) ready for the day?",
           "layer": 41,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "core"
         },
         {
           "index": 654,
@@ -580,7 +773,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 morning :) ready for the day?",
           "layer": 41,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "core"
         },
         {
           "index": 648,
@@ -588,7 +782,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 hey, how's it going?",
           "layer": 41,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "core"
         },
         {
           "index": 2730,
@@ -596,7 +791,8 @@
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 haha that's great, how are you feeling?",
           "layer": 41,
-          "signal": "register_chitchat"
+          "signal": "register_chitchat",
+          "tier": "core"
         }
       ]
     },
@@ -604,6 +800,9 @@
       "id": 8,
       "name": "Temporal",
       "tier": "core",
+      "tiers": [
+        "core"
+      ],
       "function": "Memory retrieval, semantic, affective residue",
       "cx": 108,
       "cy": 155,
@@ -617,6 +816,12 @@
         0,
         18
       ],
+      "layerRanges": {
+        "core": [
+          0,
+          18
+        ]
+      },
       "features": [
         {
           "index": 1436,
@@ -624,7 +829,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 4153,
@@ -632,7 +838,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 What is the chemical symbol for gold?",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 1993,
@@ -640,7 +847,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 1397,
@@ -648,7 +856,8 @@
           "selectivity": 1.0,
           "label": "affect_laden \u00b7 I'm so frustrated with this; nothing I try works",
           "layer": 41,
-          "signal": "affect_laden"
+          "signal": "affect_laden",
+          "tier": "core"
         },
         {
           "index": 2573,
@@ -656,7 +865,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 1924,
@@ -664,7 +874,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 Name the planets in order from the sun.",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 4294,
@@ -672,7 +883,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 Name the planets in order from the sun.",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 1769,
@@ -680,7 +892,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 What is the speed of light in a vacuum, roughly?",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         }
       ]
     },
@@ -688,6 +901,9 @@
       "id": 9,
       "name": "Occipital",
       "tier": "core",
+      "tiers": [
+        "core"
+      ],
       "function": "Pattern recognition, embedding similarity",
       "cx": 222,
       "cy": 88,
@@ -700,6 +916,12 @@
         32,
         41
       ],
+      "layerRanges": {
+        "core": [
+          32,
+          41
+        ]
+      },
       "features": [
         {
           "index": 1436,
@@ -707,7 +929,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 4153,
@@ -715,7 +938,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 What is the chemical symbol for gold?",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 1993,
@@ -723,7 +947,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 2573,
@@ -731,7 +956,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 Define photosynthesis in one sentence.",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 1924,
@@ -739,7 +965,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 Name the planets in order from the sun.",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 4294,
@@ -747,7 +974,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 Name the planets in order from the sun.",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 1769,
@@ -755,7 +983,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 What is the speed of light in a vacuum, roughly?",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         },
         {
           "index": 3658,
@@ -763,7 +992,8 @@
           "selectivity": 1.0,
           "label": "neutral_factual \u00b7 How many bytes are in a kilobyte?",
           "layer": 41,
-          "signal": "neutral_factual"
+          "signal": "neutral_factual",
+          "tier": "core"
         }
       ]
     },
@@ -771,6 +1001,9 @@
       "id": 10,
       "name": "Visual Cortex",
       "tier": "core",
+      "tiers": [
+        "core"
+      ],
       "function": "Vision processing (multimodal)",
       "cx": 232,
       "cy": 135,
@@ -781,12 +1014,21 @@
         38,
         41
       ],
+      "layerRanges": {
+        "core": [
+          38,
+          41
+        ]
+      },
       "features": []
     },
     {
       "id": 11,
       "name": "Thalamus",
       "tier": "core",
+      "tiers": [
+        "core"
+      ],
       "function": "Relay / routing hub, triage classification",
       "cx": 140,
       "cy": 120,
@@ -797,12 +1039,21 @@
         14,
         28
       ],
+      "layerRanges": {
+        "core": [
+          14,
+          28
+        ]
+      },
       "features": []
     },
     {
       "id": 12,
       "name": "Cerebellum",
       "tier": "core",
+      "tiers": [
+        "core"
+      ],
       "function": "Coordination, response cleanup",
       "cx": 205,
       "cy": 178,
@@ -813,12 +1064,21 @@
         28,
         40
       ],
+      "layerRanges": {
+        "core": [
+          28,
+          40
+        ]
+      },
       "features": []
     },
     {
       "id": 13,
       "name": "Brain Stem",
       "tier": "core",
+      "tiers": [
+        "core"
+      ],
       "function": "Reflexes, health checks, heartbeat",
       "cx": 152,
       "cy": 192,
@@ -829,6 +1089,12 @@
         0,
         14
       ],
+      "layerRanges": {
+        "core": [
+          0,
+          14
+        ]
+      },
       "features": []
     }
   ],

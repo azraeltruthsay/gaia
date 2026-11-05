@@ -25,15 +25,18 @@ def region_lookup(region_atlas_path, tier):
         ra = json.load(open(region_atlas_path))
     except OSError:
         return lambda L: "unknown"
-    regions = [r for r in ra.get("regions", []) if r.get("tier") == tier]
+    regions = [r for r in ra.get("regions", []) if tier in r.get("tiers", [r.get("tier")])]
+
+    def span(r):
+        return r.get("layerRanges", {}).get(tier) or r.get("layerRange", [0, 0])
 
     def dist(r, layer):
-        lo, hi = r.get("layerRange", [0, 0])
+        lo, hi = span(r)
         return lo - layer if layer < lo else (layer - hi if layer > hi else 0)
 
     def find(layer):
         for r in regions:
-            lo, hi = r.get("layerRange", [0, 0])
+            lo, hi = span(r)
             if lo <= layer <= hi:
                 return r["name"]
         # Uncovered layer — snap to nearest region of the tier (see

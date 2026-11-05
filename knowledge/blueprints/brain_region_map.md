@@ -12,7 +12,7 @@
 | 2 | Orbitofrontal | prime | Value judgement, coherence / ethical sentinel | coherence_contradiction, affect_laden | 18–27 |
 | 3 | Broca's Area | prime | Language generation, response composition | register_chitchat | 9–18 |
 | 4 | Motor Cortex | prime | Action planning, tool execution | competence_problem | 4–14 |
-| 5 | Somatosensory | core | Input parsing, prompt analysis | identity_self | 0–14 |
+| 5 | Somatosensory | core | Sense of self, identity, input parsing | identity_self | 0–14 |
 | 6 | Parietal | core | Spatial / contextual reasoning, working memory | spatial_reasoning, register_technical | 14–28 |
 | 7 | Wernicke's Area | core | Language comprehension, intent detection | register_chitchat | 24–38 |
 | 8 | Temporal | core | Memory retrieval, semantic, affective residue | affect_laden, neutral_factual | 0–18 |

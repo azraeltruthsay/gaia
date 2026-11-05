@@ -1072,7 +1072,7 @@ function _insetPoint(x, y, refX, refY, dist) {
 // The path between start and end is a deterministic lightning bolt.
 function _generateNeurons(tier, count) {
   const neurons = [];
-  const tierRegions = BRAIN_REGIONS.filter(r => r.tier === tier);
+  const tierRegions = BRAIN_REGIONS.filter(r => (r.tiers || [r.tier]).includes(tier));
   if (tierRegions.length === 0) return neurons;
   const perRegion = Math.ceil(count / tierRegions.length);
   let seed = tier === 'nano' ? 42 : tier === 'core' ? 137 : 271;
@@ -1142,7 +1142,7 @@ function _generateNeurons(tier, count) {
         region: region.name,
         targetRegion: targetName || null,
         tier: tier,
-        layerRange: region.layerRange,
+        layerRange: (region.layerRanges && region.layerRanges[tier]) || region.layerRange,
         id: null,
       });
     }
@@ -2043,8 +2043,8 @@ function mindMapPanel() {
         const data = await resp.json();
         if (!data || !Array.isArray(data.regions) || data.regions.length === 0) return;
         BRAIN_REGIONS = data.regions.map(r => ({
-          name: r.name, tier: r.tier,
-          layerRange: r.layerRange || [0, 0],
+          name: r.name, tier: r.tier, tiers: r.tiers || [r.tier],
+          layerRange: r.layerRange || [0, 0], layerRanges: r.layerRanges || null,
           cx: r.cx, cy: r.cy, rx: r.rx, ry: r.ry,
           domains: r.domains || [],
           features: r.features || [],

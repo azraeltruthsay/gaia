@@ -114,7 +114,8 @@ def compute_region_connectivity(
         emit "unknown", snap an uncovered layer to the nearest region of the
         tier by layer distance — every synapse resolves to a real region.
         """
-        tier_regions = [r for r in regions if r["tier"] == tier_name]
+        tier_regions = [{**r, "layerRange": r.get("layerRanges", {}).get(tier_name) or r.get("layerRange", [0, 0])}
+                        for r in regions if tier_name in r.get("tiers", [r["tier"]])]
         for r in tier_regions:
             lr = r.get("layerRange", [0, 0])
             if lr[0] <= layer <= lr[1]:
