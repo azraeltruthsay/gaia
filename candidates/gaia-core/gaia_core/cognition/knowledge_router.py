@@ -783,6 +783,26 @@ def recall_answer(question: str) -> Optional[GroundingContext]:
     return ctx
 
 
+def _who(session_id: str) -> str:
+    """The name on a past conversation, if she knows it (751u)."""
+    try:
+        from gaia_common.utils.people import PeopleRegistry
+        person = PeopleRegistry().for_session(session_id)
+        return person["names"][0] if person else "the person there"
+    except Exception:
+        return "the person there"
+
+
+def _belongs_to(session_id: str, topic: str) -> bool:
+    """Whether a past conversation was with the person a topic names."""
+    try:
+        from gaia_common.utils.people import PeopleRegistry
+        person = PeopleRegistry().for_session(session_id)
+    except Exception:
+        return False
+    return bool(person) and bool({n.lower() for n in person.get("names", [])} & set(topic.lower().split()))
+
+
 def recall_conversation(session_id: str, question: str,
                         history: Optional[List[Dict[str, Any]]] = None,
                         top_k: int = 3) -> GroundingContext:
@@ -820,13 +840,16 @@ def recall_conversation(session_id: str, question: str,
         for h in elsewhere:
             # The rest of what they said: asked about Andy, "recite Jabberwockey"
             # doesn't name him, and left out she guessed which poem it was.
-            others = [t for t in memory.said_in(h.get("session_id", "")) if t != (h.get("user") or "")[:120]]
+            # Only for that person's own conversation: anywhere else it's about
+            # something else entirely (Azrael's Arthur questions, asked about Andy).
+            others = [t for t in memory.said_in(h.get("session_id", "")) if t != (h.get("user") or "")[:120]
+                      ] if _belongs_to(h.get("session_id", ""), topic) else []
             also = ("; also in that conversation they said: " + "; ".join(f'"{t}"' for t in others)
                     if others else "")
             ctx.results.append(GroundingResult(
                 source="conversation", trust_tier="own_record",
                 content=(f"{ELSEWHERE_PREFIX} {channel_of(h.get('session_id', ''))} on "
-                         f"{(h.get('ts') or '')[:10]}, the person there said: \"{h.get('user', '')}\""
+                         f"{(h.get('ts') or '')[:10]}, {_who(h.get('session_id', ''))} said: \"{h.get('user', '')}\""
                          f" — and you replied: \"{(h.get('reply') or '')[:300]}\"{also}"),
                 title="another conversation", retrieved_at=h.get("ts", ""),
                 score=float(h.get("score", 0.0) or 0.0), query=topic))

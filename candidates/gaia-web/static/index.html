@@ -40,6 +40,153 @@
     </template>
   </nav>
 
+  <!-- ── Palace report (oxfy) ── -->
+  <section class="view palace" x-data x-show="$store.nav.currentView === 'palace'" style="display:none"
+           x-effect="if ($store.nav.currentView === 'palace') $store.palace.start()">
+    <div class="palace-sections" role="tablist">
+      <template x-for="s in $store.palace.sections" :key="s.id">
+        <button class="palace-section" role="tab" :aria-selected="$store.palace.section === s.id"
+                :class="{ active: $store.palace.section === s.id }" @click="$store.palace.open(s.id)">
+          <span x-text="s.label"></span>
+          <span class="palace-count" x-text="$store.palace.counts[s.count] ?? ''"></span>
+        </button>
+      </template>
+    </div>
+
+    <form class="palace-tools" @submit.prevent="$store.palace.search()">
+      <input type="search" aria-label="Search this section" placeholder="Search this section"
+             x-model="$store.palace.query">
+      <template x-if="$store.palace.section === 'graph'">
+        <div class="palace-filters">
+          <select aria-label="World" x-model="$store.palace.world" @change="$store.palace.search()">
+            <option value="">All worlds</option>
+            <template x-for="w in $store.palace.worlds" :key="w.id">
+              <option :value="w.id" x-text="w.name"></option>
+            </template>
+          </select>
+          <select aria-label="Fact type" x-model="$store.palace.factType" @change="$store.palace.search()">
+            <option value="">All types</option>
+            <template x-for="t in $store.palace.factTypes" :key="t">
+              <option :value="t" x-text="t"></option>
+            </template>
+          </select>
+          <label><input type="checkbox" x-model="$store.palace.includeEnded" @change="$store.palace.search()"> Show ended facts</label>
+        </div>
+      </template>
+      <button type="submit" class="btn">Search</button>
+    </form>
+
+    <p class="palace-error" role="alert" x-show="$store.palace.error" x-text="$store.palace.error"></p>
+    <p class="palace-note" x-show="!$store.palace.items.length && !$store.palace.loading && !$store.palace.error">Nothing here matches.</p>
+
+    <div class="palace-body" x-show="!$store.palace.transcript">
+      <template x-if="$store.palace.section === 'people'">
+        <div class="palace-cards">
+          <template x-for="p in $store.palace.items" :key="p.id">
+            <article class="palace-card">
+              <h3 x-text="$store.palace.list(p.names)"></h3>
+              <p x-show="p.relationship" x-text="p.relationship"></p>
+              <p class="palace-meta" x-text="p.id"></p>
+              <p class="palace-meta" x-text="(p.accounts || []).map(a => `${a.kind}: ${a.id}`).join(' · ')"></p>
+              <ul x-show="(p.facts || []).length">
+                <template x-for="f in p.facts" :key="f.id">
+                  <li :class="{ 'palace-wrong': f.status === 'wrong' }">
+                    <span x-text="f.text"></span>
+                    <span class="palace-meta" x-text="`per ${f.told_by}, ${$store.palace.day(f.when)}${f.status === 'wrong' ? ', marked wrong' : ''}`"></span>
+                  </li>
+                </template>
+              </ul>
+            </article>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="$store.palace.section === 'lookups'">
+        <div class="palace-cards">
+          <template x-for="r in $store.palace.items" :key="r.id">
+            <article class="palace-card">
+              <h3 x-text="r.title || r.id"></h3>
+              <p x-text="r.snippet"></p>
+              <p class="palace-meta">
+                <span x-text="`${r.kind || 'lookup'} · ${r.trust_tier || 'unrated'} · recalled ${r.times_recalled || 0} times · ${$store.palace.day(r.retrieved_at)}`"></span>
+              </p>
+              <a x-show="r.url" :href="r.url" target="_blank" rel="noopener noreferrer" x-text="r.url"></a>
+            </article>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="$store.palace.section === 'memories'">
+        <div class="palace-cards">
+          <template x-for="m in $store.palace.items" :key="m.id">
+            <article class="palace-card">
+              <h3 x-text="`${m.wing} / ${m.room}`"></h3>
+              <pre x-text="m.text"></pre>
+              <p class="palace-meta" x-text="`${m.date} · ${m.source} · ${m.intent}${m.archived ? ' · archived' : ''}`"></p>
+            </article>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="$store.palace.section === 'conversations'">
+        <div class="palace-cards">
+          <template x-for="c in $store.palace.items" :key="c.session_id">
+            <button class="palace-card palace-row" @click="$store.palace.read(c.session_id)">
+              <h3 x-text="c.person || 'Someone she doesn\'t know yet'"></h3>
+              <p class="palace-meta" x-text="`${c.session_id} · ${c.exchanges} exchanges · last ${$store.palace.day(c.last)}`"></p>
+            </button>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="$store.palace.section === 'works'">
+        <div class="palace-cards">
+          <template x-for="w in $store.palace.items" :key="w.id">
+            <article class="palace-card">
+              <h3 x-text="w.title || w.id"></h3>
+              <p class="palace-meta" x-text="w.author || ''"></p>
+              <p class="palace-preview" x-text="(w.text || '').slice(0, 300)"></p>
+            </article>
+          </template>
+        </div>
+      </template>
+
+      <template x-if="$store.palace.section === 'graph'">
+        <div class="palace-table">
+          <table>
+            <thead><tr><th>Subject</th><th>Predicate</th><th>Object</th><th>World</th><th>Type</th><th>Source</th></tr></thead>
+            <tbody>
+              <template x-for="t in $store.palace.items" :key="t.id">
+                <tr>
+                  <td x-text="t.subject"></td><td x-text="t.predicate"></td><td x-text="t.object"></td>
+                  <td x-text="t.world"></td><td x-text="t.fact_type"></td><td x-text="t.source"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </div>
+
+    <div class="palace-transcript" x-show="$store.palace.transcript">
+      <button class="btn" @click="$store.palace.transcript = null">Back to conversations</button>
+      <h3 x-text="$store.palace.transcript?.session_id"></h3>
+      <template x-for="e in ($store.palace.transcript?.exchanges || [])" :key="e.id">
+        <div class="palace-exchange">
+          <p class="palace-meta" x-text="$store.palace.day(e.ts)"></p>
+          <p><strong>They said:</strong> <span x-text="e.user"></span></p>
+          <p><strong>She replied:</strong> <span x-text="e.reply"></span></p>
+        </div>
+      </template>
+    </div>
+
+    <div class="palace-pager" x-show="$store.palace.total > $store.palace.limit && !$store.palace.transcript">
+      <button class="btn" :disabled="$store.palace.offset === 0" @click="$store.palace.page(-1)">Previous</button>
+      <span x-text="$store.palace.range"></span>
+      <button class="btn" :disabled="$store.palace.offset + $store.palace.limit >= $store.palace.total" @click="$store.palace.page(1)">Next</button>
+    </div>
+  </section>
+
   <!-- ── Chat View (full-page Claude-style with sidebar) ── -->
   <section class="view" x-data x-show="$store.nav.currentView === 'chat'" style="display:none">
     <div class="chat-layout" :class="{ 'sidebar-open': $store.chat.sidebarPinned }">
@@ -1743,6 +1890,7 @@
     </template>
   </section>
 
-  <script src="/static/app.js?v=20261105a"></script>
+  <script src="/static/palace.js?v=20261105a"></script>
+  <script src="/static/app.js?v=20261105b"></script>
 </body>
 </html>

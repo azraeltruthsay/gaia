@@ -334,7 +334,20 @@ def _slim_history(packet) -> List[Dict]:
     return msgs
 
 
-def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None, slim_mode: bool = False, kv_prefix_active: bool = False) -> List[Dict]:
+def build_from_packet(packet: CognitionPacket, *args, **kwargs) -> List[Dict]:
+    """The prompt for a packet, told who she is speaking with (751u)."""
+    messages = _assemble_from_packet(packet, *args, **kwargs)
+    try:
+        from gaia_common.utils.people import speaker_line
+        line = speaker_line(getattr(getattr(packet, "header", None), "session_id", "") or "")
+        if line and messages and messages[0].get("role") == "system":
+            messages[0] = {**messages[0], "content": f"{messages[0]['content']}\n\n{line}"}
+    except Exception:
+        logger.debug("Speaker line unavailable", exc_info=True)
+    return messages
+
+
+def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = None, slim_mode: bool = False, kv_prefix_active: bool = False) -> List[Dict]:
     """
     Builds a prompt from a v0.3 CognitionPacket, using a tiered, budget-aware logic.
     If slim_mode=True, returns a minimal Identity + User Prompt list for speed.

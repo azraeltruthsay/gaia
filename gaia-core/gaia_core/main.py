@@ -514,11 +514,6 @@ async def lifespan(app: FastAPI):
     logger.info("GAIA Core shutting down — writing cognitive checkpoints...")
     try:
         _write_shutdown_checkpoints(app)
-        # 02m5: a restart is not sleep. Left unconsumed, this "preparing for a
-        # sleep cycle" note went into every non-trivial prompt until a real
-        # wake, which a plain restart never has (Prime dropped URLs under it).
-        from gaia_core.cognition.prime_checkpoint import PrimeCheckpointManager
-        PrimeCheckpointManager(_ai_manager.config).mark_consumed()
     except Exception:
         logger.warning("Shutdown checkpoint write failed", exc_info=True)
 
@@ -561,6 +556,11 @@ def _write_shutdown_checkpoints(app: FastAPI) -> dict:
         pm = PrimeCheckpointManager(config, timeline_store=timeline_store)
         pm.rotate_checkpoints()
         path = pm.create_checkpoint(packet=None, model_pool=model_pool)
+        # 02m5: a restart is not sleep. Left unconsumed, this "preparing for a
+        # sleep cycle" note went into every non-trivial prompt until a real
+        # wake, which a plain restart never has (Prime dropped URLs under it).
+        # Here, not after the writes: Core.md can outlast the stop grace period.
+        pm.mark_consumed()
         results["prime"] = {"status": "ok", "path": str(path)}
         logger.info("Shutdown checkpoint: prime.md written")
     except Exception as exc:

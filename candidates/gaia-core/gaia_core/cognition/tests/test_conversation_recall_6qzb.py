@@ -288,6 +288,8 @@ def test_a_short_conversation_is_not_crowded_out_by_a_long_one(palace):
 
 
 def test_the_rest_of_what_they_said_comes_along(palace):
+    from gaia_common.utils.people import PeopleRegistry
+    PeopleRegistry().create("Andy", [{"kind": "session", "id": ANDY}])
     palace.record_exchange(ANDY, "I am Andy.", "Hello.")
     palace.record_exchange(ANDY, "Recite the poem Jabberwockey?", "Twas brillig")
     ctx = kr.recall_conversation(DM, "Do you remember Andy from yesterday?")
@@ -313,3 +315,10 @@ def test_only_web_fetch_is_filled():
     from gaia_common.utils.tool_call_parser import fill_missing_url
     assert fill_missing_url("web", "search", {}, "see https://a.org") == {}
     assert fill_missing_url("file", "fetch", {}, "see https://a.org") == {}
+
+
+def test_someone_elses_conversation_brings_only_the_match(palace):
+    palace.record_exchange(DM, "Is Andy around?", "Not today.")
+    palace.record_exchange(DM, "Who forged Excalibur?", "The Lady.")
+    ctx = kr.recall_conversation("web_0000beef", "Do you remember Andy from yesterday?")
+    assert ctx.results and "Excalibur" not in ctx.results[0].content

@@ -40,6 +40,7 @@ from gaia_web.routes.autonomous import router as autonomous_router
 from gaia_web.routes.curriculum import router as curriculum_router
 from gaia_web.routes.training import router as training_router
 from gaia_web.routes.world_merges import router as world_merges_router
+from gaia_web.routes.palace import router as palace_router
 
 # Setup logging
 try:
@@ -166,6 +167,7 @@ app.include_router(autonomous_router, tags=["autonomous"])
 app.include_router(curriculum_router, prefix="/api/curriculum", tags=["curriculum"])
 app.include_router(training_router, tags=["training"])
 app.include_router(world_merges_router, tags=["world_merges"])
+app.include_router(palace_router, tags=["palace"])
 
 @app.post("/process_user_input")
 async def process_user_input(user_input: str, request: Request):

@@ -98,6 +98,7 @@ document.addEventListener('alpine:init', () => {
       { id: 'hooks', label: 'Commands' },
       { id: 'files', label: 'Files' },
       { id: 'knowledge', label: 'Knowledge' },
+      { id: 'palace', label: 'Palace' },
       { id: 'audio', label: 'Audio' },
       { id: 'terminal', label: 'Terminal' },
       { id: 'consent', label: 'Consent' },

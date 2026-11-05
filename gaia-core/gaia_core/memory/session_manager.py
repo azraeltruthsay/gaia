@@ -204,6 +204,10 @@ class SessionManager:
                 try:
                     from gaia_common.utils.conversation_memory import ConversationMemory
                     ConversationMemory().record_exchange(session_id, _user, content, ts=turn["timestamp"])
+                    from gaia_common.utils.conversation_memory import recorded
+                    from gaia_common.utils.people import PeopleRegistry
+                    if recorded(session_id):
+                        PeopleRegistry().note_claim(session_id, _user)   # 751u
                 except Exception:
                     logger.debug("Conversation record failed (non-fatal)", exc_info=True)
 
