@@ -280,7 +280,7 @@ async def get_atlas(tier: str = "core"):
 
 # Default canonical (top-k, discriminative) atlas tags per tier, both holding a
 # synapse_graph.json (within-layer co-activation + cross-layer causal) — A4/72q.
-_SYNAPSE_DEFAULT_TAG = {"core": "CORE_IDENTITY_V3_gguf", "prime": "PRIME_ABLITERATED_gguf"}
+_SYNAPSE_DEFAULT_TAG = {"core": "CORE_IDENTITY_V3_gguf", "prime": "PRIME_V2B_gguf"}
 _ATLAS_BASE = os.getenv("SAE_ATLAS_BASE", "/shared/atlas")
 
 

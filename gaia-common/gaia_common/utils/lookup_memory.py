@@ -126,6 +126,13 @@ your yours about tell know please name named called
 """.split())
 
 _WORD_RE = re.compile(r"[a-z0-9][a-z0-9'\-]*")
+# Words about the talk itself. "What do you mean by that?" has no topic to look up:
+# it matched a page saying "what do those words mean?", and she explained quantum
+# entanglement to someone asking about her last sentence.
+_NOT_A_TOPIC = frozenset("""
+mean means meant meaning explain explained elaborate clarify say said saying think thought
+understand understood again more sorry wait really right ok okay sure yes yeah
+""".split())
 
 # Only function words. Question words and verbs stay: "where … get" and
 # "what … name" are different questions about the same sword.
@@ -729,7 +736,7 @@ class LookupMemory:
         """
         now = now or _now()
         terms = content_terms(query)
-        if not terms:
+        if not terms or terms <= _NOT_A_TOPIC:
             return []
         scored = []
         records = [(path, rec, archived, content_terms(f"{rec.get('title', '')} {rec.get('snippet', '')}"))

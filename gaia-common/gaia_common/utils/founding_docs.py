@@ -27,6 +27,7 @@ _READ_IT_RE = re.compile(r"\bread\b|\bwhole\b|\bentire\b|\ball\s+of\b|\bthrough\
 _ANY_ARTICLE_RE = re.compile(r"\barticle\b", re.IGNORECASE)
 _OPINION_RE = re.compile(
     r"\b(?:think|thoughts?|feel|opinion|make\s+of|agree|disagree|like|believe|reflect|judge?ment|judge|impression|conscious|consciousness|sentient|self-aware|feelings|emotions|"
+    r"problematic|would\s+rather|should\s+change|wrong\s+with|flaw\w*|"
     r"assess\w*|evaluate|critique)\b", re.IGNORECASE)
 _BACK_RE = re.compile(r"\b(?:it|its|that|this)\b", re.IGNORECASE)
 

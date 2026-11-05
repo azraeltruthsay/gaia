@@ -29,7 +29,7 @@ ATLAS = Path("/shared/atlas")
 OUT_DIR = Path("/gaia/GAIA_Project/knowledge/blueprints")
 MODELS = [
     {"tier": "core",  "st": "CORE_IDENTITY_V3",  "gguf": "CORE_IDENTITY_V3_gguf"},
-    {"tier": "prime", "st": "PRIME_ABLITERATED", "gguf": "PRIME_ABLITERATED_gguf"},
+    {"tier": "prime", "st": "PRIME_V2B", "gguf": "PRIME_V2B_gguf"},
 ]
 TOP_N = 12  # discriminative features reported per signal
 

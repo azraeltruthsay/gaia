@@ -64,13 +64,15 @@ def _adds_a_section(reply: str, text: str) -> bool:
 def keeps_to_text(reply: str, text: str, question: str, opinion: bool = False) -> bool:
     """Whether a reply about a document stays with it: no invented names, enough
     of its words from the text, and any article asked for under its real title.
-    An opinion can range further, but still has to be about the text."""
+    An opinion can range further."""
     if not (reply or "").strip() or _loops(reply) or _adds_a_section(reply, text) or unbacked(reply, f"{question}\n{text}"):
         return False
     from gaia_common.utils.doc_sections import asked_articles, sections
     from gaia_common.utils.lookup_memory import content_terms
     said = content_terms(reply)
-    if not said or len(said & content_terms(text)) / len(said) < (0.25 if opinion else 0.5):
+    # An opinion is hers: it needn't echo the text, only not invent names. "I don't
+    # disagree with it" has no words of the document in it, and it's still an answer.
+    if not opinion and (not said or len(said & content_terms(text)) / len(said) < 0.5):
         return False
     for article in ([] if opinion else asked_articles(question)):  # a view needn't recite the title
         for heading, _body in sections(text):

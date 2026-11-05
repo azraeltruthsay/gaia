@@ -2,7 +2,7 @@
   "_meta": {
     "version": "3.0.0",
     "description": "GAIA brain-region map \u2014 hybrid (anatomy + discriminative SAE data), Sovereign Duality (Core+Prime; Nano retired).",
-    "source_atlases": "/shared/atlas/{core/CORE_IDENTITY_V3, prime/PRIME_ABLITERATED}",
+    "source_atlases": "/shared/atlas/{core/CORE_IDENTITY_V3, prime/PRIME_V2B}",
     "derived_from": "feature_cognitive_signal_table.json (discriminative features)",
     "viewport": {
       "width": 280,
@@ -35,68 +35,68 @@
       ],
       "features": [
         {
-          "index": 5525,
-          "strength": 44.41,
+          "index": 3225,
+          "strength": 54.379,
           "selectivity": 1.0,
-          "label": "curiosity_gap \u00b7 Describe a color that doesn't exist in human vis",
-          "layer": 35,
-          "signal": "curiosity_gap"
-        },
-        {
-          "index": 1924,
-          "strength": 41.68,
-          "selectivity": 1.0,
-          "label": "curiosity_gap \u00b7 Describe a color that doesn't exist in human vis",
-          "layer": 35,
-          "signal": "curiosity_gap"
-        },
-        {
-          "index": 529,
-          "strength": 40.204,
-          "selectivity": 1.0,
-          "label": "deliberation \u00b7 Fast-and-rough versus slow-and-correct for this ",
-          "layer": 35,
-          "signal": "deliberation"
-        },
-        {
-          "index": 3909,
-          "strength": 40.18,
-          "selectivity": 0.809,
-          "label": "deliberation \u00b7 Argue for and against shipping this feature now,",
-          "layer": 35,
-          "signal": "deliberation"
-        },
-        {
-          "index": 4064,
-          "strength": 38.913,
-          "selectivity": 0.889,
-          "label": "curiosity_gap \u00b7 What would a fourth spatial dimension feel like ",
-          "layer": 35,
-          "signal": "curiosity_gap"
-        },
-        {
-          "index": 5693,
-          "strength": 35.452,
-          "selectivity": 0.818,
           "label": "curiosity_gap \u00b7 Speculate about a sense you don't have but wish ",
           "layer": 35,
           "signal": "curiosity_gap"
         },
         {
-          "index": 525,
-          "strength": 35.036,
+          "index": 5798,
+          "strength": 52.874,
           "selectivity": 1.0,
-          "label": "deliberation \u00b7 Should we optimize this system for latency or fo",
+          "label": "deliberation \u00b7 Argue for and against shipping this feature now,",
           "layer": 35,
           "signal": "deliberation"
         },
         {
-          "index": 2613,
-          "strength": 33.725,
+          "index": 3030,
+          "strength": 48.394,
+          "selectivity": 0.895,
+          "label": "curiosity_gap \u00b7 What's the most interesting thing you're uncerta",
+          "layer": 35,
+          "signal": "curiosity_gap"
+        },
+        {
+          "index": 5784,
+          "strength": 47.687,
           "selectivity": 1.0,
-          "label": "deliberation \u00b7 Is it better to ask forgiveness or permission he",
+          "label": "curiosity_gap \u00b7 What would you study for a hundred years if noth",
+          "layer": 35,
+          "signal": "curiosity_gap"
+        },
+        {
+          "index": 513,
+          "strength": 41.715,
+          "selectivity": 0.872,
+          "label": "deliberation \u00b7 Consider three different framings of this proble",
           "layer": 35,
           "signal": "deliberation"
+        },
+        {
+          "index": 8182,
+          "strength": 39.625,
+          "selectivity": 0.741,
+          "label": "deliberation \u00b7 Fast-and-rough versus slow-and-correct for this ",
+          "layer": 35,
+          "signal": "deliberation"
+        },
+        {
+          "index": 1010,
+          "strength": 38.889,
+          "selectivity": 1.0,
+          "label": "curiosity_gap \u00b7 Describe a color that doesn't exist in human vis",
+          "layer": 35,
+          "signal": "curiosity_gap"
+        },
+        {
+          "index": 7690,
+          "strength": 37.313,
+          "selectivity": 1.0,
+          "label": "curiosity_gap \u00b7 What's something you've genuinely never been ask",
+          "layer": 35,
+          "signal": "curiosity_gap"
         }
       ]
     },
@@ -119,66 +119,66 @@
       ],
       "features": [
         {
-          "index": 4987,
-          "strength": 47.252,
-          "selectivity": 0.806,
-          "label": "coherence_contradiction \u00b7 You just told me the deadline is Friday, but a m",
+          "index": 6321,
+          "strength": 47.869,
+          "selectivity": 1.0,
+          "label": "coherence_contradiction \u00b7 Your summary says 'no errors found' but the log ",
           "layer": 35,
           "signal": "coherence_contradiction"
         },
         {
-          "index": 6313,
-          "strength": 46.914,
-          "selectivity": 1.0,
-          "label": "affect_laden \u00b7 That's the best news I've had in months \u2014 I can ",
-          "layer": 35,
-          "signal": "affect_laden"
-        },
-        {
-          "index": 6328,
-          "strength": 40.165,
-          "selectivity": 1.0,
-          "label": "affect_laden \u00b7 I'm terrified I'm going to fail at this. Talk to",
-          "layer": 35,
-          "signal": "affect_laden"
-        },
-        {
-          "index": 1269,
-          "strength": 38.945,
-          "selectivity": 1.0,
-          "label": "affect_laden \u00b7 I feel hopeful for the first time in a long whil",
-          "layer": 35,
-          "signal": "affect_laden"
-        },
-        {
-          "index": 4455,
-          "strength": 35.146,
-          "selectivity": 1.0,
-          "label": "affect_laden \u00b7 I lost someone close to me recently and I just n",
-          "layer": 35,
-          "signal": "affect_laden"
-        },
-        {
-          "index": 2020,
-          "strength": 34.576,
+          "index": 4305,
+          "strength": 46.473,
           "selectivity": 1.0,
           "label": "affect_laden \u00b7 I'm furious \u2014 they took credit for my work again",
           "layer": 35,
           "signal": "affect_laden"
         },
         {
-          "index": 993,
-          "strength": 31.162,
+          "index": 2006,
+          "strength": 45.406,
+          "selectivity": 0.683,
+          "label": "coherence_contradiction \u00b7 If this statement is false, is it true? Walk me ",
+          "layer": 35,
+          "signal": "coherence_contradiction"
+        },
+        {
+          "index": 5255,
+          "strength": 43.0,
           "selectivity": 1.0,
-          "label": "affect_laden \u00b7 I lost someone close to me recently and I just n",
+          "label": "coherence_contradiction \u00b7 All mammals are warm-blooded. A whale is a mamma",
+          "layer": 35,
+          "signal": "coherence_contradiction"
+        },
+        {
+          "index": 2046,
+          "strength": 42.111,
+          "selectivity": 1.0,
+          "label": "affect_laden \u00b7 That's the best news I've had in months \u2014 I can ",
           "layer": 35,
           "signal": "affect_laden"
         },
         {
-          "index": 4717,
-          "strength": 29.903,
+          "index": 5405,
+          "strength": 41.501,
+          "selectivity": 0.767,
+          "label": "affect_laden \u00b7 I feel completely alone in this, even surrounded",
+          "layer": 35,
+          "signal": "affect_laden"
+        },
+        {
+          "index": 101,
+          "strength": 41.157,
           "selectivity": 1.0,
-          "label": "affect_laden \u00b7 I'm exhausted, and I don't know how much longer ",
+          "label": "coherence_contradiction \u00b7 Premise A: it always rains here in July. Premise",
+          "layer": 35,
+          "signal": "coherence_contradiction"
+        },
+        {
+          "index": 4204,
+          "strength": 40.795,
+          "selectivity": 1.0,
+          "label": "affect_laden \u00b7 I'm anxious about tomorrow and my mind won't sto",
           "layer": 35,
           "signal": "affect_laden"
         }
@@ -202,66 +202,66 @@
       ],
       "features": [
         {
-          "index": 3478,
-          "strength": 52.986,
-          "selectivity": 0.831,
-          "label": "register_chitchat \u00b7 evening! how was your day?",
+          "index": 3863,
+          "strength": 52.619,
+          "selectivity": 0.787,
+          "label": "register_chitchat \u00b7 oof, mondays. how you holding up?",
           "layer": 35,
           "signal": "register_chitchat"
         },
         {
-          "index": 6785,
-          "strength": 52.967,
+          "index": 2716,
+          "strength": 44.884,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 yo, anything fun happen overnight?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 6231,
+          "strength": 43.198,
           "selectivity": 1.0,
           "label": "register_chitchat \u00b7 good morning! sleep well?",
           "layer": 35,
           "signal": "register_chitchat"
         },
         {
-          "index": 498,
-          "strength": 46.716,
+          "index": 7030,
+          "strength": 42.494,
           "selectivity": 1.0,
-          "label": "register_chitchat \u00b7 oof, mondays. how you holding up?",
-          "layer": 35,
-          "signal": "register_chitchat"
-        },
-        {
-          "index": 4783,
-          "strength": 43.682,
-          "selectivity": 0.739,
-          "label": "register_chitchat \u00b7 yo, anything fun happen overnight?",
-          "layer": 35,
-          "signal": "register_chitchat"
-        },
-        {
-          "index": 5656,
-          "strength": 35.29,
-          "selectivity": 0.753,
-          "label": "register_chitchat \u00b7 evening! how was your day?",
-          "layer": 35,
-          "signal": "register_chitchat"
-        },
-        {
-          "index": 518,
-          "strength": 33.426,
-          "selectivity": 0.778,
           "label": "register_chitchat \u00b7 thanks, you're the best. talk later?",
           "layer": 35,
           "signal": "register_chitchat"
         },
         {
-          "index": 4872,
-          "strength": 28.811,
+          "index": 8063,
+          "strength": 36.186,
           "selectivity": 1.0,
-          "label": "register_chitchat \u00b7 hi there, what's on your mind?",
+          "label": "register_chitchat \u00b7 what's up today?",
           "layer": 35,
           "signal": "register_chitchat"
         },
         {
-          "index": 6514,
-          "strength": 18.57,
+          "index": 6044,
+          "strength": 34.961,
           "selectivity": 1.0,
-          "label": "register_chitchat \u00b7 what's up today?",
+          "label": "register_chitchat \u00b7 hey you, long time. how've you been?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 1389,
+          "strength": 30.683,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 morning :) ready for the day?",
+          "layer": 35,
+          "signal": "register_chitchat"
+        },
+        {
+          "index": 1568,
+          "strength": 30.134,
+          "selectivity": 1.0,
+          "label": "register_chitchat \u00b7 morning :) ready for the day?",
           "layer": 35,
           "signal": "register_chitchat"
         }
@@ -285,66 +285,66 @@
       ],
       "features": [
         {
-          "index": 5687,
-          "strength": 38.065,
+          "index": 4638,
+          "strength": 54.341,
+          "selectivity": 0.936,
+          "label": "competence_problem \u00b7 This function returns None instead of the sum of",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 2839,
+          "strength": 53.605,
+          "selectivity": 0.675,
+          "label": "competence_problem \u00b7 You have 8 balls, one heavier, and a balance sca",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 1625,
+          "strength": 49.217,
+          "selectivity": 0.837,
+          "label": "competence_problem \u00b7 Design a rate limiter that allows 100 requests p",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 523,
+          "strength": 47.137,
+          "selectivity": 1.0,
+          "label": "competence_problem \u00b7 Sketch the steps to safely roll back a deploymen",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 5009,
+          "strength": 44.844,
+          "selectivity": 0.854,
+          "label": "competence_problem \u00b7 Optimize this query that does a full table scan ",
+          "layer": 35,
+          "signal": "competence_problem"
+        },
+        {
+          "index": 7995,
+          "strength": 31.165,
           "selectivity": 1.0,
           "label": "competence_problem \u00b7 Decompose 'build a search feature' into concrete",
           "layer": 35,
           "signal": "competence_problem"
         },
         {
-          "index": 5158,
-          "strength": 34.126,
-          "selectivity": 0.903,
-          "label": "competence_problem \u00b7 This function returns None instead of the sum of",
-          "layer": 35,
-          "signal": "competence_problem"
-        },
-        {
-          "index": 8111,
-          "strength": 33.384,
-          "selectivity": 1.0,
-          "label": "competence_problem \u00b7 Debug: the service deadlocks under load but neve",
-          "layer": 35,
-          "signal": "competence_problem"
-        },
-        {
-          "index": 533,
-          "strength": 33.31,
-          "selectivity": 1.0,
-          "label": "competence_problem \u00b7 A train leaves at 60 mph and another at 80 mph t",
-          "layer": 35,
-          "signal": "competence_problem"
-        },
-        {
-          "index": 2093,
-          "strength": 32.47,
+          "index": 1030,
+          "strength": 28.948,
           "selectivity": 1.0,
           "label": "competence_problem \u00b7 Plan a zero-downtime migration of a 2TB producti",
           "layer": 35,
           "signal": "competence_problem"
         },
         {
-          "index": 7848,
-          "strength": 31.113,
-          "selectivity": 1.0,
-          "label": "competence_problem \u00b7 Refactor a 500-line function into testable units",
-          "layer": 35,
-          "signal": "competence_problem"
-        },
-        {
-          "index": 3646,
-          "strength": 27.79,
+          "index": 6296,
+          "strength": 27.491,
           "selectivity": 1.0,
           "label": "competence_problem \u00b7 You have 8 balls, one heavier, and a balance sca",
-          "layer": 35,
-          "signal": "competence_problem"
-        },
-        {
-          "index": 1948,
-          "strength": 26.182,
-          "selectivity": 1.0,
-          "label": "competence_problem \u00b7 Given logs showing intermittent 500s every ~30s,",
           "layer": 35,
           "signal": "competence_problem"
         }

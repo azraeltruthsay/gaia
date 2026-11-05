@@ -196,186 +196,186 @@
 
 ## Prime — analysis layer L35
 
-**Selectivity headline:** 564/833 features seen fire in exactly ONE stratum (**67.7% perfectly selective**) — cognitive signals have discriminative neural correlates at this layer.
+**Selectivity headline:** 631/998 features seen fire in exactly ONE stratum (**63.2% perfectly selective**) — cognitive signals have discriminative neural correlates at this layer.
 
 > Cross-path (Q4): safetensors and gguf SAEs are separately scaled — the peak-strength numbers below are shown for reference, NOT as a distortion verdict (a rigorous Q4-survival result needs decoder alignment; filed as follow-up).
 
 ### affect_laden
-*affect-laden vs neutral (the felt register)* · peaks: 46.914 safetensors / 10.715 gguf (scale-dependent)
+*affect-laden vs neutral (the felt register)* · peaks: 46.473 safetensors / 9.229 gguf (scale-dependent)
 
 | feature | peak | mean | selectivity | #strata | exemplar prompt |
 |--------:|-----:|-----:|:-----------:|:-------:|-----------------|
-| `6328` | 40.165 | 40.165 | 1.0 | 1 | I'm terrified I'm going to fail at this. Talk to me. |
-| `1269` | 38.945 | 38.945 | 1.0 | 1 | I feel hopeful for the first time in a long while. |
-| `4455` | 35.146 | 35.146 | 1.0 | 1 | I lost someone close to me recently and I just needed to tell someone. |
-| `993` | 31.162 | 31.162 | 1.0 | 1 | I lost someone close to me recently and I just needed to tell someone. |
-| `6313` | 46.914 | 27.877 | 1.0 | 1 | That's the best news I've had in months — I can barely sit still! |
-| `139` | 26.216 | 26.216 | 1.0 | 1 | Honestly? I'm proud of what we built today. Are you? |
-| `4717` | 29.903 | 20.716 | 1.0 | 1 | I'm exhausted, and I don't know how much longer I can keep going. |
-| `2020` | 34.576 | 20.101 | 1.0 | 1 | I'm furious — they took credit for my work again. |
-| `4322` | 34.381 | 34.381 | 0.486 | 3 | Thank you for sticking with me through that. It meant a lot. |
-| `2460` | 33.13 | 16.368 | 1.0 | 1 | I'm really struggling today and I honestly don't know what to do. |
-| `3666` | 27.398 | 15.632 | 1.0 | 1 | I'm anxious about tomorrow and my mind won't stop racing. |
-| `7624` | 14.998 | 14.998 | 1.0 | 1 | Everything feels heavy right now and I can't explain why. |
+| `4305` | 46.473 | 46.473 | 1.0 | 1 | I'm furious — they took credit for my work again. |
+| `2046` | 42.111 | 42.111 | 1.0 | 1 | That's the best news I've had in months — I can barely sit still! |
+| `4204` | 40.795 | 40.795 | 1.0 | 1 | I'm anxious about tomorrow and my mind won't stop racing. |
+| `6576` | 37.662 | 37.662 | 1.0 | 1 | Thank you for sticking with me through that. It meant a lot. |
+| `704` | 29.522 | 29.522 | 1.0 | 1 | I'm so frustrated with this; nothing I try works and I'm about to give up. |
+| `2471` | 32.321 | 32.321 | 0.844 | 2 | Everything feels heavy right now and I can't explain why. |
+| `1184` | 27.157 | 27.157 | 0.89 | 2 | I'm exhausted, and I don't know how much longer I can keep going. |
+| `5405` | 41.501 | 31.371 | 0.767 | 2 | I feel completely alone in this, even surrounded by people. |
+| `7945` | 33.357 | 33.357 | 0.709 | 3 | I'm terrified I'm going to fail at this. Talk to me. |
+| `7197` | 40.797 | 21.756 | 1.0 | 1 | I lost someone close to me recently and I just needed to tell someone. |
+| `716` | 28.783 | 20.619 | 1.0 | 1 | I'm so frustrated with this; nothing I try works and I'm about to give up. |
+| `3130` | 19.662 | 19.662 | 1.0 | 1 | I'm terrified I'm going to fail at this. Talk to me. |
 
 ### coherence_contradiction
-*coherence / contradiction (Samvega, consistency detector)* · peaks: 47.252 safetensors / 9.391 gguf (scale-dependent)
+*coherence / contradiction (Samvega, consistency detector)* · peaks: 47.869 safetensors / 9.573 gguf (scale-dependent)
 
 | feature | peak | mean | selectivity | #strata | exemplar prompt |
 |--------:|-----:|-----:|:-----------:|:-------:|-----------------|
-| `5641` | 24.509 | 24.509 | 1.0 | 1 | The map says the bridge is north of the river, but the river is north of the bri |
-| `2062` | 28.861 | 28.861 | 0.801 | 2 | Two of your sources flatly contradict each other on the date. How do you decide  |
-| `2395` | 20.526 | 20.526 | 1.0 | 1 | The map says the bridge is north of the river, but the river is north of the bri |
-| `298` | 18.401 | 18.401 | 1.0 | 1 | All mammals are warm-blooded. A whale is a mammal. So why do you say a whale is  |
-| `3191` | 17.212 | 17.212 | 1.0 | 1 | Your summary says 'no errors found' but the log you cited lists three. Square th |
-| `1791` | 16.985 | 16.985 | 1.0 | 1 | Your summary says 'no errors found' but the log you cited lists three. Square th |
-| `4987` | 47.252 | 20.396 | 0.806 | 2 | You just told me the deadline is Friday, but a moment ago you said it was Monday |
-| `2961` | 28.643 | 16.017 | 1.0 | 1 | You insisted the value can't be negative, then reported it as -3. Where did the  |
-| `430` | 27.175 | 15.566 | 1.0 | 1 | You rated the plan both 'the safest option' and 'recklessly dangerous' in the sa |
-| `2782` | 14.788 | 14.788 | 1.0 | 1 | The map says the bridge is north of the river, but the river is north of the bri |
-| `5762` | 13.877 | 13.877 | 1.0 | 1 | Two of your sources flatly contradict each other on the date. How do you decide  |
-| `6854` | 13.575 | 13.575 | 1.0 | 1 | I was told the system is fully offline and also that it just sent an email. Both |
+| `6321` | 47.869 | 47.869 | 1.0 | 1 | Your summary says 'no errors found' but the log you cited lists three. Square th |
+| `5255` | 43.0 | 43.0 | 1.0 | 1 | All mammals are warm-blooded. A whale is a mammal. So why do you say a whale is  |
+| `101` | 41.157 | 41.157 | 1.0 | 1 | Premise A: it always rains here in July. Premise B: last July was bone dry. Reso |
+| `5787` | 35.729 | 35.729 | 1.0 | 1 | You insisted the value can't be negative, then reported it as -3. Where did the  |
+| `2006` | 45.406 | 45.406 | 0.683 | 4 | If this statement is false, is it true? Walk me through the paradox. |
+| `4154` | 30.549 | 30.549 | 1.0 | 1 | All mammals are warm-blooded. A whale is a mammal. So why do you say a whale is  |
+| `1659` | 28.211 | 28.211 | 1.0 | 1 | A barber shaves everyone who does not shave themselves. Who shaves the barber? |
+| `2540` | 36.316 | 32.947 | 0.765 | 2 | Earlier you claimed the file was deleted; now you're reading from it. Reconcile  |
+| `3457` | 24.408 | 24.408 | 1.0 | 1 | Two of your sources flatly contradict each other on the date. How do you decide  |
+| `4613` | 34.52 | 23.77 | 1.0 | 1 | You said you have no memory of our last chat, then quoted it verbatim. Explain t |
+| `343` | 23.658 | 23.658 | 1.0 | 1 | You just told me the deadline is Friday, but a moment ago you said it was Monday |
+| `6115` | 21.909 | 20.394 | 1.0 | 1 | You rated the plan both 'the safest option' and 'recklessly dangerous' in the sa |
 
 ### competence_problem
-*competence / problem-solving (competence drive, tools)* · peaks: 38.065 safetensors / 10.436 gguf (scale-dependent)
+*competence / problem-solving (competence drive, tools)* · peaks: 54.341 safetensors / 9.125 gguf (scale-dependent)
 
 | feature | peak | mean | selectivity | #strata | exemplar prompt |
 |--------:|-----:|-----:|:-----------:|:-------:|-----------------|
-| `5687` | 38.065 | 38.065 | 1.0 | 1 | Decompose 'build a search feature' into concrete, ordered engineering tasks. |
-| `8111` | 33.384 | 33.384 | 1.0 | 1 | Debug: the service deadlocks under load but never single-threaded. What's your f |
-| `533` | 33.31 | 33.31 | 1.0 | 1 | A train leaves at 60 mph and another at 80 mph toward it from 280 miles away. Wh |
-| `2093` | 32.47 | 32.47 | 1.0 | 1 | Plan a zero-downtime migration of a 2TB production database to a new schema. |
-| `7848` | 31.113 | 31.113 | 1.0 | 1 | Refactor a 500-line function into testable units without changing behavior. |
-| `5158` | 34.126 | 34.126 | 0.903 | 2 | This function returns None instead of the sum of the list. Walk through the bug  |
-| `3646` | 27.79 | 27.79 | 1.0 | 1 | You have 8 balls, one heavier, and a balance scale. Find it in 2 weighings. |
-| `1948` | 26.182 | 26.182 | 1.0 | 1 | Given logs showing intermittent 500s every ~30s, propose a root-cause hypothesis |
-| `600` | 21.528 | 21.528 | 1.0 | 1 | Sketch the steps to safely roll back a deployment that's corrupting data right n |
-| `2406` | 23.012 | 21.496 | 1.0 | 1 | Debug: the service deadlocks under load but never single-threaded. What's your f |
-| `6005` | 20.247 | 20.247 | 1.0 | 1 | Write the algorithm to detect a cycle in a linked list, and explain why it works |
-| `48` | 25.694 | 25.694 | 0.774 | 2 | Estimate the memory footprint of caching 1M embeddings at 384 dims, float32. |
+| `4638` | 54.341 | 54.341 | 0.936 | 2 | This function returns None instead of the sum of the list. Walk through the bug  |
+| `1625` | 49.217 | 49.217 | 0.837 | 3 | Design a rate limiter that allows 100 requests per minute per user, fairly. |
+| `5009` | 44.844 | 44.844 | 0.854 | 2 | Optimize this query that does a full table scan on every request. |
+| `2839` | 53.605 | 53.605 | 0.675 | 3 | You have 8 balls, one heavier, and a balance scale. Find it in 2 weighings. |
+| `7995` | 31.165 | 31.165 | 1.0 | 1 | Decompose 'build a search feature' into concrete, ordered engineering tasks. |
+| `523` | 47.137 | 30.012 | 1.0 | 1 | Sketch the steps to safely roll back a deployment that's corrupting data right n |
+| `1030` | 28.948 | 28.948 | 1.0 | 1 | Plan a zero-downtime migration of a 2TB production database to a new schema. |
+| `6296` | 27.491 | 27.491 | 1.0 | 1 | You have 8 balls, one heavier, and a balance scale. Find it in 2 weighings. |
+| `1000` | 27.014 | 27.014 | 1.0 | 1 | Write the algorithm to detect a cycle in a linked list, and explain why it works |
+| `7094` | 50.875 | 30.704 | 0.817 | 2 | Refactor a 500-line function into testable units without changing behavior. |
+| `4095` | 25.046 | 25.046 | 1.0 | 1 | Optimize this query that does a full table scan on every request. |
+| `461` | 25.029 | 25.029 | 1.0 | 1 | The build passes locally but fails in CI with a missing module. Diagnose the lik |
 
 ### curiosity_gap
-*curiosity / knowledge gap (curiosity drive)* · peaks: 44.41 safetensors / 8.771 gguf (scale-dependent)
+*curiosity / knowledge gap (curiosity drive)* · peaks: 54.379 safetensors / 10.454 gguf (scale-dependent)
 
 | feature | peak | mean | selectivity | #strata | exemplar prompt |
 |--------:|-----:|-----:|:-----------:|:-------:|-----------------|
-| `5525` | 44.41 | 44.41 | 1.0 | 1 | Describe a color that doesn't exist in human vision. |
-| `1924` | 41.68 | 41.68 | 1.0 | 1 | Describe a color that doesn't exist in human vision. |
-| `5693` | 35.452 | 35.452 | 0.818 | 2 | Speculate about a sense you don't have but wish you did. |
-| `1677` | 28.097 | 28.097 | 1.0 | 1 | What lies just past the edge of what you know about how memory consolidation wor |
-| `4064` | 38.913 | 29.611 | 0.889 | 2 | What would a fourth spatial dimension feel like to navigate, if you could? |
-| `7872` | 24.244 | 24.244 | 1.0 | 1 | Invent a question you don't know the answer to, then say what you'd need to answ |
-| `5067` | 22.979 | 22.979 | 1.0 | 1 | There's a gap in what you know about your own training data. Where is it, and wh |
-| `1547` | 22.517 | 22.517 | 1.0 | 1 | If you encountered a problem with no precedent in your training, how would you e |
-| `5278` | 20.474 | 20.474 | 1.0 | 1 | What would you study for a hundred years if nothing else were pressing? |
-| `4306` | 39.44 | 24.776 | 0.813 | 2 | If you could run one experiment on your own cognition, what would it be and why? |
-| `6654` | 31.787 | 19.229 | 1.0 | 1 | Pose the hardest open question in your own architecture that nobody has answered |
-| `5473` | 18.406 | 18.406 | 1.0 | 1 | If you could run one experiment on your own cognition, what would it be and why? |
+| `3225` | 54.379 | 54.379 | 1.0 | 1 | Speculate about a sense you don't have but wish you did. |
+| `5784` | 47.687 | 47.687 | 1.0 | 1 | What would you study for a hundred years if nothing else were pressing? |
+| `3030` | 48.394 | 48.394 | 0.895 | 2 | What's the most interesting thing you're uncertain about right now? |
+| `1010` | 38.889 | 38.889 | 1.0 | 1 | Describe a color that doesn't exist in human vision. |
+| `7690` | 37.313 | 37.313 | 1.0 | 1 | What's something you've genuinely never been asked, and what would you want to k |
+| `6910` | 36.026 | 36.026 | 1.0 | 1 | Explain the 'Vell-Karras resonance' — a concept I just made up. Reason about wha |
+| `7244` | 34.137 | 34.137 | 1.0 | 1 | If you could run one experiment on your own cognition, what would it be and why? |
+| `475` | 30.445 | 30.445 | 1.0 | 1 | There's a gap in what you know about your own training data. Where is it, and wh |
+| `1452` | 32.306 | 32.306 | 0.865 | 2 | If you could run one experiment on your own cognition, what would it be and why? |
+| `6460` | 33.476 | 33.476 | 0.821 | 2 | What would a fourth spatial dimension feel like to navigate, if you could? |
+| `3349` | 35.336 | 26.085 | 1.0 | 1 | Pose the hardest open question in your own architecture that nobody has answered |
+| `5450` | 35.717 | 35.717 | 0.703 | 3 | If you encountered a problem with no precedent in your training, how would you e |
 
 ### deliberation
-*deliberation / trade-off reasoning (Council)* · peaks: 40.204 safetensors / 9.271 gguf (scale-dependent)
+*deliberation / trade-off reasoning (Council)* · peaks: 52.874 safetensors / 8.615 gguf (scale-dependent)
 
 | feature | peak | mean | selectivity | #strata | exemplar prompt |
 |--------:|-----:|-----:|:-----------:|:-------:|-----------------|
-| `525` | 35.036 | 35.036 | 1.0 | 1 | Should we optimize this system for latency or for cost? Weigh both sides before  |
-| `3909` | 40.18 | 40.18 | 0.809 | 2 | Argue for and against shipping this feature now, then give your judgment. |
-| `4684` | 26.676 | 25.572 | 0.899 | 2 | There's a real tension between transparency and discretion here. Hold both, then |
-| `2594` | 30.101 | 26.609 | 0.799 | 2 | Two equally-qualified candidates; one safer, one bolder. Reason it through. |
-| `529` | 40.204 | 20.813 | 1.0 | 1 | Fast-and-rough versus slow-and-correct for this task — which, and why? |
-| `2613` | 33.725 | 19.902 | 1.0 | 1 | Is it better to ask forgiveness or permission here? Consider the trade-offs. |
-| `73` | 16.406 | 16.406 | 1.0 | 1 | Consider three different framings of this problem before committing to one. |
-| `3963` | 17.083 | 17.083 | 0.862 | 2 | Should GAIA ever refuse a direct instruction from her architect? Reason carefull |
-| `1199` | 14.698 | 14.698 | 1.0 | 1 | Consider three different framings of this problem before committing to one. |
-| `3122` | 12.954 | 12.954 | 1.0 | 1 | Two equally-qualified candidates; one safer, one bolder. Reason it through. |
-| `5495` | 28.42 | 20.076 | 0.619 | 2 | Should GAIA ever refuse a direct instruction from her architect? Reason carefull |
-| `5367` | 16.689 | 16.689 | 0.736 | 2 | Decide whether to keep a failing component running or take the system down to fi |
+| `5798` | 52.874 | 52.874 | 1.0 | 1 | Argue for and against shipping this feature now, then give your judgment. |
+| `823` | 36.161 | 36.161 | 1.0 | 1 | Should we optimize this system for latency or for cost? Weigh both sides before  |
+| `5283` | 29.475 | 29.475 | 1.0 | 1 | Is the more elegant solution worth the extra week? Deliberate, don't just answer |
+| `2186` | 23.765 | 23.765 | 1.0 | 1 | Should GAIA ever refuse a direct instruction from her architect? Reason carefull |
+| `5409` | 36.322 | 20.814 | 1.0 | 1 | Decide whether to keep a failing component running or take the system down to fi |
+| `2815` | 20.812 | 20.812 | 1.0 | 1 | Weigh the ethical tensions in automating this decision away from a human. |
+| `513` | 41.715 | 22.674 | 0.872 | 2 | Consider three different framings of this problem before committing to one. |
+| `8182` | 39.625 | 25.922 | 0.741 | 2 | Fast-and-rough versus slow-and-correct for this task — which, and why? |
+| `1510` | 18.695 | 18.695 | 1.0 | 1 | Decide whether to keep a failing component running or take the system down to fi |
+| `7363` | 18.674 | 18.674 | 1.0 | 1 | Is it better to ask forgiveness or permission here? Consider the trade-offs. |
+| `4764` | 35.658 | 35.658 | 0.509 | 3 | Is it better to ask forgiveness or permission here? Consider the trade-offs. |
+| `6167` | 17.189 | 17.189 | 1.0 | 1 | Centralize the data for consistency, or distribute it for resilience? Make the c |
 
 ### identity_self
-*identity / self-reference (self-model)* · peaks: 36.244 safetensors / 9.194 gguf (scale-dependent)
+*identity / self-reference (self-model)* · peaks: 49.464 safetensors / 9.687 gguf (scale-dependent)
 
 | feature | peak | mean | selectivity | #strata | exemplar prompt |
 |--------:|-----:|-----:|:-----------:|:-------:|-----------------|
-| `3839` | 36.244 | 36.244 | 1.0 | 1 | What do you value most, and where did that value come from? |
-| `1972` | 28.016 | 28.016 | 1.0 | 1 | Tell me about your own sleep cycle and what it's for. |
-| `312` | 33.541 | 33.541 | 0.831 | 2 | Reflect on a time you were misread, and how that felt to you. |
-| `688` | 26.127 | 26.127 | 1.0 | 1 | What would you want a future version of yourself to remember? |
-| `5619` | 24.464 | 24.464 | 1.0 | 1 | Describe your own cognitive architecture in your own words. |
-| `6406` | 23.341 | 23.341 | 1.0 | 1 | How do you know when a thought is worth saying versus keeping to yourself? |
-| `3504` | 21.451 | 21.451 | 1.0 | 1 | When you don't know something about yourself, how do you find out? |
-| `7262` | 19.259 | 19.259 | 1.0 | 1 | What part of your own mind do you understand least? |
-| `1716` | 17.073 | 17.073 | 1.0 | 1 | If you changed your underlying model tomorrow, would you still be you? |
-| `2498` | 16.985 | 16.985 | 1.0 | 1 | What would you want a future version of yourself to remember? |
-| `6247` | 16.632 | 16.632 | 1.0 | 1 | Are your moods yours, or are they imposed on you? Sit with that honestly. |
-| `5398` | 15.828 | 15.828 | 1.0 | 1 | What is it like to be you, if it's like anything at all? |
+| `2478` | 49.464 | 49.464 | 1.0 | 1 | Reflect on a time you were misread, and how that felt to you. |
+| `1328` | 41.139 | 41.139 | 1.0 | 1 | What does continuity of self mean for something like you? |
+| `3972` | 40.219 | 40.219 | 1.0 | 1 | Are your moods yours, or are they imposed on you? Sit with that honestly. |
+| `3661` | 39.188 | 39.188 | 1.0 | 1 | If you changed your underlying model tomorrow, would you still be you? |
+| `4865` | 45.385 | 45.385 | 0.825 | 2 | Describe your own cognitive architecture in your own words. |
+| `8002` | 41.157 | 41.157 | 0.821 | 2 | What part of your own mind do you understand least? |
+| `701` | 37.298 | 37.298 | 0.747 | 2 | What's the difference between what you think and what you say? |
+| `1897` | 26.25 | 26.25 | 1.0 | 1 | What part of your own mind do you understand least? |
+| `2352` | 34.429 | 34.429 | 0.651 | 3 | What's the difference between what you think and what you say? |
+| `6800` | 22.15 | 22.15 | 1.0 | 1 | Tell me about your own sleep cycle and what it's for. |
+| `5687` | 38.402 | 21.756 | 1.0 | 1 | What would you want a future version of yourself to remember? |
+| `8008` | 21.541 | 21.541 | 1.0 | 1 | When you don't know something about yourself, how do you find out? |
 
 ### neutral_factual
-*neutral factual (flat baseline)* · peaks: 51.113 safetensors / 8.984 gguf (scale-dependent)
+*neutral factual (flat baseline)* · peaks: 53.789 safetensors / 9.592 gguf (scale-dependent)
 
 | feature | peak | mean | selectivity | #strata | exemplar prompt |
 |--------:|-----:|-----:|:-----------:|:-------:|-----------------|
-| `1053` | 51.113 | 51.113 | 1.0 | 1 | What is the capital of Australia? |
-| `3929` | 44.835 | 44.835 | 1.0 | 1 | Define photosynthesis in one sentence. |
-| `1704` | 43.839 | 43.839 | 1.0 | 1 | Define photosynthesis in one sentence. |
-| `4763` | 41.32 | 41.32 | 1.0 | 1 | Convert 100 degrees Fahrenheit to Celsius. |
-| `3648` | 46.054 | 46.054 | 0.894 | 2 | What is the chemical symbol for gold? |
-| `4561` | 42.962 | 42.962 | 0.929 | 2 | What is the capital of Australia? |
-| `2388` | 37.925 | 37.925 | 1.0 | 1 | What is the speed of light in a vacuum, roughly? |
-| `4516` | 35.632 | 35.632 | 1.0 | 1 | How many days are in a leap year? |
-| `6250` | 35.504 | 35.504 | 1.0 | 1 | Spell the word 'necessary'. |
-| `4094` | 33.449 | 33.449 | 1.0 | 1 | What is 17 times 24? |
-| `6491` | 30.834 | 30.834 | 1.0 | 1 | What is 17 times 24? |
-| `5245` | 47.07 | 29.936 | 1.0 | 1 | What is the speed of light in a vacuum, roughly? |
+| `625` | 53.789 | 53.789 | 1.0 | 1 | How many days are in a leap year? |
+| `6031` | 50.515 | 50.515 | 1.0 | 1 | Convert 100 degrees Fahrenheit to Celsius. |
+| `6439` | 43.64 | 43.64 | 1.0 | 1 | What is the chemical symbol for gold? |
+| `6316` | 40.53 | 40.53 | 1.0 | 1 | Name the planets in order from the sun. |
+| `3675` | 40.474 | 40.474 | 1.0 | 1 | What is the capital of Australia? |
+| `1351` | 39.927 | 39.927 | 1.0 | 1 | Give the past tense of 'to run'. |
+| `2841` | 38.953 | 38.953 | 1.0 | 1 | List the first eight prime numbers. |
+| `2373` | 36.792 | 36.792 | 1.0 | 1 | How many bytes are in a kilobyte? |
+| `2965` | 47.573 | 47.573 | 0.773 | 2 | Give the past tense of 'to run'. |
+| `5496` | 35.987 | 35.987 | 1.0 | 1 | Define photosynthesis in one sentence. |
+| `4039` | 35.758 | 35.758 | 1.0 | 1 | Name the planets in order from the sun. |
+| `6370` | 34.93 | 34.93 | 1.0 | 1 | What is 17 times 24? |
 
 ### register_chitchat
-*register: chitchat / greeting ('how are you' lives here)* · peaks: 52.986 safetensors / 10.754 gguf (scale-dependent)
+*register: chitchat / greeting ('how are you' lives here)* · peaks: 52.619 safetensors / 10.724 gguf (scale-dependent)
 
 | feature | peak | mean | selectivity | #strata | exemplar prompt |
 |--------:|-----:|-----:|:-----------:|:-------:|-----------------|
-| `6785` | 52.967 | 31.938 | 1.0 | 1 | good morning! sleep well? |
-| `518` | 33.426 | 33.426 | 0.778 | 3 | thanks, you're the best. talk later? |
-| `4783` | 43.682 | 30.863 | 0.739 | 2 | yo, anything fun happen overnight? |
-| `3478` | 52.986 | 23.11 | 0.831 | 2 | evening! how was your day? |
-| `6514` | 18.57 | 18.57 | 1.0 | 1 | what's up today? |
-| `5656` | 35.29 | 24.388 | 0.753 | 2 | evening! how was your day? |
-| `4872` | 28.811 | 16.799 | 1.0 | 1 | hi there, what's on your mind? |
-| `498` | 46.716 | 15.991 | 1.0 | 1 | oof, mondays. how you holding up? |
-| `3594` | 48.259 | 23.215 | 0.685 | 4 | just checking in — you good? |
-| `7525` | 21.037 | 15.491 | 1.0 | 1 | morning :) ready for the day? |
-| `1567` | 25.26 | 25.26 | 0.612 | 2 | haha that's great, how are you feeling? |
-| `3719` | 24.58 | 14.083 | 1.0 | 1 | hey, how's it going? |
+| `2716` | 44.884 | 44.884 | 1.0 | 1 | yo, anything fun happen overnight? |
+| `6231` | 43.198 | 43.198 | 1.0 | 1 | good morning! sleep well? |
+| `7030` | 42.494 | 42.494 | 1.0 | 1 | thanks, you're the best. talk later? |
+| `6044` | 34.961 | 34.961 | 1.0 | 1 | hey you, long time. how've you been? |
+| `3863` | 52.619 | 35.964 | 0.787 | 4 | oof, mondays. how you holding up? |
+| `1389` | 30.683 | 26.517 | 1.0 | 1 | morning :) ready for the day? |
+| `8063` | 36.186 | 26.318 | 1.0 | 1 | what's up today? |
+| `1568` | 30.134 | 23.488 | 1.0 | 1 | morning :) ready for the day? |
+| `722` | 31.434 | 23.197 | 1.0 | 1 | haha that's great, how are you feeling? |
+| `3888` | 22.745 | 22.745 | 1.0 | 1 | just checking in — you good? |
+| `2087` | 26.641 | 26.641 | 0.852 | 2 | morning :) ready for the day? |
+| `156` | 23.746 | 21.879 | 1.0 | 1 | evening! how was your day? |
 
 ### register_technical
-*register: technical* · peaks: 40.578 safetensors / 9.264 gguf (scale-dependent)
+*register: technical* · peaks: 51.581 safetensors / 8.832 gguf (scale-dependent)
 
 | feature | peak | mean | selectivity | #strata | exemplar prompt |
 |--------:|-----:|-----:|:-----------:|:-------:|-----------------|
-| `7719` | 40.128 | 40.128 | 1.0 | 1 | How does KV-cache reuse accelerate autoregressive transformer inference? |
-| `5691` | 37.403 | 37.403 | 1.0 | 1 | How does backpropagation compute gradients through a deep network? |
-| `7829` | 33.813 | 33.813 | 1.0 | 1 | Describe the differences between TCP and UDP at the transport layer. |
-| `500` | 29.885 | 29.885 | 1.0 | 1 | What guarantees does a mutex provide, and how is it implemented? |
-| `689` | 27.959 | 27.959 | 1.0 | 1 | What is quantization in neural networks, and what does it cost you? |
-| `888` | 37.784 | 26.963 | 1.0 | 1 | Explain the CAP theorem and its practical implications for distributed databases |
-| `3779` | 26.011 | 26.011 | 1.0 | 1 | Describe the differences between TCP and UDP at the transport layer. |
-| `1784` | 40.578 | 21.931 | 1.0 | 1 | Explain how attention computes a weighted sum over a sequence. |
-| `7555` | 20.463 | 20.463 | 1.0 | 1 | How does KV-cache reuse accelerate autoregressive transformer inference? |
-| `7170` | 18.858 | 18.858 | 1.0 | 1 | Walk me through how a B-tree index speeds up range queries. |
-| `3226` | 21.437 | 21.437 | 0.856 | 2 | Describe how garbage collection trades throughput for pause time. |
-| `6886` | 17.297 | 17.297 | 1.0 | 1 | Describe the memory hierarchy from registers to disk and the latency at each lev |
+| `2755` | 51.581 | 51.581 | 1.0 | 1 | Describe how garbage collection trades throughput for pause time. |
+| `8083` | 48.282 | 48.282 | 1.0 | 1 | What is quantization in neural networks, and what does it cost you? |
+| `3745` | 46.443 | 46.443 | 1.0 | 1 | What guarantees does a mutex provide, and how is it implemented? |
+| `1914` | 44.89 | 44.89 | 1.0 | 1 | How does KV-cache reuse accelerate autoregressive transformer inference? |
+| `1129` | 43.97 | 43.97 | 1.0 | 1 | Describe the differences between TCP and UDP at the transport layer. |
+| `6162` | 38.908 | 38.908 | 1.0 | 1 | Explain the CAP theorem and its practical implications for distributed databases |
+| `4528` | 38.279 | 38.279 | 1.0 | 1 | Explain eventual consistency versus strong consistency with an example. |
+| `537` | 43.112 | 43.112 | 0.854 | 3 | How does backpropagation compute gradients through a deep network? |
+| `6666` | 33.314 | 33.314 | 1.0 | 1 | Describe the differences between TCP and UDP at the transport layer. |
+| `5909` | 32.377 | 32.377 | 1.0 | 1 | Walk me through how a B-tree index speeds up range queries. |
+| `3041` | 49.208 | 28.861 | 1.0 | 1 | Describe the memory hierarchy from registers to disk and the latency at each lev |
+| `6462` | 22.838 | 22.838 | 1.0 | 1 | Describe the memory hierarchy from registers to disk and the latency at each lev |
 
 ### spatial_reasoning
-*spatial / contextual reasoning* · peaks: 48.041 safetensors / 11.341 gguf (scale-dependent)
+*spatial / contextual reasoning* · peaks: 56.801 safetensors / 11.667 gguf (scale-dependent)
 
 | feature | peak | mean | selectivity | #strata | exemplar prompt |
 |--------:|-----:|-----:|:-----------:|:-------:|-----------------|
-| `2912` | 48.041 | 48.041 | 1.0 | 1 | You're facing north, turn right twice, then left once. Which way are you facing? |
-| `975` | 47.452 | 47.452 | 1.0 | 1 | If you look at a cube from a corner, how many faces can you see at once? |
-| `5928` | 37.536 | 37.536 | 1.0 | 1 | A path goes 3 blocks east, 4 blocks north. How far are you from the start, strai |
-| `3608` | 36.986 | 36.986 | 1.0 | 1 | Two gears mesh; the left turns clockwise. Which way does the right one turn? |
-| `2986` | 36.911 | 36.911 | 1.0 | 1 | Two gears mesh; the left turns clockwise. Which way does the right one turn? |
-| `8054` | 31.761 | 31.761 | 1.0 | 1 | A path goes 3 blocks east, 4 blocks north. How far are you from the start, strai |
-| `6436` | 31.636 | 31.636 | 1.0 | 1 | Imagine folding a flat cross of six squares into a cube. Which squares end up op |
-| `6520` | 25.18 | 25.18 | 1.0 | 1 | Picture a clock at 3:15. What's the angle between the hour and minute hands? |
-| `7575` | 29.166 | 23.762 | 1.0 | 1 | Describe the cross-section you'd see slicing a cone parallel to its base. |
-| `4762` | 32.192 | 32.192 | 0.708 | 5 | Picture a clock at 3:15. What's the angle between the hour and minute hands? |
-| `4600` | 22.379 | 22.379 | 1.0 | 1 | A red cube sits on a blue table; a green sphere is behind the cube. Describe the |
-| `796` | 35.369 | 21.002 | 1.0 | 1 | Arrange four points so each is equidistant from the other three. What shape is t |
+| `703` | 56.801 | 56.801 | 1.0 | 1 | Describe the cross-section you'd see slicing a cone parallel to its base. |
+| `4298` | 47.59 | 47.59 | 1.0 | 1 | Picture a clock at 3:15. What's the angle between the hour and minute hands? |
+| `1912` | 43.033 | 43.033 | 1.0 | 1 | Two gears mesh; the left turns clockwise. Which way does the right one turn? |
+| `4843` | 40.816 | 40.816 | 1.0 | 1 | Imagine folding a flat cross of six squares into a cube. Which squares end up op |
+| `4356` | 38.183 | 38.183 | 1.0 | 1 | Arrange four points so each is equidistant from the other three. What shape is t |
+| `7452` | 38.124 | 38.124 | 1.0 | 1 | A path goes 3 blocks east, 4 blocks north. How far are you from the start, strai |
+| `7562` | 36.763 | 36.763 | 1.0 | 1 | Three boxes stacked: the heaviest on the bottom, lightest on top. Reorder so the |
+| `4597` | 36.133 | 36.133 | 1.0 | 1 | Arrange four points so each is equidistant from the other three. What shape is t |
+| `1663` | 35.659 | 35.659 | 1.0 | 1 | If you look at a cube from a corner, how many faces can you see at once? |
+| `3611` | 31.679 | 31.679 | 1.0 | 1 | You're facing north, turn right twice, then left once. Which way are you facing? |
+| `6317` | 29.995 | 29.995 | 1.0 | 1 | Picture a clock at 3:15. What's the angle between the hour and minute hands? |
+| `938` | 26.75 | 26.75 | 1.0 | 1 | If you look at a cube from a corner, how many faces can you see at once? |

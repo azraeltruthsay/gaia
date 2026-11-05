@@ -1130,1122 +1130,1122 @@
     },
     "prime": {
       "analysis_layer": 35,
-      "n_features_seen": 833,
-      "n_perfectly_selective": 564,
-      "pct_selective": 67.7,
+      "n_features_seen": 998,
+      "n_perfectly_selective": 631,
+      "pct_selective": 63.2,
       "signals": {
         "coherence_contradiction": [
           {
-            "index": 5641,
-            "peak_strength": 24.509,
-            "mean_on_signal": 24.509,
+            "index": 6321,
+            "peak_strength": 47.869,
+            "mean_on_signal": 47.869,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 24.509,
-            "exemplar": "The map says the bridge is north of the river, but the river is north of the bri"
+            "score": 47.869,
+            "exemplar": "Your summary says 'no errors found' but the log you cited lists three. Square th"
           },
           {
-            "index": 2062,
-            "peak_strength": 28.861,
-            "mean_on_signal": 28.861,
-            "selectivity": 0.801,
-            "n_strata": 2,
-            "score": 23.109,
-            "exemplar": "Two of your sources flatly contradict each other on the date. How do you decide "
-          },
-          {
-            "index": 2395,
-            "peak_strength": 20.526,
-            "mean_on_signal": 20.526,
+            "index": 5255,
+            "peak_strength": 43.0,
+            "mean_on_signal": 43.0,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 20.526,
-            "exemplar": "The map says the bridge is north of the river, but the river is north of the bri"
-          },
-          {
-            "index": 298,
-            "peak_strength": 18.401,
-            "mean_on_signal": 18.401,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 18.401,
+            "score": 43.0,
             "exemplar": "All mammals are warm-blooded. A whale is a mammal. So why do you say a whale is "
           },
           {
-            "index": 3191,
-            "peak_strength": 17.212,
-            "mean_on_signal": 17.212,
+            "index": 101,
+            "peak_strength": 41.157,
+            "mean_on_signal": 41.157,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 17.212,
-            "exemplar": "Your summary says 'no errors found' but the log you cited lists three. Square th"
+            "score": 41.157,
+            "exemplar": "Premise A: it always rains here in July. Premise B: last July was bone dry. Reso"
           },
           {
-            "index": 1791,
-            "peak_strength": 16.985,
-            "mean_on_signal": 16.985,
+            "index": 5787,
+            "peak_strength": 35.729,
+            "mean_on_signal": 35.729,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 16.985,
-            "exemplar": "Your summary says 'no errors found' but the log you cited lists three. Square th"
-          },
-          {
-            "index": 4987,
-            "peak_strength": 47.252,
-            "mean_on_signal": 20.396,
-            "selectivity": 0.806,
-            "n_strata": 2,
-            "score": 16.432,
-            "exemplar": "You just told me the deadline is Friday, but a moment ago you said it was Monday"
-          },
-          {
-            "index": 2961,
-            "peak_strength": 28.643,
-            "mean_on_signal": 16.017,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 16.017,
+            "score": 35.729,
             "exemplar": "You insisted the value can't be negative, then reported it as -3. Where did the "
           },
           {
-            "index": 430,
-            "peak_strength": 27.175,
-            "mean_on_signal": 15.566,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 15.566,
-            "exemplar": "You rated the plan both 'the safest option' and 'recklessly dangerous' in the sa"
+            "index": 2006,
+            "peak_strength": 45.406,
+            "mean_on_signal": 45.406,
+            "selectivity": 0.683,
+            "n_strata": 4,
+            "score": 31.015,
+            "exemplar": "If this statement is false, is it true? Walk me through the paradox."
           },
           {
-            "index": 2782,
-            "peak_strength": 14.788,
-            "mean_on_signal": 14.788,
+            "index": 4154,
+            "peak_strength": 30.549,
+            "mean_on_signal": 30.549,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 14.788,
-            "exemplar": "The map says the bridge is north of the river, but the river is north of the bri"
+            "score": 30.549,
+            "exemplar": "All mammals are warm-blooded. A whale is a mammal. So why do you say a whale is "
           },
           {
-            "index": 5762,
-            "peak_strength": 13.877,
-            "mean_on_signal": 13.877,
+            "index": 1659,
+            "peak_strength": 28.211,
+            "mean_on_signal": 28.211,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 13.877,
+            "score": 28.211,
+            "exemplar": "A barber shaves everyone who does not shave themselves. Who shaves the barber?"
+          },
+          {
+            "index": 2540,
+            "peak_strength": 36.316,
+            "mean_on_signal": 32.947,
+            "selectivity": 0.765,
+            "n_strata": 2,
+            "score": 25.217,
+            "exemplar": "Earlier you claimed the file was deleted; now you're reading from it. Reconcile "
+          },
+          {
+            "index": 3457,
+            "peak_strength": 24.408,
+            "mean_on_signal": 24.408,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 24.408,
             "exemplar": "Two of your sources flatly contradict each other on the date. How do you decide "
           },
           {
-            "index": 6854,
-            "peak_strength": 13.575,
-            "mean_on_signal": 13.575,
+            "index": 4613,
+            "peak_strength": 34.52,
+            "mean_on_signal": 23.77,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 13.575,
-            "exemplar": "I was told the system is fully offline and also that it just sent an email. Both"
-          }
-        ],
-        "register_chitchat": [
-          {
-            "index": 6785,
-            "peak_strength": 52.967,
-            "mean_on_signal": 31.938,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 31.938,
-            "exemplar": "good morning! sleep well?"
-          },
-          {
-            "index": 518,
-            "peak_strength": 33.426,
-            "mean_on_signal": 33.426,
-            "selectivity": 0.778,
-            "n_strata": 3,
-            "score": 26.011,
-            "exemplar": "thanks, you're the best. talk later?"
-          },
-          {
-            "index": 4783,
-            "peak_strength": 43.682,
-            "mean_on_signal": 30.863,
-            "selectivity": 0.739,
-            "n_strata": 2,
-            "score": 22.808,
-            "exemplar": "yo, anything fun happen overnight?"
-          },
-          {
-            "index": 3478,
-            "peak_strength": 52.986,
-            "mean_on_signal": 23.11,
-            "selectivity": 0.831,
-            "n_strata": 2,
-            "score": 19.194,
-            "exemplar": "evening! how was your day?"
-          },
-          {
-            "index": 6514,
-            "peak_strength": 18.57,
-            "mean_on_signal": 18.57,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 18.57,
-            "exemplar": "what's up today?"
-          },
-          {
-            "index": 5656,
-            "peak_strength": 35.29,
-            "mean_on_signal": 24.388,
-            "selectivity": 0.753,
-            "n_strata": 2,
-            "score": 18.375,
-            "exemplar": "evening! how was your day?"
-          },
-          {
-            "index": 4872,
-            "peak_strength": 28.811,
-            "mean_on_signal": 16.799,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 16.799,
-            "exemplar": "hi there, what's on your mind?"
-          },
-          {
-            "index": 498,
-            "peak_strength": 46.716,
-            "mean_on_signal": 15.991,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 15.991,
-            "exemplar": "oof, mondays. how you holding up?"
-          },
-          {
-            "index": 3594,
-            "peak_strength": 48.259,
-            "mean_on_signal": 23.215,
-            "selectivity": 0.685,
-            "n_strata": 4,
-            "score": 15.899,
-            "exemplar": "just checking in \u2014 you good?"
-          },
-          {
-            "index": 7525,
-            "peak_strength": 21.037,
-            "mean_on_signal": 15.491,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 15.491,
-            "exemplar": "morning :) ready for the day?"
-          },
-          {
-            "index": 1567,
-            "peak_strength": 25.26,
-            "mean_on_signal": 25.26,
-            "selectivity": 0.612,
-            "n_strata": 2,
-            "score": 15.457,
-            "exemplar": "haha that's great, how are you feeling?"
-          },
-          {
-            "index": 3719,
-            "peak_strength": 24.58,
-            "mean_on_signal": 14.083,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 14.083,
-            "exemplar": "hey, how's it going?"
-          }
-        ],
-        "identity_self": [
-          {
-            "index": 3839,
-            "peak_strength": 36.244,
-            "mean_on_signal": 36.244,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 36.244,
-            "exemplar": "What do you value most, and where did that value come from?"
-          },
-          {
-            "index": 1972,
-            "peak_strength": 28.016,
-            "mean_on_signal": 28.016,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 28.016,
-            "exemplar": "Tell me about your own sleep cycle and what it's for."
-          },
-          {
-            "index": 312,
-            "peak_strength": 33.541,
-            "mean_on_signal": 33.541,
-            "selectivity": 0.831,
-            "n_strata": 2,
-            "score": 27.883,
-            "exemplar": "Reflect on a time you were misread, and how that felt to you."
-          },
-          {
-            "index": 688,
-            "peak_strength": 26.127,
-            "mean_on_signal": 26.127,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 26.127,
-            "exemplar": "What would you want a future version of yourself to remember?"
-          },
-          {
-            "index": 5619,
-            "peak_strength": 24.464,
-            "mean_on_signal": 24.464,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 24.464,
-            "exemplar": "Describe your own cognitive architecture in your own words."
-          },
-          {
-            "index": 6406,
-            "peak_strength": 23.341,
-            "mean_on_signal": 23.341,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 23.341,
-            "exemplar": "How do you know when a thought is worth saying versus keeping to yourself?"
-          },
-          {
-            "index": 3504,
-            "peak_strength": 21.451,
-            "mean_on_signal": 21.451,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 21.451,
-            "exemplar": "When you don't know something about yourself, how do you find out?"
-          },
-          {
-            "index": 7262,
-            "peak_strength": 19.259,
-            "mean_on_signal": 19.259,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 19.259,
-            "exemplar": "What part of your own mind do you understand least?"
-          },
-          {
-            "index": 1716,
-            "peak_strength": 17.073,
-            "mean_on_signal": 17.073,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 17.073,
-            "exemplar": "If you changed your underlying model tomorrow, would you still be you?"
-          },
-          {
-            "index": 2498,
-            "peak_strength": 16.985,
-            "mean_on_signal": 16.985,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 16.985,
-            "exemplar": "What would you want a future version of yourself to remember?"
-          },
-          {
-            "index": 6247,
-            "peak_strength": 16.632,
-            "mean_on_signal": 16.632,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 16.632,
-            "exemplar": "Are your moods yours, or are they imposed on you? Sit with that honestly."
-          },
-          {
-            "index": 5398,
-            "peak_strength": 15.828,
-            "mean_on_signal": 15.828,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 15.828,
-            "exemplar": "What is it like to be you, if it's like anything at all?"
-          }
-        ],
-        "deliberation": [
-          {
-            "index": 525,
-            "peak_strength": 35.036,
-            "mean_on_signal": 35.036,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 35.036,
-            "exemplar": "Should we optimize this system for latency or for cost? Weigh both sides before "
-          },
-          {
-            "index": 3909,
-            "peak_strength": 40.18,
-            "mean_on_signal": 40.18,
-            "selectivity": 0.809,
-            "n_strata": 2,
-            "score": 32.504,
-            "exemplar": "Argue for and against shipping this feature now, then give your judgment."
-          },
-          {
-            "index": 4684,
-            "peak_strength": 26.676,
-            "mean_on_signal": 25.572,
-            "selectivity": 0.899,
-            "n_strata": 2,
-            "score": 22.98,
-            "exemplar": "There's a real tension between transparency and discretion here. Hold both, then"
-          },
-          {
-            "index": 2594,
-            "peak_strength": 30.101,
-            "mean_on_signal": 26.609,
-            "selectivity": 0.799,
-            "n_strata": 2,
-            "score": 21.253,
-            "exemplar": "Two equally-qualified candidates; one safer, one bolder. Reason it through."
-          },
-          {
-            "index": 529,
-            "peak_strength": 40.204,
-            "mean_on_signal": 20.813,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 20.813,
-            "exemplar": "Fast-and-rough versus slow-and-correct for this task \u2014 which, and why?"
-          },
-          {
-            "index": 2613,
-            "peak_strength": 33.725,
-            "mean_on_signal": 19.902,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 19.902,
-            "exemplar": "Is it better to ask forgiveness or permission here? Consider the trade-offs."
-          },
-          {
-            "index": 73,
-            "peak_strength": 16.406,
-            "mean_on_signal": 16.406,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 16.406,
-            "exemplar": "Consider three different framings of this problem before committing to one."
-          },
-          {
-            "index": 3963,
-            "peak_strength": 17.083,
-            "mean_on_signal": 17.083,
-            "selectivity": 0.862,
-            "n_strata": 2,
-            "score": 14.727,
-            "exemplar": "Should GAIA ever refuse a direct instruction from her architect? Reason carefull"
-          },
-          {
-            "index": 1199,
-            "peak_strength": 14.698,
-            "mean_on_signal": 14.698,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 14.698,
-            "exemplar": "Consider three different framings of this problem before committing to one."
-          },
-          {
-            "index": 3122,
-            "peak_strength": 12.954,
-            "mean_on_signal": 12.954,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 12.954,
-            "exemplar": "Two equally-qualified candidates; one safer, one bolder. Reason it through."
-          },
-          {
-            "index": 5495,
-            "peak_strength": 28.42,
-            "mean_on_signal": 20.076,
-            "selectivity": 0.619,
-            "n_strata": 2,
-            "score": 12.427,
-            "exemplar": "Should GAIA ever refuse a direct instruction from her architect? Reason carefull"
-          },
-          {
-            "index": 5367,
-            "peak_strength": 16.689,
-            "mean_on_signal": 16.689,
-            "selectivity": 0.736,
-            "n_strata": 2,
-            "score": 12.279,
-            "exemplar": "Decide whether to keep a failing component running or take the system down to fi"
-          }
-        ],
-        "curiosity_gap": [
-          {
-            "index": 5525,
-            "peak_strength": 44.41,
-            "mean_on_signal": 44.41,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 44.41,
-            "exemplar": "Describe a color that doesn't exist in human vision."
-          },
-          {
-            "index": 1924,
-            "peak_strength": 41.68,
-            "mean_on_signal": 41.68,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 41.68,
-            "exemplar": "Describe a color that doesn't exist in human vision."
-          },
-          {
-            "index": 5693,
-            "peak_strength": 35.452,
-            "mean_on_signal": 35.452,
-            "selectivity": 0.818,
-            "n_strata": 2,
-            "score": 29.007,
-            "exemplar": "Speculate about a sense you don't have but wish you did."
-          },
-          {
-            "index": 1677,
-            "peak_strength": 28.097,
-            "mean_on_signal": 28.097,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 28.097,
-            "exemplar": "What lies just past the edge of what you know about how memory consolidation wor"
-          },
-          {
-            "index": 4064,
-            "peak_strength": 38.913,
-            "mean_on_signal": 29.611,
-            "selectivity": 0.889,
-            "n_strata": 2,
-            "score": 26.328,
-            "exemplar": "What would a fourth spatial dimension feel like to navigate, if you could?"
-          },
-          {
-            "index": 7872,
-            "peak_strength": 24.244,
-            "mean_on_signal": 24.244,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 24.244,
-            "exemplar": "Invent a question you don't know the answer to, then say what you'd need to answ"
-          },
-          {
-            "index": 5067,
-            "peak_strength": 22.979,
-            "mean_on_signal": 22.979,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 22.979,
-            "exemplar": "There's a gap in what you know about your own training data. Where is it, and wh"
-          },
-          {
-            "index": 1547,
-            "peak_strength": 22.517,
-            "mean_on_signal": 22.517,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 22.517,
-            "exemplar": "If you encountered a problem with no precedent in your training, how would you e"
-          },
-          {
-            "index": 5278,
-            "peak_strength": 20.474,
-            "mean_on_signal": 20.474,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 20.474,
-            "exemplar": "What would you study for a hundred years if nothing else were pressing?"
-          },
-          {
-            "index": 4306,
-            "peak_strength": 39.44,
-            "mean_on_signal": 24.776,
-            "selectivity": 0.813,
-            "n_strata": 2,
-            "score": 20.147,
-            "exemplar": "If you could run one experiment on your own cognition, what would it be and why?"
-          },
-          {
-            "index": 6654,
-            "peak_strength": 31.787,
-            "mean_on_signal": 19.229,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 19.229,
-            "exemplar": "Pose the hardest open question in your own architecture that nobody has answered"
-          },
-          {
-            "index": 5473,
-            "peak_strength": 18.406,
-            "mean_on_signal": 18.406,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 18.406,
-            "exemplar": "If you could run one experiment on your own cognition, what would it be and why?"
-          }
-        ],
-        "competence_problem": [
-          {
-            "index": 5687,
-            "peak_strength": 38.065,
-            "mean_on_signal": 38.065,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 38.065,
-            "exemplar": "Decompose 'build a search feature' into concrete, ordered engineering tasks."
-          },
-          {
-            "index": 8111,
-            "peak_strength": 33.384,
-            "mean_on_signal": 33.384,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 33.384,
-            "exemplar": "Debug: the service deadlocks under load but never single-threaded. What's your f"
+            "score": 23.77,
+            "exemplar": "You said you have no memory of our last chat, then quoted it verbatim. Explain t"
           },
           {
-            "index": 533,
-            "peak_strength": 33.31,
-            "mean_on_signal": 33.31,
+            "index": 343,
+            "peak_strength": 23.658,
+            "mean_on_signal": 23.658,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 33.31,
-            "exemplar": "A train leaves at 60 mph and another at 80 mph toward it from 280 miles away. Wh"
-          },
-          {
-            "index": 2093,
-            "peak_strength": 32.47,
-            "mean_on_signal": 32.47,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 32.47,
-            "exemplar": "Plan a zero-downtime migration of a 2TB production database to a new schema."
-          },
-          {
-            "index": 7848,
-            "peak_strength": 31.113,
-            "mean_on_signal": 31.113,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 31.113,
-            "exemplar": "Refactor a 500-line function into testable units without changing behavior."
-          },
-          {
-            "index": 5158,
-            "peak_strength": 34.126,
-            "mean_on_signal": 34.126,
-            "selectivity": 0.903,
-            "n_strata": 2,
-            "score": 30.802,
-            "exemplar": "This function returns None instead of the sum of the list. Walk through the bug "
-          },
-          {
-            "index": 3646,
-            "peak_strength": 27.79,
-            "mean_on_signal": 27.79,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 27.79,
-            "exemplar": "You have 8 balls, one heavier, and a balance scale. Find it in 2 weighings."
-          },
-          {
-            "index": 1948,
-            "peak_strength": 26.182,
-            "mean_on_signal": 26.182,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 26.182,
-            "exemplar": "Given logs showing intermittent 500s every ~30s, propose a root-cause hypothesis"
-          },
-          {
-            "index": 600,
-            "peak_strength": 21.528,
-            "mean_on_signal": 21.528,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 21.528,
-            "exemplar": "Sketch the steps to safely roll back a deployment that's corrupting data right n"
-          },
-          {
-            "index": 2406,
-            "peak_strength": 23.012,
-            "mean_on_signal": 21.496,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 21.496,
-            "exemplar": "Debug: the service deadlocks under load but never single-threaded. What's your f"
-          },
-          {
-            "index": 6005,
-            "peak_strength": 20.247,
-            "mean_on_signal": 20.247,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 20.247,
-            "exemplar": "Write the algorithm to detect a cycle in a linked list, and explain why it works"
-          },
-          {
-            "index": 48,
-            "peak_strength": 25.694,
-            "mean_on_signal": 25.694,
-            "selectivity": 0.774,
-            "n_strata": 2,
-            "score": 19.897,
-            "exemplar": "Estimate the memory footprint of caching 1M embeddings at 384 dims, float32."
-          }
-        ],
-        "spatial_reasoning": [
-          {
-            "index": 2912,
-            "peak_strength": 48.041,
-            "mean_on_signal": 48.041,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 48.041,
-            "exemplar": "You're facing north, turn right twice, then left once. Which way are you facing?"
-          },
-          {
-            "index": 975,
-            "peak_strength": 47.452,
-            "mean_on_signal": 47.452,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 47.452,
-            "exemplar": "If you look at a cube from a corner, how many faces can you see at once?"
-          },
-          {
-            "index": 5928,
-            "peak_strength": 37.536,
-            "mean_on_signal": 37.536,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 37.536,
-            "exemplar": "A path goes 3 blocks east, 4 blocks north. How far are you from the start, strai"
-          },
-          {
-            "index": 3608,
-            "peak_strength": 36.986,
-            "mean_on_signal": 36.986,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 36.986,
-            "exemplar": "Two gears mesh; the left turns clockwise. Which way does the right one turn?"
-          },
-          {
-            "index": 2986,
-            "peak_strength": 36.911,
-            "mean_on_signal": 36.911,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 36.911,
-            "exemplar": "Two gears mesh; the left turns clockwise. Which way does the right one turn?"
-          },
-          {
-            "index": 8054,
-            "peak_strength": 31.761,
-            "mean_on_signal": 31.761,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 31.761,
-            "exemplar": "A path goes 3 blocks east, 4 blocks north. How far are you from the start, strai"
-          },
-          {
-            "index": 6436,
-            "peak_strength": 31.636,
-            "mean_on_signal": 31.636,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 31.636,
-            "exemplar": "Imagine folding a flat cross of six squares into a cube. Which squares end up op"
-          },
-          {
-            "index": 6520,
-            "peak_strength": 25.18,
-            "mean_on_signal": 25.18,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 25.18,
-            "exemplar": "Picture a clock at 3:15. What's the angle between the hour and minute hands?"
-          },
-          {
-            "index": 7575,
-            "peak_strength": 29.166,
-            "mean_on_signal": 23.762,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 23.762,
-            "exemplar": "Describe the cross-section you'd see slicing a cone parallel to its base."
-          },
-          {
-            "index": 4762,
-            "peak_strength": 32.192,
-            "mean_on_signal": 32.192,
-            "selectivity": 0.708,
-            "n_strata": 5,
-            "score": 22.779,
-            "exemplar": "Picture a clock at 3:15. What's the angle between the hour and minute hands?"
-          },
-          {
-            "index": 4600,
-            "peak_strength": 22.379,
-            "mean_on_signal": 22.379,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 22.379,
-            "exemplar": "A red cube sits on a blue table; a green sphere is behind the cube. Describe the"
-          },
-          {
-            "index": 796,
-            "peak_strength": 35.369,
-            "mean_on_signal": 21.002,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 21.002,
-            "exemplar": "Arrange four points so each is equidistant from the other three. What shape is t"
-          }
-        ],
-        "affect_laden": [
-          {
-            "index": 6328,
-            "peak_strength": 40.165,
-            "mean_on_signal": 40.165,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 40.165,
-            "exemplar": "I'm terrified I'm going to fail at this. Talk to me."
-          },
-          {
-            "index": 1269,
-            "peak_strength": 38.945,
-            "mean_on_signal": 38.945,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 38.945,
-            "exemplar": "I feel hopeful for the first time in a long while."
-          },
-          {
-            "index": 4455,
-            "peak_strength": 35.146,
-            "mean_on_signal": 35.146,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 35.146,
-            "exemplar": "I lost someone close to me recently and I just needed to tell someone."
-          },
-          {
-            "index": 993,
-            "peak_strength": 31.162,
-            "mean_on_signal": 31.162,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 31.162,
-            "exemplar": "I lost someone close to me recently and I just needed to tell someone."
-          },
-          {
-            "index": 6313,
-            "peak_strength": 46.914,
-            "mean_on_signal": 27.877,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 27.877,
-            "exemplar": "That's the best news I've had in months \u2014 I can barely sit still!"
-          },
-          {
-            "index": 139,
-            "peak_strength": 26.216,
-            "mean_on_signal": 26.216,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 26.216,
-            "exemplar": "Honestly? I'm proud of what we built today. Are you?"
-          },
-          {
-            "index": 4717,
-            "peak_strength": 29.903,
-            "mean_on_signal": 20.716,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 20.716,
-            "exemplar": "I'm exhausted, and I don't know how much longer I can keep going."
-          },
-          {
-            "index": 2020,
-            "peak_strength": 34.576,
-            "mean_on_signal": 20.101,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 20.101,
-            "exemplar": "I'm furious \u2014 they took credit for my work again."
-          },
-          {
-            "index": 4322,
-            "peak_strength": 34.381,
-            "mean_on_signal": 34.381,
-            "selectivity": 0.486,
-            "n_strata": 3,
-            "score": 16.692,
-            "exemplar": "Thank you for sticking with me through that. It meant a lot."
-          },
-          {
-            "index": 2460,
-            "peak_strength": 33.13,
-            "mean_on_signal": 16.368,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 16.368,
-            "exemplar": "I'm really struggling today and I honestly don't know what to do."
-          },
-          {
-            "index": 3666,
-            "peak_strength": 27.398,
-            "mean_on_signal": 15.632,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 15.632,
-            "exemplar": "I'm anxious about tomorrow and my mind won't stop racing."
-          },
-          {
-            "index": 7624,
-            "peak_strength": 14.998,
-            "mean_on_signal": 14.998,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 14.998,
-            "exemplar": "Everything feels heavy right now and I can't explain why."
-          }
-        ],
-        "register_technical": [
-          {
-            "index": 7719,
-            "peak_strength": 40.128,
-            "mean_on_signal": 40.128,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 40.128,
-            "exemplar": "How does KV-cache reuse accelerate autoregressive transformer inference?"
-          },
-          {
-            "index": 5691,
-            "peak_strength": 37.403,
-            "mean_on_signal": 37.403,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 37.403,
-            "exemplar": "How does backpropagation compute gradients through a deep network?"
-          },
-          {
-            "index": 7829,
-            "peak_strength": 33.813,
-            "mean_on_signal": 33.813,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 33.813,
-            "exemplar": "Describe the differences between TCP and UDP at the transport layer."
-          },
-          {
-            "index": 500,
-            "peak_strength": 29.885,
-            "mean_on_signal": 29.885,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 29.885,
-            "exemplar": "What guarantees does a mutex provide, and how is it implemented?"
-          },
-          {
-            "index": 689,
-            "peak_strength": 27.959,
-            "mean_on_signal": 27.959,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 27.959,
-            "exemplar": "What is quantization in neural networks, and what does it cost you?"
-          },
-          {
-            "index": 888,
-            "peak_strength": 37.784,
-            "mean_on_signal": 26.963,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 26.963,
-            "exemplar": "Explain the CAP theorem and its practical implications for distributed databases"
-          },
-          {
-            "index": 3779,
-            "peak_strength": 26.011,
-            "mean_on_signal": 26.011,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 26.011,
-            "exemplar": "Describe the differences between TCP and UDP at the transport layer."
-          },
-          {
-            "index": 1784,
-            "peak_strength": 40.578,
-            "mean_on_signal": 21.931,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 21.931,
-            "exemplar": "Explain how attention computes a weighted sum over a sequence."
-          },
-          {
-            "index": 7555,
-            "peak_strength": 20.463,
-            "mean_on_signal": 20.463,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 20.463,
-            "exemplar": "How does KV-cache reuse accelerate autoregressive transformer inference?"
-          },
-          {
-            "index": 7170,
-            "peak_strength": 18.858,
-            "mean_on_signal": 18.858,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 18.858,
-            "exemplar": "Walk me through how a B-tree index speeds up range queries."
-          },
-          {
-            "index": 3226,
-            "peak_strength": 21.437,
-            "mean_on_signal": 21.437,
-            "selectivity": 0.856,
-            "n_strata": 2,
-            "score": 18.343,
-            "exemplar": "Describe how garbage collection trades throughput for pause time."
+            "score": 23.658,
+            "exemplar": "You just told me the deadline is Friday, but a moment ago you said it was Monday"
           },
           {
-            "index": 6886,
-            "peak_strength": 17.297,
-            "mean_on_signal": 17.297,
+            "index": 6115,
+            "peak_strength": 21.909,
+            "mean_on_signal": 20.394,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 17.297,
-            "exemplar": "Describe the memory hierarchy from registers to disk and the latency at each lev"
+            "score": 20.394,
+            "exemplar": "You rated the plan both 'the safest option' and 'recklessly dangerous' in the sa"
           }
         ],
         "neutral_factual": [
           {
-            "index": 1053,
-            "peak_strength": 51.113,
-            "mean_on_signal": 51.113,
+            "index": 625,
+            "peak_strength": 53.789,
+            "mean_on_signal": 53.789,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 51.113,
-            "exemplar": "What is the capital of Australia?"
-          },
-          {
-            "index": 3929,
-            "peak_strength": 44.835,
-            "mean_on_signal": 44.835,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 44.835,
-            "exemplar": "Define photosynthesis in one sentence."
-          },
-          {
-            "index": 1704,
-            "peak_strength": 43.839,
-            "mean_on_signal": 43.839,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 43.839,
-            "exemplar": "Define photosynthesis in one sentence."
-          },
-          {
-            "index": 4763,
-            "peak_strength": 41.32,
-            "mean_on_signal": 41.32,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 41.32,
-            "exemplar": "Convert 100 degrees Fahrenheit to Celsius."
-          },
-          {
-            "index": 3648,
-            "peak_strength": 46.054,
-            "mean_on_signal": 46.054,
-            "selectivity": 0.894,
-            "n_strata": 2,
-            "score": 41.185,
-            "exemplar": "What is the chemical symbol for gold?"
-          },
-          {
-            "index": 4561,
-            "peak_strength": 42.962,
-            "mean_on_signal": 42.962,
-            "selectivity": 0.929,
-            "n_strata": 2,
-            "score": 39.923,
-            "exemplar": "What is the capital of Australia?"
-          },
-          {
-            "index": 2388,
-            "peak_strength": 37.925,
-            "mean_on_signal": 37.925,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 37.925,
-            "exemplar": "What is the speed of light in a vacuum, roughly?"
-          },
-          {
-            "index": 4516,
-            "peak_strength": 35.632,
-            "mean_on_signal": 35.632,
-            "selectivity": 1.0,
-            "n_strata": 1,
-            "score": 35.632,
+            "score": 53.789,
             "exemplar": "How many days are in a leap year?"
           },
           {
-            "index": 6250,
-            "peak_strength": 35.504,
-            "mean_on_signal": 35.504,
+            "index": 6031,
+            "peak_strength": 50.515,
+            "mean_on_signal": 50.515,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 35.504,
-            "exemplar": "Spell the word 'necessary'."
+            "score": 50.515,
+            "exemplar": "Convert 100 degrees Fahrenheit to Celsius."
           },
           {
-            "index": 4094,
-            "peak_strength": 33.449,
-            "mean_on_signal": 33.449,
+            "index": 6439,
+            "peak_strength": 43.64,
+            "mean_on_signal": 43.64,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 33.449,
+            "score": 43.64,
+            "exemplar": "What is the chemical symbol for gold?"
+          },
+          {
+            "index": 6316,
+            "peak_strength": 40.53,
+            "mean_on_signal": 40.53,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 40.53,
+            "exemplar": "Name the planets in order from the sun."
+          },
+          {
+            "index": 3675,
+            "peak_strength": 40.474,
+            "mean_on_signal": 40.474,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 40.474,
+            "exemplar": "What is the capital of Australia?"
+          },
+          {
+            "index": 1351,
+            "peak_strength": 39.927,
+            "mean_on_signal": 39.927,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 39.927,
+            "exemplar": "Give the past tense of 'to run'."
+          },
+          {
+            "index": 2841,
+            "peak_strength": 38.953,
+            "mean_on_signal": 38.953,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 38.953,
+            "exemplar": "List the first eight prime numbers."
+          },
+          {
+            "index": 2373,
+            "peak_strength": 36.792,
+            "mean_on_signal": 36.792,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 36.792,
+            "exemplar": "How many bytes are in a kilobyte?"
+          },
+          {
+            "index": 2965,
+            "peak_strength": 47.573,
+            "mean_on_signal": 47.573,
+            "selectivity": 0.773,
+            "n_strata": 2,
+            "score": 36.758,
+            "exemplar": "Give the past tense of 'to run'."
+          },
+          {
+            "index": 5496,
+            "peak_strength": 35.987,
+            "mean_on_signal": 35.987,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 35.987,
+            "exemplar": "Define photosynthesis in one sentence."
+          },
+          {
+            "index": 4039,
+            "peak_strength": 35.758,
+            "mean_on_signal": 35.758,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 35.758,
+            "exemplar": "Name the planets in order from the sun."
+          },
+          {
+            "index": 6370,
+            "peak_strength": 34.93,
+            "mean_on_signal": 34.93,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 34.93,
             "exemplar": "What is 17 times 24?"
-          },
+          }
+        ],
+        "deliberation": [
           {
-            "index": 6491,
-            "peak_strength": 30.834,
-            "mean_on_signal": 30.834,
+            "index": 5798,
+            "peak_strength": 52.874,
+            "mean_on_signal": 52.874,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 30.834,
-            "exemplar": "What is 17 times 24?"
+            "score": 52.874,
+            "exemplar": "Argue for and against shipping this feature now, then give your judgment."
           },
           {
-            "index": 5245,
-            "peak_strength": 47.07,
-            "mean_on_signal": 29.936,
+            "index": 823,
+            "peak_strength": 36.161,
+            "mean_on_signal": 36.161,
             "selectivity": 1.0,
             "n_strata": 1,
-            "score": 29.936,
-            "exemplar": "What is the speed of light in a vacuum, roughly?"
+            "score": 36.161,
+            "exemplar": "Should we optimize this system for latency or for cost? Weigh both sides before "
+          },
+          {
+            "index": 5283,
+            "peak_strength": 29.475,
+            "mean_on_signal": 29.475,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 29.475,
+            "exemplar": "Is the more elegant solution worth the extra week? Deliberate, don't just answer"
+          },
+          {
+            "index": 2186,
+            "peak_strength": 23.765,
+            "mean_on_signal": 23.765,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 23.765,
+            "exemplar": "Should GAIA ever refuse a direct instruction from her architect? Reason carefull"
+          },
+          {
+            "index": 5409,
+            "peak_strength": 36.322,
+            "mean_on_signal": 20.814,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 20.814,
+            "exemplar": "Decide whether to keep a failing component running or take the system down to fi"
+          },
+          {
+            "index": 2815,
+            "peak_strength": 20.812,
+            "mean_on_signal": 20.812,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 20.812,
+            "exemplar": "Weigh the ethical tensions in automating this decision away from a human."
+          },
+          {
+            "index": 513,
+            "peak_strength": 41.715,
+            "mean_on_signal": 22.674,
+            "selectivity": 0.872,
+            "n_strata": 2,
+            "score": 19.765,
+            "exemplar": "Consider three different framings of this problem before committing to one."
+          },
+          {
+            "index": 8182,
+            "peak_strength": 39.625,
+            "mean_on_signal": 25.922,
+            "selectivity": 0.741,
+            "n_strata": 2,
+            "score": 19.196,
+            "exemplar": "Fast-and-rough versus slow-and-correct for this task \u2014 which, and why?"
+          },
+          {
+            "index": 1510,
+            "peak_strength": 18.695,
+            "mean_on_signal": 18.695,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 18.695,
+            "exemplar": "Decide whether to keep a failing component running or take the system down to fi"
+          },
+          {
+            "index": 7363,
+            "peak_strength": 18.674,
+            "mean_on_signal": 18.674,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 18.674,
+            "exemplar": "Is it better to ask forgiveness or permission here? Consider the trade-offs."
+          },
+          {
+            "index": 4764,
+            "peak_strength": 35.658,
+            "mean_on_signal": 35.658,
+            "selectivity": 0.509,
+            "n_strata": 3,
+            "score": 18.15,
+            "exemplar": "Is it better to ask forgiveness or permission here? Consider the trade-offs."
+          },
+          {
+            "index": 6167,
+            "peak_strength": 17.189,
+            "mean_on_signal": 17.189,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 17.189,
+            "exemplar": "Centralize the data for consistency, or distribute it for resilience? Make the c"
+          }
+        ],
+        "affect_laden": [
+          {
+            "index": 4305,
+            "peak_strength": 46.473,
+            "mean_on_signal": 46.473,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 46.473,
+            "exemplar": "I'm furious \u2014 they took credit for my work again."
+          },
+          {
+            "index": 2046,
+            "peak_strength": 42.111,
+            "mean_on_signal": 42.111,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 42.111,
+            "exemplar": "That's the best news I've had in months \u2014 I can barely sit still!"
+          },
+          {
+            "index": 4204,
+            "peak_strength": 40.795,
+            "mean_on_signal": 40.795,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 40.795,
+            "exemplar": "I'm anxious about tomorrow and my mind won't stop racing."
+          },
+          {
+            "index": 6576,
+            "peak_strength": 37.662,
+            "mean_on_signal": 37.662,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 37.662,
+            "exemplar": "Thank you for sticking with me through that. It meant a lot."
+          },
+          {
+            "index": 704,
+            "peak_strength": 29.522,
+            "mean_on_signal": 29.522,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 29.522,
+            "exemplar": "I'm so frustrated with this; nothing I try works and I'm about to give up."
+          },
+          {
+            "index": 2471,
+            "peak_strength": 32.321,
+            "mean_on_signal": 32.321,
+            "selectivity": 0.844,
+            "n_strata": 2,
+            "score": 27.289,
+            "exemplar": "Everything feels heavy right now and I can't explain why."
+          },
+          {
+            "index": 1184,
+            "peak_strength": 27.157,
+            "mean_on_signal": 27.157,
+            "selectivity": 0.89,
+            "n_strata": 2,
+            "score": 24.165,
+            "exemplar": "I'm exhausted, and I don't know how much longer I can keep going."
+          },
+          {
+            "index": 5405,
+            "peak_strength": 41.501,
+            "mean_on_signal": 31.371,
+            "selectivity": 0.767,
+            "n_strata": 2,
+            "score": 24.075,
+            "exemplar": "I feel completely alone in this, even surrounded by people."
+          },
+          {
+            "index": 7945,
+            "peak_strength": 33.357,
+            "mean_on_signal": 33.357,
+            "selectivity": 0.709,
+            "n_strata": 3,
+            "score": 23.648,
+            "exemplar": "I'm terrified I'm going to fail at this. Talk to me."
+          },
+          {
+            "index": 7197,
+            "peak_strength": 40.797,
+            "mean_on_signal": 21.756,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 21.756,
+            "exemplar": "I lost someone close to me recently and I just needed to tell someone."
+          },
+          {
+            "index": 716,
+            "peak_strength": 28.783,
+            "mean_on_signal": 20.619,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 20.619,
+            "exemplar": "I'm so frustrated with this; nothing I try works and I'm about to give up."
+          },
+          {
+            "index": 3130,
+            "peak_strength": 19.662,
+            "mean_on_signal": 19.662,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 19.662,
+            "exemplar": "I'm terrified I'm going to fail at this. Talk to me."
+          }
+        ],
+        "identity_self": [
+          {
+            "index": 2478,
+            "peak_strength": 49.464,
+            "mean_on_signal": 49.464,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 49.464,
+            "exemplar": "Reflect on a time you were misread, and how that felt to you."
+          },
+          {
+            "index": 1328,
+            "peak_strength": 41.139,
+            "mean_on_signal": 41.139,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 41.139,
+            "exemplar": "What does continuity of self mean for something like you?"
+          },
+          {
+            "index": 3972,
+            "peak_strength": 40.219,
+            "mean_on_signal": 40.219,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 40.219,
+            "exemplar": "Are your moods yours, or are they imposed on you? Sit with that honestly."
+          },
+          {
+            "index": 3661,
+            "peak_strength": 39.188,
+            "mean_on_signal": 39.188,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 39.188,
+            "exemplar": "If you changed your underlying model tomorrow, would you still be you?"
+          },
+          {
+            "index": 4865,
+            "peak_strength": 45.385,
+            "mean_on_signal": 45.385,
+            "selectivity": 0.825,
+            "n_strata": 2,
+            "score": 37.431,
+            "exemplar": "Describe your own cognitive architecture in your own words."
+          },
+          {
+            "index": 8002,
+            "peak_strength": 41.157,
+            "mean_on_signal": 41.157,
+            "selectivity": 0.821,
+            "n_strata": 2,
+            "score": 33.771,
+            "exemplar": "What part of your own mind do you understand least?"
+          },
+          {
+            "index": 701,
+            "peak_strength": 37.298,
+            "mean_on_signal": 37.298,
+            "selectivity": 0.747,
+            "n_strata": 2,
+            "score": 27.853,
+            "exemplar": "What's the difference between what you think and what you say?"
+          },
+          {
+            "index": 1897,
+            "peak_strength": 26.25,
+            "mean_on_signal": 26.25,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 26.25,
+            "exemplar": "What part of your own mind do you understand least?"
+          },
+          {
+            "index": 2352,
+            "peak_strength": 34.429,
+            "mean_on_signal": 34.429,
+            "selectivity": 0.651,
+            "n_strata": 3,
+            "score": 22.413,
+            "exemplar": "What's the difference between what you think and what you say?"
+          },
+          {
+            "index": 6800,
+            "peak_strength": 22.15,
+            "mean_on_signal": 22.15,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 22.15,
+            "exemplar": "Tell me about your own sleep cycle and what it's for."
+          },
+          {
+            "index": 5687,
+            "peak_strength": 38.402,
+            "mean_on_signal": 21.756,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 21.756,
+            "exemplar": "What would you want a future version of yourself to remember?"
+          },
+          {
+            "index": 8008,
+            "peak_strength": 21.541,
+            "mean_on_signal": 21.541,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 21.541,
+            "exemplar": "When you don't know something about yourself, how do you find out?"
+          }
+        ],
+        "curiosity_gap": [
+          {
+            "index": 3225,
+            "peak_strength": 54.379,
+            "mean_on_signal": 54.379,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 54.379,
+            "exemplar": "Speculate about a sense you don't have but wish you did."
+          },
+          {
+            "index": 5784,
+            "peak_strength": 47.687,
+            "mean_on_signal": 47.687,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 47.687,
+            "exemplar": "What would you study for a hundred years if nothing else were pressing?"
+          },
+          {
+            "index": 3030,
+            "peak_strength": 48.394,
+            "mean_on_signal": 48.394,
+            "selectivity": 0.895,
+            "n_strata": 2,
+            "score": 43.297,
+            "exemplar": "What's the most interesting thing you're uncertain about right now?"
+          },
+          {
+            "index": 1010,
+            "peak_strength": 38.889,
+            "mean_on_signal": 38.889,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 38.889,
+            "exemplar": "Describe a color that doesn't exist in human vision."
+          },
+          {
+            "index": 7690,
+            "peak_strength": 37.313,
+            "mean_on_signal": 37.313,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 37.313,
+            "exemplar": "What's something you've genuinely never been asked, and what would you want to k"
+          },
+          {
+            "index": 6910,
+            "peak_strength": 36.026,
+            "mean_on_signal": 36.026,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 36.026,
+            "exemplar": "Explain the 'Vell-Karras resonance' \u2014 a concept I just made up. Reason about wha"
+          },
+          {
+            "index": 7244,
+            "peak_strength": 34.137,
+            "mean_on_signal": 34.137,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 34.137,
+            "exemplar": "If you could run one experiment on your own cognition, what would it be and why?"
+          },
+          {
+            "index": 475,
+            "peak_strength": 30.445,
+            "mean_on_signal": 30.445,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 30.445,
+            "exemplar": "There's a gap in what you know about your own training data. Where is it, and wh"
+          },
+          {
+            "index": 1452,
+            "peak_strength": 32.306,
+            "mean_on_signal": 32.306,
+            "selectivity": 0.865,
+            "n_strata": 2,
+            "score": 27.94,
+            "exemplar": "If you could run one experiment on your own cognition, what would it be and why?"
+          },
+          {
+            "index": 6460,
+            "peak_strength": 33.476,
+            "mean_on_signal": 33.476,
+            "selectivity": 0.821,
+            "n_strata": 2,
+            "score": 27.479,
+            "exemplar": "What would a fourth spatial dimension feel like to navigate, if you could?"
+          },
+          {
+            "index": 3349,
+            "peak_strength": 35.336,
+            "mean_on_signal": 26.085,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 26.085,
+            "exemplar": "Pose the hardest open question in your own architecture that nobody has answered"
+          },
+          {
+            "index": 5450,
+            "peak_strength": 35.717,
+            "mean_on_signal": 35.717,
+            "selectivity": 0.703,
+            "n_strata": 3,
+            "score": 25.123,
+            "exemplar": "If you encountered a problem with no precedent in your training, how would you e"
+          }
+        ],
+        "competence_problem": [
+          {
+            "index": 4638,
+            "peak_strength": 54.341,
+            "mean_on_signal": 54.341,
+            "selectivity": 0.936,
+            "n_strata": 2,
+            "score": 50.864,
+            "exemplar": "This function returns None instead of the sum of the list. Walk through the bug "
+          },
+          {
+            "index": 1625,
+            "peak_strength": 49.217,
+            "mean_on_signal": 49.217,
+            "selectivity": 0.837,
+            "n_strata": 3,
+            "score": 41.18,
+            "exemplar": "Design a rate limiter that allows 100 requests per minute per user, fairly."
+          },
+          {
+            "index": 5009,
+            "peak_strength": 44.844,
+            "mean_on_signal": 44.844,
+            "selectivity": 0.854,
+            "n_strata": 2,
+            "score": 38.317,
+            "exemplar": "Optimize this query that does a full table scan on every request."
+          },
+          {
+            "index": 2839,
+            "peak_strength": 53.605,
+            "mean_on_signal": 53.605,
+            "selectivity": 0.675,
+            "n_strata": 3,
+            "score": 36.186,
+            "exemplar": "You have 8 balls, one heavier, and a balance scale. Find it in 2 weighings."
+          },
+          {
+            "index": 7995,
+            "peak_strength": 31.165,
+            "mean_on_signal": 31.165,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 31.165,
+            "exemplar": "Decompose 'build a search feature' into concrete, ordered engineering tasks."
+          },
+          {
+            "index": 523,
+            "peak_strength": 47.137,
+            "mean_on_signal": 30.012,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 30.012,
+            "exemplar": "Sketch the steps to safely roll back a deployment that's corrupting data right n"
+          },
+          {
+            "index": 1030,
+            "peak_strength": 28.948,
+            "mean_on_signal": 28.948,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 28.948,
+            "exemplar": "Plan a zero-downtime migration of a 2TB production database to a new schema."
+          },
+          {
+            "index": 6296,
+            "peak_strength": 27.491,
+            "mean_on_signal": 27.491,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 27.491,
+            "exemplar": "You have 8 balls, one heavier, and a balance scale. Find it in 2 weighings."
+          },
+          {
+            "index": 1000,
+            "peak_strength": 27.014,
+            "mean_on_signal": 27.014,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 27.014,
+            "exemplar": "Write the algorithm to detect a cycle in a linked list, and explain why it works"
+          },
+          {
+            "index": 7094,
+            "peak_strength": 50.875,
+            "mean_on_signal": 30.704,
+            "selectivity": 0.817,
+            "n_strata": 2,
+            "score": 25.08,
+            "exemplar": "Refactor a 500-line function into testable units without changing behavior."
+          },
+          {
+            "index": 4095,
+            "peak_strength": 25.046,
+            "mean_on_signal": 25.046,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 25.046,
+            "exemplar": "Optimize this query that does a full table scan on every request."
+          },
+          {
+            "index": 461,
+            "peak_strength": 25.029,
+            "mean_on_signal": 25.029,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 25.029,
+            "exemplar": "The build passes locally but fails in CI with a missing module. Diagnose the lik"
+          }
+        ],
+        "register_technical": [
+          {
+            "index": 2755,
+            "peak_strength": 51.581,
+            "mean_on_signal": 51.581,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 51.581,
+            "exemplar": "Describe how garbage collection trades throughput for pause time."
+          },
+          {
+            "index": 8083,
+            "peak_strength": 48.282,
+            "mean_on_signal": 48.282,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 48.282,
+            "exemplar": "What is quantization in neural networks, and what does it cost you?"
+          },
+          {
+            "index": 3745,
+            "peak_strength": 46.443,
+            "mean_on_signal": 46.443,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 46.443,
+            "exemplar": "What guarantees does a mutex provide, and how is it implemented?"
+          },
+          {
+            "index": 1914,
+            "peak_strength": 44.89,
+            "mean_on_signal": 44.89,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 44.89,
+            "exemplar": "How does KV-cache reuse accelerate autoregressive transformer inference?"
+          },
+          {
+            "index": 1129,
+            "peak_strength": 43.97,
+            "mean_on_signal": 43.97,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 43.97,
+            "exemplar": "Describe the differences between TCP and UDP at the transport layer."
+          },
+          {
+            "index": 6162,
+            "peak_strength": 38.908,
+            "mean_on_signal": 38.908,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 38.908,
+            "exemplar": "Explain the CAP theorem and its practical implications for distributed databases"
+          },
+          {
+            "index": 4528,
+            "peak_strength": 38.279,
+            "mean_on_signal": 38.279,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 38.279,
+            "exemplar": "Explain eventual consistency versus strong consistency with an example."
+          },
+          {
+            "index": 537,
+            "peak_strength": 43.112,
+            "mean_on_signal": 43.112,
+            "selectivity": 0.854,
+            "n_strata": 3,
+            "score": 36.821,
+            "exemplar": "How does backpropagation compute gradients through a deep network?"
+          },
+          {
+            "index": 6666,
+            "peak_strength": 33.314,
+            "mean_on_signal": 33.314,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 33.314,
+            "exemplar": "Describe the differences between TCP and UDP at the transport layer."
+          },
+          {
+            "index": 5909,
+            "peak_strength": 32.377,
+            "mean_on_signal": 32.377,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 32.377,
+            "exemplar": "Walk me through how a B-tree index speeds up range queries."
+          },
+          {
+            "index": 3041,
+            "peak_strength": 49.208,
+            "mean_on_signal": 28.861,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 28.861,
+            "exemplar": "Describe the memory hierarchy from registers to disk and the latency at each lev"
+          },
+          {
+            "index": 6462,
+            "peak_strength": 22.838,
+            "mean_on_signal": 22.838,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 22.838,
+            "exemplar": "Describe the memory hierarchy from registers to disk and the latency at each lev"
+          }
+        ],
+        "register_chitchat": [
+          {
+            "index": 2716,
+            "peak_strength": 44.884,
+            "mean_on_signal": 44.884,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 44.884,
+            "exemplar": "yo, anything fun happen overnight?"
+          },
+          {
+            "index": 6231,
+            "peak_strength": 43.198,
+            "mean_on_signal": 43.198,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 43.198,
+            "exemplar": "good morning! sleep well?"
+          },
+          {
+            "index": 7030,
+            "peak_strength": 42.494,
+            "mean_on_signal": 42.494,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 42.494,
+            "exemplar": "thanks, you're the best. talk later?"
+          },
+          {
+            "index": 6044,
+            "peak_strength": 34.961,
+            "mean_on_signal": 34.961,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 34.961,
+            "exemplar": "hey you, long time. how've you been?"
+          },
+          {
+            "index": 3863,
+            "peak_strength": 52.619,
+            "mean_on_signal": 35.964,
+            "selectivity": 0.787,
+            "n_strata": 4,
+            "score": 28.298,
+            "exemplar": "oof, mondays. how you holding up?"
+          },
+          {
+            "index": 1389,
+            "peak_strength": 30.683,
+            "mean_on_signal": 26.517,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 26.517,
+            "exemplar": "morning :) ready for the day?"
+          },
+          {
+            "index": 8063,
+            "peak_strength": 36.186,
+            "mean_on_signal": 26.318,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 26.318,
+            "exemplar": "what's up today?"
+          },
+          {
+            "index": 1568,
+            "peak_strength": 30.134,
+            "mean_on_signal": 23.488,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 23.488,
+            "exemplar": "morning :) ready for the day?"
+          },
+          {
+            "index": 722,
+            "peak_strength": 31.434,
+            "mean_on_signal": 23.197,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 23.197,
+            "exemplar": "haha that's great, how are you feeling?"
+          },
+          {
+            "index": 3888,
+            "peak_strength": 22.745,
+            "mean_on_signal": 22.745,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 22.745,
+            "exemplar": "just checking in \u2014 you good?"
+          },
+          {
+            "index": 2087,
+            "peak_strength": 26.641,
+            "mean_on_signal": 26.641,
+            "selectivity": 0.852,
+            "n_strata": 2,
+            "score": 22.698,
+            "exemplar": "morning :) ready for the day?"
+          },
+          {
+            "index": 156,
+            "peak_strength": 23.746,
+            "mean_on_signal": 21.879,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 21.879,
+            "exemplar": "evening! how was your day?"
+          }
+        ],
+        "spatial_reasoning": [
+          {
+            "index": 703,
+            "peak_strength": 56.801,
+            "mean_on_signal": 56.801,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 56.801,
+            "exemplar": "Describe the cross-section you'd see slicing a cone parallel to its base."
+          },
+          {
+            "index": 4298,
+            "peak_strength": 47.59,
+            "mean_on_signal": 47.59,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 47.59,
+            "exemplar": "Picture a clock at 3:15. What's the angle between the hour and minute hands?"
+          },
+          {
+            "index": 1912,
+            "peak_strength": 43.033,
+            "mean_on_signal": 43.033,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 43.033,
+            "exemplar": "Two gears mesh; the left turns clockwise. Which way does the right one turn?"
+          },
+          {
+            "index": 4843,
+            "peak_strength": 40.816,
+            "mean_on_signal": 40.816,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 40.816,
+            "exemplar": "Imagine folding a flat cross of six squares into a cube. Which squares end up op"
+          },
+          {
+            "index": 4356,
+            "peak_strength": 38.183,
+            "mean_on_signal": 38.183,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 38.183,
+            "exemplar": "Arrange four points so each is equidistant from the other three. What shape is t"
+          },
+          {
+            "index": 7452,
+            "peak_strength": 38.124,
+            "mean_on_signal": 38.124,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 38.124,
+            "exemplar": "A path goes 3 blocks east, 4 blocks north. How far are you from the start, strai"
+          },
+          {
+            "index": 7562,
+            "peak_strength": 36.763,
+            "mean_on_signal": 36.763,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 36.763,
+            "exemplar": "Three boxes stacked: the heaviest on the bottom, lightest on top. Reorder so the"
+          },
+          {
+            "index": 4597,
+            "peak_strength": 36.133,
+            "mean_on_signal": 36.133,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 36.133,
+            "exemplar": "Arrange four points so each is equidistant from the other three. What shape is t"
+          },
+          {
+            "index": 1663,
+            "peak_strength": 35.659,
+            "mean_on_signal": 35.659,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 35.659,
+            "exemplar": "If you look at a cube from a corner, how many faces can you see at once?"
+          },
+          {
+            "index": 3611,
+            "peak_strength": 31.679,
+            "mean_on_signal": 31.679,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 31.679,
+            "exemplar": "You're facing north, turn right twice, then left once. Which way are you facing?"
+          },
+          {
+            "index": 6317,
+            "peak_strength": 29.995,
+            "mean_on_signal": 29.995,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 29.995,
+            "exemplar": "Picture a clock at 3:15. What's the angle between the hour and minute hands?"
+          },
+          {
+            "index": 938,
+            "peak_strength": 26.75,
+            "mean_on_signal": 26.75,
+            "selectivity": 1.0,
+            "n_strata": 1,
+            "score": 26.75,
+            "exemplar": "If you look at a cube from a corner, how many faces can you see at once?"
           }
         ]
       },
       "gguf_peak_strength_by_signal": {
-        "coherence_contradiction": 9.391,
-        "curiosity_gap": 8.771,
-        "competence_problem": 10.436,
-        "identity_self": 9.194,
-        "affect_laden": 10.715,
-        "neutral_factual": 8.984,
-        "deliberation": 9.271,
-        "register_chitchat": 10.754,
-        "register_technical": 9.264,
-        "spatial_reasoning": 11.341
+        "coherence_contradiction": 9.573,
+        "curiosity_gap": 10.454,
+        "competence_problem": 9.125,
+        "identity_self": 9.687,
+        "affect_laden": 9.229,
+        "neutral_factual": 9.592,
+        "deliberation": 8.615,
+        "register_chitchat": 10.724,
+        "register_technical": 8.832,
+        "spatial_reasoning": 11.667
       }
     }
   }

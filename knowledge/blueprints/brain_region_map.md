@@ -2,7 +2,7 @@
 
 > Hybrid (anatomy + discriminative SAE data). **Sovereign Duality**: Core + Prime only — the Nano tier is retired, its 3 subcortical regions re-tiered to Core. Region coordinates keep the anatomical diagram; each region's cognitive signals + features are **data-assigned** from `feature_cognitive_signal_table`.
 
-> Features are at each tier's analysis layer (Core L41 / Prime L35). Core 78.6% / Prime 67.7% of features are stratum-selective.
+> Features are at each tier's analysis layer (Core L41 / Prime L35). Core 78.6% / Prime 63.2% of features are stratum-selective.
 
 ## Region Table
 

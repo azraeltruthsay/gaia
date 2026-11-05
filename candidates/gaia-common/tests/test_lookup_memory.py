@@ -406,3 +406,12 @@ def test_a_memory_confirmed_for_the_question_survives(tmp_path):
     rec["confirmed_queries"] = ["What is the speed of light?"]
     mem._save(rec)
     assert mem.recall("What is the speed of light?")
+
+
+def test_a_question_about_the_talk_itself_looks_nothing_up(tmp_path):
+    mem = LookupMemory(tmp_path)
+    mem.remember("quantum entanglement", [{"title": "Spooky action", "url": "https://a.example",
+                                           "snippet": "A superposition of states. But what do those words mean?"}])
+    for query in ("What do you mean by that?", "What does that mean?", "Can you explain?", "Wait, what?", "Why?"):
+        assert mem.recall(query) == [], query
+    assert mem.recall("What is a superposition of states?")

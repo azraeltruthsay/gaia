@@ -2519,7 +2519,7 @@ class AgentCore:
             # context for identity questions — see GAIA_Project-ar2. Now all
             # three grounding paths (CIL, web, auto) share the same skip-list
             # for intents where grounding context conflicts with self-knowledge.
-            _skip_web_ground_intents = {"recitation", "greeting", "identity", "time", "chat", "status"}
+            _skip_web_ground_intents = {"recitation", "greeting", "identity", "time", "chat", "status", "clarification"}
             _detected_intent = ""
             try:
                 _detected_intent = str(getattr(getattr(packet, 'intent', None), 'user_intent', '') or '').lower()
@@ -2643,7 +2643,7 @@ class AgentCore:
             # Inject Stage 0 neural grounding results
             # Skip for intents where grounding context interferes with the task
             # (e.g., recitation — web results about poems override the actual poem)
-            _skip_grounding_intents = {"recitation", "greeting", "identity", "chat"}
+            _skip_grounding_intents = {"recitation", "greeting", "identity", "chat", "clarification"}
             if _grounding_context and _detected_intent not in _skip_grounding_intents:
                 packet.content.data_fields.append(DataField(
                     key='auto_grounding',

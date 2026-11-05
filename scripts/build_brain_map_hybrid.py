@@ -96,7 +96,7 @@ def main():
     tier_layer_map = {}
     for t in ("core", "prime"):
         meta = json.load(open(ATLAS / t / (
-            "CORE_IDENTITY_V3" if t == "core" else "PRIME_ABLITERATED") / "meta.json"))
+            "CORE_IDENTITY_V3" if t == "core" else "PRIME_V2B") / "meta.json"))
         tier_layer_map[t] = {"n_layers": new_max[t],
                              "atlas_sampled_layers": meta["layers"],
                              "analysis_layer": models[t]["analysis_layer"]}
@@ -106,7 +106,7 @@ def main():
             "version": "3.0.0",
             "description": "GAIA brain-region map — hybrid (anatomy + discriminative "
                            "SAE data), Sovereign Duality (Core+Prime; Nano retired).",
-            "source_atlases": "/shared/atlas/{core/CORE_IDENTITY_V3, prime/PRIME_ABLITERATED}",
+            "source_atlases": "/shared/atlas/{core/CORE_IDENTITY_V3, prime/PRIME_V2B}",
             "derived_from": "feature_cognitive_signal_table.json (discriminative features)",
             "viewport": {"width": 280, "height": 225, "brain_faces": "left"},
             "tiers": ["core", "prime"],

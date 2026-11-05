@@ -201,3 +201,8 @@ def test_an_opinion_of_an_article_needn_t_quote_its_title():
     said = "It places consent at the center: freely given, reversible and specific."
     assert sm.keeps_to_text(said, ARTICLES, "What do you think of Article VII?", opinion=True)
     assert not sm.keeps_to_text(said, ARTICLES, "What does Article VII say?", opinion=False)
+
+
+def test_a_short_opinion_with_none_of_the_documents_words_is_still_an_answer():
+    assert sm.keeps_to_text("I don't disagree. It seems right to me.", ARTICLES, "Do you disagree with it?", opinion=True)
+    assert not sm.keeps_to_text("Per the Azrael Protocol, yes.", ARTICLES, "Do you disagree with it?", opinion=True)
