@@ -190,3 +190,24 @@ def test_asks_for_the_words():
 ])
 def test_what_comes_before_the_request_is_not_the_title(asked, name):
     assert work_name(asked) == name
+
+
+def _known(tmp_path):
+    mem = WorkMemory(tmp_path)
+    assert mem.remember("Jabberwocky", POEM, [{"url": "a"}])
+    assert mem.remember("The Raven by Edgar Allan Poe", POEM + " raven", [{"url": "b"}])
+    return mem
+
+
+@pytest.mark.parametrize("asked,name", [
+    ("Would you please recite the poem Jabberwockey?", "Jabberwocky"),
+    ("recite jabberwoky", "Jabberwocky"),
+    ("Recite The Ravenn by Edgar Allan Poe", "The Raven by Edgar Allan Poe"),
+])
+def test_a_misspelled_title_still_finds_the_work(tmp_path, asked, name):
+    assert _known(tmp_path).recall(asked)["name"] == name
+
+
+@pytest.mark.parametrize("asked", ["Recite Jabberstock", "Recite The Rave", "Recite The Raven by Ted Hughes", "Recite Paradise"])
+def test_a_near_word_is_not_a_different_work(tmp_path, asked):
+    assert _known(tmp_path).recall(asked) is None

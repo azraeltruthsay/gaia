@@ -183,3 +183,15 @@ def test_a_packet_says_where_it_came_from():
     from gaia_core.main import _packet_source
     assert _packet_source({"header": {"output_routing": {"source_destination": "discord"}}}) == "discord"
     assert _packet_source({}) == "web"
+
+
+@pytest.mark.parametrize("asked,named", [
+    ("Would you please recite the poem Jabberwockey?", True),
+    ("Recite to me the poem Ozymandias.", True),
+    ("Recite The Raven", True),
+    ("Recite a poem", False),
+    ("Please recite a haiku.", False),
+])
+def test_a_named_poem_goes_to_recital_even_when_we_dont_know_the_name(asked, named):
+    from gaia_core.cognition.nlu.intent_detection import _has_named_work_signal
+    assert _has_named_work_signal(asked) is named

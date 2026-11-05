@@ -20,6 +20,7 @@ from bisect import bisect_left, bisect_right
 import hashlib
 import json
 import logging
+import difflib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -367,7 +368,30 @@ class WorkMemory:
             if wanted <= known and wanted & titles:
                 if best is None or len(known) < len(best[0]):
                     best = (known, rec)
-        return best[1] if best else None
+        if best:
+            return best[1]
+        return self._recall_misspelled(wanted)
+
+    def _recall_misspelled(self, wanted: set) -> Optional[dict]:
+        """One long word a letter or two off: "Jabberwockey" is Jabberwocky. Without
+        this she improvised the poem from her weights and made up its second verse."""
+        best, best_score = None, 0.0
+        for rec in self._records():
+            names = rec.get("names") or [rec.get("name", "")]
+            known = set().union(*(name_terms(n) for n in names))
+            titles = set().union(*(title_terms(n) for n in names))
+            missing = wanted - known
+            if len(missing) != 1:
+                continue
+            word = next(iter(missing))
+            if len(word) < 6:
+                continue
+            # A title word must be among what's matched, as in recall.
+            pool = known if (wanted - missing) & titles else titles
+            score = max((difflib.SequenceMatcher(None, word, k).ratio() for k in pool), default=0.0)
+            if score >= 0.85 and score > best_score:
+                best, best_score = rec, score
+        return best
 
     def mentioned(self, text: str) -> Optional[dict]:
         """A work a question names in passing ('the first line of The Raven').

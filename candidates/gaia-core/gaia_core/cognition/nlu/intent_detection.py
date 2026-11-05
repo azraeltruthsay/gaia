@@ -107,7 +107,8 @@ def _has_named_work_signal(text: str) -> bool:
     # (a global IGNORECASE flag here would make [A-Z] match lowercase too,
     # defeating the whole point of the capitalization check — see the
     # pre-existing bug this replaces at the old rule-4 title_pattern below).
-    if re.search(r'(?i:recite)\s+(?:(?i:the)\s+)?["\']?([A-Z][^"\'.]+)["\']?', text or ""):
+    if re.search(r'(?i:recite)\s+(?:(?i:(?:to\s+)?me)\s+)?(?:(?i:the)\s+)?(?:(?i:poem|speech|text\s+of)\s+)?'
+                 r'["\']?([A-Z][^"\'.]+)["\']?', text or ""):
         return True
 
     return False
