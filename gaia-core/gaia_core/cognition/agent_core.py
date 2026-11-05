@@ -3453,12 +3453,16 @@ class AgentCore:
             # exchange ("Where did he get the sword?"), which reads as chat.
             from gaia_core.cognition.nlu.intent_detection import (
                 conversation_topic, is_conversation_recall, is_factual_pushback,
-                is_knowledge_followup)
-            _pushback = is_factual_pushback(user_input, history)
+                is_conversation_followup, is_knowledge_followup, mentions_a_conversation)
+            # 02m5: "that's not accurate, he spoke with you yesterday" disputes
+            # her memory of a conversation. The record answers that, not the web.
+            _pushback = (is_factual_pushback(user_input, history)
+                         and not mentions_a_conversation(user_input))
             # 6qzb: "What did we talk about regarding X?" is answered from the
             # palace's record of this conversation — read as chat, it was
             # skipped and Core promised a lookup that never ran.
-            _conv_recall = not _pushback and is_conversation_recall(user_input)
+            _conv_recall = not _pushback and (is_conversation_recall(user_input)
+                                              or is_conversation_followup(user_input, history))
             _followup = (not _pushback and not _conv_recall
                          and is_knowledge_followup(user_input, history))
             # Outcome ledger (gjuh.2): a dispute is the strongest signal the

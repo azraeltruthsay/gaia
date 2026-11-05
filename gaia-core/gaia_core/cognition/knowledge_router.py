@@ -796,12 +796,18 @@ def recall_conversation(session_id: str, question: str,
     of what was said, not evidence of what is true, so prompt_builder renders
     them as past exchanges. An empty result is an answer too — sources_queried
     says the record was searched, and the caller tells her nothing was found.
+
+    02m5: her other conversations are searched too, for anything with a topic,
+    and marked as said elsewhere. A name is the topic when one is given, since
+    the words around it ("this was Andy my friend") were never in the exchange.
+    At most top_k come back, up to two of them from elsewhere.
     """
-    from gaia_common.utils.conversation_memory import ConversationMemory
-    from gaia_core.cognition.nlu.intent_detection import conversation_topic
+    from gaia_common.utils.conversation_memory import (
+        ELSEWHERE_PREFIX, ConversationMemory, channel_of)
+    from gaia_core.cognition.nlu.intent_detection import conversation_topic, names_in_context
 
     t0 = time.time()
-    topic = conversation_topic(question)
+    topic = " ".join(names_in_context(question, history)) or conversation_topic(question)
     ctx = GroundingContext(query=topic or question, sources_queried=["conversation"])
     try:
         memory = ConversationMemory()
@@ -809,8 +815,22 @@ def recall_conversation(session_id: str, question: str,
                    if isinstance(h, dict) and h.get("role") == "user"}
         n = top_k + len(visible)
         hits = memory.recall(session_id, topic, top_k=n) if topic else memory.latest(session_id, n)
-        hits =[h for h in hits if (h.get("user") or "").strip() not in visible][:top_k]
-        for h in hits:
+        hits =[h for h in hits if (h.get("user") or "").strip() not in visible]
+        elsewhere = memory.recall_elsewhere(session_id, topic, top_k=min(2, top_k)) if topic else []
+        for h in elsewhere:
+            # The rest of what they said: asked about Andy, "recite Jabberwockey"
+            # doesn't name him, and left out she guessed which poem it was.
+            others = [t for t in memory.said_in(h.get("session_id", "")) if t != (h.get("user") or "")[:120]]
+            also = ("; also in that conversation they said: " + "; ".join(f'"{t}"' for t in others)
+                    if others else "")
+            ctx.results.append(GroundingResult(
+                source="conversation", trust_tier="own_record",
+                content=(f"{ELSEWHERE_PREFIX} {channel_of(h.get('session_id', ''))} on "
+                         f"{(h.get('ts') or '')[:10]}, the person there said: \"{h.get('user', '')}\""
+                         f" — and you replied: \"{(h.get('reply') or '')[:300]}\"{also}"),
+                title="another conversation", retrieved_at=h.get("ts", ""),
+                score=float(h.get("score", 0.0) or 0.0), query=topic))
+        for h in hits[:top_k - len(elsewhere)]:
             ctx.results.append(GroundingResult(
                 source="conversation", trust_tier="own_record",
                 content=(f"On {(h.get('ts') or '')[:10]}, they said: \"{h.get('user', '')}\""

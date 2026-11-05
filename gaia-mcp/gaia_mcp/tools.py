@@ -1159,7 +1159,7 @@ def _palace_recall_impl(params: dict) -> dict:
     top_k = int(params.get("top_k", 5))
     return palace.recall(query, top_k=top_k, include_archive=bool(params.get("include_archive")),
                          include_lookups=params.get("include_lookups", True) is not False,
-                         asker=str(params.get("_asker") or ""))
+                         asker=str(params.get("_asker") or ""), include_conversations=True)
 
 
 _FACT_PARAMS = ("fact", "query", "text", "content", "statement", "information", "info", "data", "value", "note")

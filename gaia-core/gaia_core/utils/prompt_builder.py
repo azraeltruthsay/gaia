@@ -235,7 +235,12 @@ TOOL_FREE_INTENTS = frozenset({"greeting", "farewell", "gratitude", "smalltalk",
 
 # "with them": "this person" was repeated back to the person ("I don't have
 # any prior conversations with this person").
-CONVERSATION_RECALL_LABEL = "Searching your record of earlier conversations with them"
+CONVERSATION_RECALL_LABEL = "Searching your record of earlier conversations"
+RECORD_SEARCHED = ("That is your own memory of it, already searched, so don't offer to look it up. "
+                   "Answer from it directly, and say so plainly if it doesn't cover what they asked.")
+ELSEWHERE_JUDGMENT = ("Some of this was said in another conversation, perhaps by someone else. "
+                      "It is yours to remember. Use your judgment about what belongs here, "
+                      "as you would with anything a friend told you.")
 
 
 def conversation_recall_text(packet) -> Optional[str]:
@@ -252,6 +257,10 @@ def conversation_recall_text(packet) -> Optional[str]:
             lines = [f"- {r.get('snippet', '')[:900]}" for r in info.get("results") or []
                      if r.get("snippet")]
             if lines:
+                from gaia_common.utils.conversation_memory import ELSEWHERE_PREFIX
+                lines.append(RECORD_SEARCHED)
+                if any(line.startswith(f"- {ELSEWHERE_PREFIX}") for line in lines):
+                    lines.append(ELSEWHERE_JUDGMENT)  # 02m5
                 return "\n".join(lines)
             if info.get("on_record") == 0:
                 return "Nothing: this is your first conversation together on record."

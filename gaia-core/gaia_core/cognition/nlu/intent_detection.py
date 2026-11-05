@@ -12,7 +12,7 @@ import re
 import logging
 from dataclasses import dataclass
 import sys
-from typing import Optional
+from typing import List, Optional
 from urllib.request import Request, urlopen
 
 from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
@@ -909,6 +909,15 @@ _CONV_PAST_RE = re.compile(
     r"|\b(our|the|that)\s+(last|previous|earlier|past|other)\s+(conversation|chat|discussion|talk)s?\b",
     re.I)
 _CONV_PROMPT_RE = re.compile(r"^\s*(do you\s+)?(remember|recall|remind me)\b", re.I)
+# 02m5: "Do you remember Andy from yesterday?" names someone or a time, and
+# "You spoke with him on the web chat" points at a conversation without asking.
+_CONV_REMEMBER_RE = re.compile(r"\b(do|did|can)\s+you\s+(still\s+)?(remember|recall)\b", re.I)
+_CONV_WHEN_RE = re.compile(r"\b(from|last|yesterday|earlier|ago|the other day)\b", re.I)
+_CONV_MENTION_RE = re.compile(
+    r"\byou\s+(\w+\s+)?(spoke|talked|chatted)\s+(with|to)\b"
+    r"|\byou\s+(\w+\s+)?met\b"
+    r"|\b(spoke|talked|chatted)\s+(with|to)\s+you\b", re.I)
+_NOT_NAMES = frozenset({"I", "GAIA", "Gaia", "Discord", "Prime", "Core"})
 # The recall phrasing itself, removed to leave the topic.
 _CONV_PHRASE_WORDS = frozenset("""
 talk talked talking discuss discussed discussing chat chatted chatting spoke speak say said
@@ -920,13 +929,64 @@ pick picked plan planned
 """.split())
 
 
+def conversation_names(text: str) -> List[str]:
+    """Names in the middle of a sentence: "No this was Andy my friend." → Andy.
+    A sentence's first word is capitalized whatever it is, so it doesn't count."""
+    names = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text or ""):
+        for word in re.findall(r"[A-Za-z][A-Za-z'\-]*", sentence)[1:]:
+            if word[0].isupper() and word not in _NOT_NAMES and word not in names:
+                names.append(word)
+    return names
+
+
+def mentions_a_conversation(text: str) -> bool:
+    """She spoke with someone, stated rather than asked: check the record."""
+    return bool(_CONV_MENTION_RE.search(text or ""))
+
+
+_CONV_PRONOUN_RE = re.compile(
+    r"\b(what|how|when|why)\s+did\s+(he|she|they)\s+(\w+\s+)?"
+    r"(say|said|ask|asked|tell|told|talk|want|mention)\b"
+    r"|\b(did|has|have)\s+(he|she|they)\s+(\w+\s+)?(say|said|ask|asked|tell|told|mention)\b", re.I)
+
+
+def _recent_user_turns(history, n: int = 3) -> List[str]:
+    turns = [h.get("content") or "" for h in history or []
+             if isinstance(h, dict) and h.get("role") == "user"]
+    return turns[-n:]
+
+
+def is_conversation_followup(text: str, history) -> bool:
+    """"What did he say about himself?" right after asking about that person's
+    conversation: still the record. Unprompted it could mean anyone, in any story."""
+    return bool(_CONV_PRONOUN_RE.search(text or "")) and any(
+        is_conversation_recall(t) for t in _recent_user_turns(history))
+
+
+def names_in_context(text: str, history=None) -> List[str]:
+    """Who the turn is about: its own names, or with only a pronoun ("He just
+    spoke with you"), the names in the turns just before it."""
+    names = conversation_names(text)
+    if names or not re.search(r"\b(he|him|his|she|her|they|them)\b", text or "", re.I):
+        return names
+    for turn in reversed(_recent_user_turns(history)):
+        names = conversation_names(turn)
+        if names:
+            return names
+    return []
+
+
 def is_conversation_recall(text: str) -> bool:
     """True for "What did we talk about regarding X?", "Did I tell you about
     Y?", "Remind me what we discussed last time"."""
     stripped = (text or "").strip()
     if not stripped or len(stripped) > 300:
         return False
-    if _CONV_ASKED_RE.search(stripped):
+    if _CONV_ASKED_RE.search(stripped) or mentions_a_conversation(stripped):
+        return True
+    if _CONV_REMEMBER_RE.search(stripped) and (
+            conversation_names(stripped) or _CONV_WHEN_RE.search(stripped)):
         return True
     return bool(_CONV_PAST_RE.search(stripped)) and (
         stripped.endswith("?") or bool(_CONV_PROMPT_RE.search(stripped)))
@@ -938,7 +998,9 @@ def conversation_topic(text: str) -> str:
     → "memory palace". Empty when it names no topic ("what did we talk
     about last time?")."""
     from gaia_common.utils.lookup_memory import content_terms
-    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'\-]*", text or "")
+    # What's asked follows "do you remember"; before it is small talk.
+    asked = _CONV_REMEMBER_RE.search(text or "")
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9'\-]*", text[asked.end():] if asked else text or "")
     kept = [w for w in words if w.lower() not in _CONV_PHRASE_WORDS]
     return " ".join(w for w in kept if content_terms(w))
 

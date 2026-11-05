@@ -514,6 +514,11 @@ async def lifespan(app: FastAPI):
     logger.info("GAIA Core shutting down — writing cognitive checkpoints...")
     try:
         _write_shutdown_checkpoints(app)
+        # 02m5: a restart is not sleep. Left unconsumed, this "preparing for a
+        # sleep cycle" note went into every non-trivial prompt until a real
+        # wake, which a plain restart never has (Prime dropped URLs under it).
+        from gaia_core.cognition.prime_checkpoint import PrimeCheckpointManager
+        PrimeCheckpointManager(_ai_manager.config).mark_consumed()
     except Exception:
         logger.warning("Shutdown checkpoint write failed", exc_info=True)
 
@@ -1687,6 +1692,10 @@ async def process_packet(packet_data: Dict[str, Any]):
                                         logger.info("Tool call '%s' dropped: already answered", pe.tool_name)
                                         _suppressed_tool_count += 1
                                         continue
+                                    # 02m5: she named the tool; the person named the page.
+                                    from gaia_common.utils.tool_call_parser import fill_missing_url
+                                    pe.tool_params = fill_missing_url(
+                                        pe.tool_name, pe.tool_action, pe.tool_params, user_input)
                                     # Dedup: only process each unique tool call once
                                     _tc_key = f"{pe.tool_name}:{pe.tool_action}:{json.dumps(pe.tool_params, sort_keys=True)}"
                                     if _tc_key in _seen_tool_calls:

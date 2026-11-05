@@ -583,3 +583,20 @@ def build_tool_schema_injection() -> str:
     lines.append(f"Call tools inline: {TOOL_CALL_OPEN}{{\"tool\":\"domain\",\"action\":\"verb\",...}}{TOOL_CALL_CLOSE}")
     lines.append(f"Results appear as: {TOOL_RESULT_OPEN}...{TOOL_RESULT_CLOSE}")
     return "\n".join(lines)
+
+
+_URL_RE = re.compile(r"https?://[^\s<>()\"']+", re.I)
+
+
+def fill_missing_url(tool: str, action: str, params: Optional[Dict[str, Any]], message: str) -> Dict[str, Any]:
+    """web(fetch) with no url, when the person's message names exactly one: use
+    it. Prime drops the url from a call it otherwise gets right, and the person
+    already said which page. With several, or none, it is hers to choose."""
+    params = dict(params or {})
+    if (tool or "").lower() != "web" or (action or "").lower() != "fetch" or str(params.get("url") or "").strip():
+        return params
+    urls = {u.rstrip(".,;:!?") for u in _URL_RE.findall(message or "")}
+    if len(urls) == 1:
+        params["url"] = urls.pop()
+        logger.info("web(fetch) had no url; using the one in the message: %s", params["url"])
+    return params

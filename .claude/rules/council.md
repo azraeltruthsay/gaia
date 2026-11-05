@@ -8,7 +8,7 @@ The manifest is gitignored (regenerated locally) — if it's missing in a fresh 
 ## Full Sync (L2/L3)
 - Read `COUNCIL_CHAMBER.md` for strategic dispatches and Advisor notes
 - Read `knowledge/Dev_Notebook/TODO.md` for granular task tracking
-- Use `mempalace search "topic"` for historical context (L3)
+- Use `bd memories <topic>` and `knowledge/Dev_Notebook/` for historical context (L3)
 
 ## Protocol
 - Before starting implementation work, verify the Chamber hasn't been updated since your last read

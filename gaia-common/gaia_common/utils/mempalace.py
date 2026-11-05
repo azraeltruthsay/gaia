@@ -386,7 +386,8 @@ class MemPalace:
     # ── Recall ───────────────────────────────────────────────────────────
 
     def recall(self, query: str, top_k: int = 5, include_archive: bool = False,
-               include_lookups: bool = True, asker: str = "") -> dict:
+               include_lookups: bool = True, asker: str = "",
+               include_conversations: bool = False) -> dict:
         """Semantic recall with KG enrichment.
 
         1. Search stored memories for query matches (text search across AAAK
@@ -484,10 +485,28 @@ class MemPalace:
         # Works and lookups first: they hold the words and facts, and a
         # truncated tool result (what the model sees) should cut the AAAK
         # codes, not them.
+        # 02m5: asked of her by name (the palace tool), what was said to her
+        # counts too. Off for internal callers: a record of what was said is
+        # not evidence of what is true (8xr4.19).
+        conversations = []
+        if include_conversations:
+            try:
+                from gaia_common.utils.conversation_memory import ConversationMemory, channel_of
+                conversations = [
+                    {"where": channel_of(h.get("session_id", "")), "when": (h.get("ts") or "")[:10],
+                     "they_said": (h.get("user") or "")[:300], "you_replied": (h.get("reply") or "")[:300]}
+                    for h in ConversationMemory(self._root_dir / "conversations").recall_elsewhere(
+                        "", query, top_k=3)]
+            except Exception as e:
+                logger.warning("MemPalace: conversation recall failed for %r: %s", query[:80], e)
+
         return {
             "ok": True,
             "query": query,
             "works": [compact_work(work, max_chars=3000)] if work else [],
+            "conversations": conversations,
+            "conversations_note": ("What was said, not proof it is true. Use your judgment about "
+                                   "what belongs in this conversation.") if conversations else "",
             "lookups": lookups,
             "results": results,
             "result_count": len(results),
