@@ -91,7 +91,8 @@ function drawSparkline(canvas, values, color) {
 
 document.addEventListener('alpine:init', () => {
   Alpine.store('nav', {
-    currentView: localStorage.getItem('gaia_active_tab') || 'chat',
+    // ?view=palace links straight to a tab.
+    currentView: new URLSearchParams(location.search).get('view') || localStorage.getItem('gaia_active_tab') || 'chat',
     tabs: [
       { id: 'chat', label: 'Chat' },
       { id: 'dashboard', label: 'Dashboard' },

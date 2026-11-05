@@ -4,7 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GAIA Mission Control</title>
-  <link rel="stylesheet" href="/static/style.css?v=20261105a">
+  <script>
+    try {
+      const t = new URLSearchParams(location.search).get('theme') || localStorage.getItem('gaia-theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    } catch (e) { /* dark */ }
+  </script>
+  <link rel="stylesheet" href="/static/style.css?v=20261105b">
+  <link rel="stylesheet" href="/static/theme-light.css?v=20261105a">
   <!-- marked.js for markdown rendering -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <!-- D3.js for graph visualization -->
@@ -24,6 +31,7 @@
       <span class="subtitle">Mission Control</span>
     </div>
     <div class="top-bar-right" x-data>
+      <button id="theme-toggle" class="theme-toggle" type="button">Light mode</button>
       <span class="badge" x-text="$store.header.serviceCount">-- services</span>
       <span :class="$store.header.pendingWarn ? 'badge badge-warn' : 'badge'" x-text="$store.header.pendingCount">-- pending</span>
       <span :class="$store.header.discordClass" :title="$store.header.discordTitle" x-text="$store.header.discordStatus">discord: --</span>
@@ -1890,7 +1898,8 @@
     </template>
   </section>
 
+  <script src="/static/theme.js?v=20261105a"></script>
   <script src="/static/palace.js?v=20261105a"></script>
-  <script src="/static/app.js?v=20261105b"></script>
+  <script src="/static/app.js?v=20261105c"></script>
 </body>
 </html>
