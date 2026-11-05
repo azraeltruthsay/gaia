@@ -100,6 +100,10 @@ def check(question: str, reply: str, known: str, generate: Callable[[str], str])
         return None
     context = f"What is known: {known}\n" if known.strip() else ""
     own = generate(f"{context}Question: {question}\nAnswer briefly. If you cannot know, say so.")
+    if not (own or "").strip():
+        # x9sw: no answer of its own, so nothing to compare: it can't tell a
+        # good reply from a bad one, and doubting everything says nothing.
+        return {"verdict": "no_answer", "unbacked": claims}
     remaining = unbacked(reply, f"{base}\n{own}")
     if not remaining:
         return None

@@ -230,3 +230,34 @@ def test_archiving_a_long_session_keeps_the_recent_turns(tmp_path, monkeypatch):
     sm_.summarize_and_archive("s")
     assert [m["content"] for m in session.history] == [f"turn {i}" for i in range(12, 20)]
     assert sm_.archiver.archive_conversation.call_args.kwargs["messages"] is not None
+
+
+def test_no_answer_of_its_own_doubts_nothing():
+    # x9sw: Core thought through all its tokens and answered "": every name was doubted.
+    result = sm.check("What time is it?", "It's 9:46 AM PST (17:46 UTC).", "", lambda p: "")
+    assert result["verdict"] == "no_answer"
+    assert not sm.is_necessary("What time is it?", result, ran_tool=False, had_source=False)
+
+
+def test_the_clock_survives_a_long_conversation(monkeypatch):
+    from datetime import datetime, timezone
+    from gaia_core import main
+    history = [{"role": "user", "content": "word " * 200} for _ in range(6)]
+    known = main._self_facts_for_observer(history)
+    assert datetime.now(timezone.utc).strftime("%H:%M") in known and len(known) <= 3000
+
+
+def test_the_other_mind_answers_without_thinking(monkeypatch):
+    from types import SimpleNamespace
+    from gaia_core import main
+    seen = {}
+
+    class Model:
+        def create_chat_completion(self, **kw):
+            seen.update(kw)
+            return {"choices": [{"message": {"content": "an answer"}}]}
+
+    monkeypatch.setattr(sm, "review", lambda q, r, k, generate, *a: generate("q"))
+    agent = SimpleNamespace(_is_prime_available=True, model_pool=SimpleNamespace(models={"core": Model()}))
+    assert main._second_mind_followup(agent, "q", "r", "", "s", False, False) == "an answer"
+    assert seen["chat_template_kwargs"] == {"enable_thinking": False}
