@@ -143,7 +143,7 @@ def _sources_for_observer(packet_dict, tool_texts: list) -> str:
     return "\n".join(parts)[:6000]
 
 
-def _self_facts_for_observer(history: list) -> str:
+def _self_facts_for_observer(history: list, reply: str = "") -> str:
     """What is true of her and of this conversation: a reply can use these
     without anyone having to look them up."""
     from datetime import datetime, timezone
@@ -164,7 +164,12 @@ def _self_facts_for_observer(history: list) -> str:
         logger.debug("observer self-facts failed (non-fatal)", exc_info=True)
     # What was just said is what a reply leans on: the latest of it is kept
     # whole, and the facts get the rest of the cap.
-    talk = "\n".join(str(m.get("content", ""))[:400] for m in (history or [])[-6:] if isinstance(m, dict))[-1500:]
+    # The reply under check isn't evidence for itself. It's in the history by now
+    # (agent_core adds it), and so it backed every name it had (x9sw).
+    said = (reply or "").strip()
+    earlier = [m for m in (history or []) if isinstance(m, dict)
+               and not (said and m.get("role") == "assistant" and str(m.get("content", "")).strip() in (said, said.split("\n\n", 1)[-1]))]
+    talk = "\n".join(str(m.get("content", ""))[:400] for m in earlier[-6:])[-1500:]
     facts = "\n".join(p for p in parts if p)
     return (talk + "\n" + facts).strip()[:3000]
 
@@ -2302,7 +2307,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                     _agent_core.take_turn_source(session_id)) if x)
                 _after_turn["second_mind"] = (
                     _agent_core, user_input or "", full_response,
-                    "\n".join(x for x in (_self_facts_for_observer(history), _sources) if x),
+                    "\n".join(x for x in (_self_facts_for_observer(history, full_response), _sources) if x),
                     session_id, bool(_tool_texts_for_observer), bool(_sources))
 
             # 29yq: a native tool call detected mid-stream (ParseEventType.
