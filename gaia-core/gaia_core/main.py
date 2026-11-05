@@ -151,6 +151,9 @@ def _self_facts_for_observer(history: list) -> str:
         from gaia_common.utils.host_facts import host_facts_text
         from gaia_common.utils.locality import locality_snapshot
         parts.append(host_facts_text())
+        from gaia_common.utils.self_model import lineage_of, minds
+        # She's told where her weights came from, so saying it isn't unbacked.
+        parts.extend(lineage_of(m.get("weights", "")).get("history", "") for m in minds().values())
         from gaia_core.utils.world_state import format_world_state_snapshot
         parts.append(json.dumps(locality_snapshot(), default=str))
         parts.append(format_world_state_snapshot(max_lines=4))
@@ -2350,7 +2353,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                         "total_chars": len(full_response),
                     }
 
-                yield json.dumps({"type": "packet", "value": final_packet_dict}) + "\n"
+                yield json.dumps({"type": "packet", "value": final_packet_dict}, default=str) + "\n"
 
             # Reset idle timer after response completes
             if idle_monitor:

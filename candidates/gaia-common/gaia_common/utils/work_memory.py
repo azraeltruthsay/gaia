@@ -59,8 +59,8 @@ _PART_OF_RE = re.compile(
     + r"\s+)?(?:stanza|verse|line|paragraph)s?\s+(?:of|from|in)\s+"
 )
 _PREAMBLE_RE = re.compile(
-    r"(?i)^(?:(?:hey|hi|gaia|ok|okay)[,!\s]+)*(?:(?:please|can you|could you|would you|will you)\s+)*"
-    r"(?:recite|read|share|give me|show me|write out|type out|present|say)\s+(?:me\s+)?"
+    r"(?i)^(?:(?:hey|hi|gaia|ok|okay|now|so|say)[,!\s]+)*(?:(?:please|can you|could you|would you|will you)\s+)*"
+    r"(?:recite|read|share|give me|show me|write out|type out|present|say)\s+(?:(?:to\s+)?me\s+)?"
 )
 _QUESTION_RE = re.compile(r"(?i)^(?:what(?:'s|’s| is| are| was)|tell me|how does|how do)\s+")
 _TRAILER_RE = re.compile(r"(?i)[\s,]+(?:for me|please|if you (?:can|could|would)|from memory)\s*$")
@@ -190,16 +190,22 @@ def best_agreement(pages: List[dict], name: str) -> Optional[Dict[str, object]]:
     return best
 
 
+_LEAD_IN_RE = re.compile(
+    r"(?is)^.*?[.!?]+\s+(?=(?:now\s+|so\s+)?(?:please\s+|kindly\s+)?(?:can|could|would|will|recite|read|say|tell|give|show|let)\b)")
+
+
 def work_name(request: str) -> str:
     """The work a request names: 'Please recite the first three stanzas of
     The Raven by Edgar Allan Poe.' -> 'The Raven by Edgar Allan Poe'."""
     name = (request or "").strip().rstrip(".!?")
+    # "Splendid! Can you recite ..." searched for all of it, greeting included.
+    name = _LEAD_IN_RE.sub("", name)
     name = _PREAMBLE_RE.sub("", name)
     name = _QUESTION_RE.sub("", name)
     name = _TRAILER_RE.sub("", name)
     name = _PART_OF_RE.sub("", name, count=1)
     name = _FORM_RE.sub("", name)
-    return name.strip().strip("\"“”‘’").strip()
+    return re.sub(r"[\"“”]", "", name).strip().strip("‘’").strip()
 
 
 def name_terms(name: str) -> set:

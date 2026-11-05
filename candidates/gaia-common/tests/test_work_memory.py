@@ -1,3 +1,4 @@
+import pytest
 """yx93: work memory — what two sites agree on, kept word for word."""
 
 from gaia_common.utils.work_memory import (
@@ -178,3 +179,14 @@ def test_asks_for_the_words():
                   "What does the first stanza of The Raven mean?",
                   "Use your memory palace to recall The Raven and tell me what it's about."):
         assert not asks_for_the_words(about), about
+
+
+@pytest.mark.parametrize("asked,name", [
+    ('Splendid! Can you please recite to me the poem "Jabberwocky"?', "Jabberwocky"),
+    ("Thanks. Now read me Invictus.", "Invictus"),
+    ("Mr. Darcy said hello. Recite Ozymandias.", "Ozymandias"),
+    ('Recite "Do Not Go Gentle Into That Good Night" by Dylan Thomas.', "Do Not Go Gentle Into That Good Night by Dylan Thomas"),
+    ("Say, can you recite The Road Not Taken?", "The Road Not Taken"),
+])
+def test_what_comes_before_the_request_is_not_the_title(asked, name):
+    assert work_name(asked) == name
