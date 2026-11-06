@@ -124,9 +124,14 @@ managed_http_api:
   management_endpoints:
     - endpoint: /model/load
       method: POST
-      request: { model: str, device: str, compile_mode: str, quantize: str }
+      request: { model: str, device: str, compile_mode: str, quantize: str,
+        prompt_format: "house|stock, optional, default house (2qus)" }
       response: { ok: bool, model: str, worker_port: int, model_loaded: bool }
       description: "Spawn worker subprocess, load model on GPU"
+      notes: "prompt_format picks the Gemma 4 turn format: house = GAIA's trained format
+        (<|turn>role<turn|>), stock = Google's (<|turn>role ... <turn|>, assistant 'model',
+        no-think as an empty thought channel) for an untrained stock model. Kept across
+        respawns. Ignored for ChatML models. /model/swap takes it too."
 
     - endpoint: /model/unload
       method: POST
@@ -136,7 +141,7 @@ managed_http_api:
 
     - endpoint: /model/swap
       method: POST
-      request: { model: str, device: str, compile_mode: str, quantize: str }
+      request: { model: str, device: str, compile_mode: str, quantize: str, prompt_format: "house|stock, optional" }
       response: { ok: bool, model: str, old_model: str }
       description: "Atomic unload + load (kill old worker, spawn new)"
 
