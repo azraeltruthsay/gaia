@@ -4503,6 +4503,16 @@ class AgentCore:
                         # 7n3: lean casual deliberation block on chitchat turns.
                         _delib_intent2 = str(getattr(plan, "intent", "") if plan else "").lower() \
                             or str(getattr(getattr(packet, "intent", None), "user_intent", "") or "").lower()
+                        # The selected mind deliberates, as on the OPERATOR path:
+                        # with no role given this was always Core, so Prime's
+                        # turns here came out in Core's words (2026-11-06: 22
+                        # tokens, "those are the current headlines", none listed).
+                        _delib_role2 = selected_model_name or "core"
+                        from gaia_core.cognition import inner_voice
+                        _iv_thinking2 = inner_voice.mode(self.session_manager, session_id, "thinking")
+                        _delib_deep2 = _delib_role2 == "prime" and inner_voice.wants_deep_focus(
+                            _iv_thinking2, _wants_focus_transition(
+                                packet.content.original_prompt or user_input or "", source))
                         _delib_result = run_deliberated_turn(
                             user_input=packet.content.original_prompt or "",
                             assembled_messages=final_messages,
@@ -4510,8 +4520,10 @@ class AgentCore:
                             config=self.config,
                             user_message_id=getattr(packet.header, "packet_id", None),
                             session_id=session_id,
+                            model_role=_delib_role2,
                             casual=_delib_intent2 in _CASUAL_DELIB_INTENTS,
                             offer_tools=offers_tools(_delib_intent2, packet),
+                            deep_focus=_delib_deep2,
                         )
                         if _delib_result and _delib_result.final_response:
                             logger.info(
@@ -4596,7 +4608,28 @@ class AgentCore:
                                 self._lookup_feedback(_delib_result.final_response, packet)
                             except Exception:
                                 logger.debug("Lookup memory feedback hook failed", exc_info=True)
-                            yield {"type": "token", "value": _delib_result.final_response}
+                            _delib_responding2 = (getattr(self, '_last_responding_model', None)
+                                                  or _delib_result.model_used or selected_model_name)
+                            # Shown to the person, never kept in her history (byxn).
+                            try:
+                                _iv_items2 = inner_voice.trace(
+                                    model=_delib_responding2, deep_focus=_delib_deep2,
+                                    pushback=bool(locals().get("_pushback")),
+                                    conv_recall=bool(locals().get("_conv_recall")),
+                                    followup=bool(locals().get("_followup")),
+                                    memory_answer=bool(locals().get("_memory_answer")),
+                                    sources=[r.source for r in (getattr(locals().get("_grounding_ctx"), "results", None) or [])],
+                                    tool_ran=bool(locals().get("tool_already_executed")),
+                                    flags=_delib_result.confabulation_flags or [])
+                                if inner_voice.show_trace(
+                                        inner_voice.mode(self.session_manager, session_id, "thoughts"), _iv_items2):
+                                    yield {"type": "inner", "value": inner_voice.render_trace(_iv_items2)}
+                                if inner_voice.show_thinking(_iv_thinking2, _delib_result.thinking):
+                                    yield {"type": "inner", "value": inner_voice.render_thinking(_delib_result.thinking)}
+                            except Exception:
+                                logger.debug("Inner voice failed (non-fatal)", exc_info=True)
+                            _delib_header2 = self._build_response_header(_delib_responding2, packet, None, None, None)
+                            yield {"type": "token", "value": _delib_header2 + _delib_result.final_response}
                             return
                 except Exception:
                     logger.exception("Deliberation hook failed; falling through to standard pipeline")

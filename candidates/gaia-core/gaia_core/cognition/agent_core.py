@@ -3817,6 +3817,7 @@ class AgentCore:
                                 yield {"type": "inner", "value": inner_voice.render_thinking(_delib_result.thinking)}
                         except Exception:
                             logger.debug("Inner voice failed (non-fatal)", exc_info=True)
+                        self._note_tool_sources(packet, session_id)
                         yield {"type": "token", "value": _delib_header + _final_clean}
                         try:
                             if self.session_manager and session_id:
@@ -4629,6 +4630,7 @@ class AgentCore:
                             except Exception:
                                 logger.debug("Inner voice failed (non-fatal)", exc_info=True)
                             _delib_header2 = self._build_response_header(_delib_responding2, packet, None, None, None)
+                            self._note_tool_sources(packet, session_id)
                             yield {"type": "token", "value": _delib_header2 + _delib_result.final_response}
                             return
                 except Exception:
@@ -7867,6 +7869,32 @@ RESULT: COMPLEX (reason: <brief reason>)
         keep = states_something(reply) and not unbacked(reply, f"{user_input}\n{facts}")
         self.logger.info("Host facts: answered from the machine (her words kept: %s)", keep)
         return reply if keep else facts
+
+    def _note_tool_sources(self, packet, session_id: str) -> None:
+        """Keep what this turn's tools and lookups returned for the mind
+        listening afterward. Deliberated turns end without a final packet, so
+        main.py never saw them: the other mind doubted BBC headlines that she
+        had just read (2026-11-06)."""
+        try:
+            from gaia_common.utils.tool_call_parser import tool_result_text
+            parts = []
+            for df in getattr(packet.content, "data_fields", None) or []:
+                if getattr(df, "key", "") not in ("tool_result", "web_grounding"):
+                    continue
+                v = getattr(df, "value", None)
+                if isinstance(v, dict) and "output" in v:
+                    parts.append(tool_result_text(v.get("output"), limit=3000))
+                elif isinstance(v, str):
+                    parts.append(v[:3000])
+                elif v:
+                    parts.append(json.dumps(v, default=str, ensure_ascii=False)[:3000])
+            if parts and session_id:
+                if not hasattr(self, "_turn_sources"):
+                    self._turn_sources = {}
+                have = self._turn_sources.get(session_id, "")
+                self._turn_sources[session_id] = "\n".join(x for x in [have] + parts if x)[:6000]
+        except Exception:
+            logger.debug("Could not keep the turn's sources (non-fatal)", exc_info=True)
 
     def take_turn_source(self, session_id: str) -> str:
         """What this turn answered from, for the mind listening afterward."""
