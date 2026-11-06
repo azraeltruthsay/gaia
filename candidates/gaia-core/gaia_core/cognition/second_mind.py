@@ -28,6 +28,7 @@ _MAX_REPLY_CHARS = 4000
 # A capital not opening a sentence, line or list item, or a number.
 _CLAIM_RE = re.compile(r"(?<![.!?]\s)(?<!^)(?<!\n)(?<![-*:]\s)\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+)*|\d[\d:.,]*\d|\d")
 _LABEL_RE = re.compile(r"^\s*(?:\[[^\]\n]{1,80}\]\s*|\*\[[^\n]*\]\*\s*)+")
+_MARKUP_RE = re.compile(r"[*_`]+|^#{1,6}\s+", re.MULTILINE)
 _FAKE_RESULT_RE = re.compile(r"</?tool_(?:result|response)>", re.IGNORECASE)
 _busy = threading.Lock()
 
@@ -36,11 +37,17 @@ def _words(text: str) -> set:
     return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
 
 
+def _plain(reply: str) -> str:
+    """The reply without its label and markdown: "**Explanation**:" opens a
+    line, it isn't a name (2026-11-05)."""
+    return _MARKUP_RE.sub("", _LABEL_RE.sub("", reply or "", count=1))
+
+
 def unbacked(reply: str, known: str) -> List[str]:
     """Names and numbers in a reply that `known` doesn't hold."""
     words = {w.rstrip("s") for w in _words(known)}
     lowered = (known or "").lower()
-    body = _LABEL_RE.sub("", reply or "", count=1)
+    body = _plain(reply)
     out = []
     for claim in _CLAIM_RE.findall(body):
         # Also as a substring: "9950" is backed by "9950X3D", "Gemma" by "Gemma4".
@@ -85,7 +92,7 @@ def keeps_to_text(reply: str, text: str, question: str, opinion: bool = False) -
 
 def states_something(reply: str) -> bool:
     """Whether a reply holds any name or number at all."""
-    return bool(_CLAIM_RE.findall(_LABEL_RE.sub("", reply or "", count=1)))
+    return bool(_CLAIM_RE.findall(_plain(reply)))
 
 
 def check(question: str, reply: str, known: str, generate: Callable[[str], str]) -> Optional[dict]:

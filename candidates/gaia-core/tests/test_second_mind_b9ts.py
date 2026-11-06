@@ -274,3 +274,10 @@ def test_the_reply_under_check_does_not_back_itself():
     assert "Portland" in sm.unbacked(reply, known)
     # An earlier reply of hers still counts: she can lean on what she said before.
     assert "Portland" not in sm.unbacked(reply, main._self_facts_for_observer(history))
+
+
+def test_bold_at_the_start_of_a_line_is_not_a_name():
+    from gaia_core.cognition.second_mind import unbacked
+    reply = "The ball costs **$0.05**.\n\n**Explanation**:\nLet the ball be x.\n## Summary\nDone."
+    assert unbacked(reply, "ball 0.05") == []
+    assert unbacked("I met **Bob** there.", "") == ["Bob"]
