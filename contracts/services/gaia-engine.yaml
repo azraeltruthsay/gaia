@@ -149,7 +149,8 @@ managed_http_api:
       method: GET
       response: { status: str, engine: str, model_loaded: bool, mode: str, managed: bool, worker_pid: int,
         device: str, cuda_healthy: "bool|null, present only when device=='cuda' (null = unverified)",
-        cuda_detail: "str, present only when device=='cuda'" }
+        cuda_detail: "str, present only when device=='cuda'",
+        respawning: "bool, present when the worker reported its CUDA context wedged (pqpo)" }
       description: "Health check (standby or active)"
       notes: "GAIA_Project-t0f2: when device=='cuda', actually probes torch.cuda.is_available()
         (gaia_engine.core.cuda_health_snapshot) instead of only checking process/worker
@@ -163,7 +164,12 @@ managed_http_api:
         (llama-server worker, or the active-inference short-circuit) and the manager has
         masked its own CUDA after an earlier CPU load, cuda_healthy is null with an
         'unverified' cuda_detail and status is NOT degraded -- the manager's torch view is
-        known-blind then."
+        known-blind then.
+        GAIA_Project-pqpo: a GPU fault (device-side assert, illegal memory access) wedges
+        the worker's CUDA context while torch.cuda.is_available() stays True. The worker
+        remembers it (gaia_engine.core.note_cuda_failure), reports cuda_healthy=false with
+        a 'wedged' cuda_detail, and the manager replaces the worker with a fresh process on
+        the same model (EngineManager.respawn_wedged_worker, at most once a minute)."
 
     - endpoint: /status
       method: GET
@@ -187,7 +193,8 @@ managed_http_api:
         Non-streaming errors: 500 {error} for a normal generation failure; 503
         {error, error_code: GAIA-ENGINE-GPU-DEAD} specifically when the engine
         expects CUDA but torch.cuda.is_available() is False (stale driver
-        context after a host reboot — GAIA_Project-448j/t0f2) — distinguishes
+        context after a host reboot — GAIA_Project-448j/t0f2) or a GPU fault
+        wedged the context (pqpo; the manager then respawns the worker) — distinguishes
         'this worker needs a restart' from an ordinary request/model error.
         On the streaming path the 200 + SSE headers are already sent before
         generation starts, so a mid-stream failure of either kind cannot be
