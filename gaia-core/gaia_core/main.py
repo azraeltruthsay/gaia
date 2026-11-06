@@ -1795,6 +1795,12 @@ async def process_packet(packet_data: Dict[str, Any]):
                             response_pieces.append(val)
                             yield json.dumps({"type": "token", "value": val}) + "\n"
 
+                    elif event.get("type") == "inner":
+                        # Her inner voice (inner_voice.py): its own message, shown
+                        # but not part of the reply that is checked and kept.
+                        if event.get("value"):
+                            yield json.dumps({"type": "token", "value": event["value"] + "\n\n"}) + "\n"
+                            yield json.dumps({"type": "flush"}) + "\n"
                     elif event.get("type") == "flush":
                         yield json.dumps(event) + "\n"
                     elif event.get("type") == "packet":
