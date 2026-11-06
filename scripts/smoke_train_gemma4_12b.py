@@ -23,12 +23,44 @@ trainable = sum(p.numel() for p in m.parameters() if p.requires_grad)
 mb = lambda x: round(x / 2**20)
 print(json.dumps({"load_s": round(time.time() - t, 1), "after_load_mb": mb(torch.cuda.memory_allocated()),
                   "load_peak_mb": mb(torch.cuda.max_memory_allocated()), "trainable_M": round(trainable / 1e6, 1)}), flush=True)
-import bitsandbytes as bnb; opt = bnb.optim.AdamW8bit([p for p in m.parameters() if p.requires_grad], lr=float(__import__("os").environ.get("LR", "1e-4")))
+import bitsandbytes as bnb; import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
+_inner = m.base_model.model  # Gemma4UnifiedForConditionalGeneration under PEFT
+_softcap = _inner.config.get_text_config().final_logit_softcapping
+
+
+def chunked_loss(input_ids, chunk=256):
+    """Next-token loss without the full [seq, 262144] logits: each chunk's
+    logits are rebuilt in backward (checkpoint), so only one chunk lives at a
+    time. At 1024 tokens the full logits, their float copy and their gradient
+    were ~2 GB of the 12.6 GB peak (2026-11-06)."""
+    hidden = _inner.model(input_ids=input_ids, return_dict=True).last_hidden_state
+    h, y = hidden[:, :-1], input_ids[:, 1:]
+    w = _inner.lm_head.weight
+
+    def piece(hc, yc):
+        logits = hc @ w.t()
+        if _softcap:
+            logits = torch.tanh(logits / _softcap) * _softcap
+        return F.cross_entropy(logits.float().reshape(-1, logits.shape[-1]), yc.reshape(-1), reduction="sum")
+    total = sum(checkpoint(piece, h[:, i:i + chunk], y[:, i:i + chunk], use_reentrant=False)
+                for i in range(0, h.shape[1], chunk))
+    return total / y.numel()
+
+
+CHUNKED = __import__("os").environ.get("CHUNKED", "1") == "1"
+if CHUNKED:
+    with torch.no_grad():
+        b0 = batches[0][:256].unsqueeze(0).to(0)
+        print(json.dumps({"loss_check_model": round(m(input_ids=b0, labels=b0).loss.item(), 4),
+                          "loss_check_chunked": round(chunked_loss(b0).item(), 4)}), flush=True)
+opt = bnb.optim.AdamW8bit([p for p in m.parameters() if p.requires_grad], lr=float(__import__("os").environ.get("LR", "1e-4")))
 m.train(); torch.cuda.reset_peak_memory_stats(); losses, t0 = [], time.time()
 print(json.dumps({"before_step_mb": mb(torch.cuda.memory_allocated())}), flush=True)
 for step in range(20):
     b = batches[step % len(batches)].unsqueeze(0).to(0)
-    out = m(input_ids=b, labels=b)
+    loss = chunked_loss(b) if CHUNKED else m(input_ids=b, labels=b).loss
+    out = type("Out", (), {"loss": loss})
     out.loss.backward()
     if step == 0:
         print(json.dumps({"after_backward_peak_mb": mb(torch.cuda.max_memory_allocated()), "reserved_mb": mb(torch.cuda.memory_reserved())}), flush=True)
