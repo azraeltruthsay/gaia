@@ -502,6 +502,31 @@ def is_tool_answer(messages: list) -> bool:
         and messages[0].get("content") == TOOL_ANSWER_SYSTEM
 
 
+FRONT_PAGES_NOTE = ("No individual stories came back: these are news sites' front pages, "
+                    "with no headlines in them.")
+
+
+def front_pages_only(rows: Any) -> bool:
+    """Whether search results are only sites' front pages ("nbcnews.com/",
+    "cbsnews.com/world/"): a search for "recent news headlines" returned five,
+    and she made up three stories from them (bxzc, 2026-11-06). A story's
+    address has an id, a date or a long slug; a front page's has at most one
+    short section ("world", "richland-wa")."""
+    from urllib.parse import urlparse
+    rows = [r for r in rows or [] if isinstance(r, dict)]
+    if len(rows) < 2:
+        return False
+    for r in rows:
+        url = str(r.get("url") or r.get("href") or r.get("link") or "")
+        if not url:
+            return False
+        parts = urlparse(url if "://" in url else f"https://{url}")
+        segments = [s for s in parts.path.split("/") if s]
+        if parts.query or len(segments) > 1 or any(not re.fullmatch(r"[A-Za-z]+(?:-[A-Za-z]+){0,2}(?:\.html?)?", s) for s in segments):
+            return False
+    return True
+
+
 def tool_result_text(result: Any, limit: int = 4000, question: str = "") -> str:
     """A tool result as plain text for the model to answer from (ecnc).
 
@@ -543,6 +568,8 @@ def tool_result_text(result: Any, limit: int = 4000, question: str = "") -> str:
                 text = "\n".join(_result_line(r) for r in rows)
                 if result.get("note"):
                     text = f"{result['note']}\n{text}"
+                if front_pages_only(rows):
+                    text = f"{FRONT_PAGES_NOTE}\n{text}"
             elif isinstance(rows, list) and not rows:
                 text = result.get("note") or "(no results)"
             else:
