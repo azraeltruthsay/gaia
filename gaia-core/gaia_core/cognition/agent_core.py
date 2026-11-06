@@ -1476,6 +1476,15 @@ class AgentCore:
         except Exception:
             logger.debug("Pending-write approval check failed, continuing", exc_info=True)
 
+        # d3px shadow: what the person wants, read by meaning, logged beside
+        # what routing does (ledger, same session and time). Routes nothing.
+        try:
+            from gaia_core.cognition import intent_shadow
+            intent_shadow.observe(user_input or "", self.session_manager.get_history(session_id),
+                                  session_id, source, self.model_pool)
+        except Exception:
+            logger.debug("Intent shadow hook failed (non-fatal)", exc_info=True)
+
         # Inner voice switches ("!thinking on"): a setting, not a message to her.
         try:
             from gaia_core.cognition import inner_voice
