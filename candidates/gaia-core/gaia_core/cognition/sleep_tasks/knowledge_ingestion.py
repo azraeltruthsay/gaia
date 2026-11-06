@@ -434,6 +434,10 @@ def _plant_thought_seed(
         },
     }
 
+    from gaia_core.cognition.thought_seed import same_seed_waiting
+    if same_seed_waiting(seed_text, SEEDS_DIR):
+        logger.info("KnowledgeIngestion: the same notice is already waiting; not planting another (gb7y)")
+        return
     try:
         seed_path = SEEDS_DIR / fname
         with open(seed_path, "w", encoding="utf-8") as f:
