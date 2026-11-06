@@ -4225,9 +4225,15 @@ class AgentCore:
             # - GPU Prime is available (selected_model_name is gpu_prime)
             _plan_intent = getattr(packet.intent, 'user_intent', '') if packet.intent else ''
             _plan_keywords = ["implementation plan", "detailed plan", "create a plan", "plan for adding"]
+            # The pipeline writes a four-phase engineering plan: minutes on
+            # Prime. Since Prime is the default voice, a guessed "planning"
+            # intent alone sent a question about her architecture there and
+            # past the portal's 5-minute timeout (2026-11-05). It takes a
+            # request that asks for a plan.
+            _lowered_input = (user_input or "").lower()
             _is_planning_task = (
-                _plan_intent == "planning"
-                or any(kw in (user_input or "").lower() for kw in _plan_keywords)
+                any(kw in _lowered_input for kw in _plan_keywords)
+                or (_plan_intent == "planning" and bool(re.search(r"\bplan\b|\bimplement", _lowered_input)))
             )
             if _is_planning_task and selected_model_name in ("prime",):
                 try:
