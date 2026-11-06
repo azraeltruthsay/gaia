@@ -506,25 +506,33 @@ FRONT_PAGES_NOTE = ("No individual stories came back: these are news sites' fron
                     "with no headlines in them.")
 
 
-def front_pages_only(rows: Any) -> bool:
-    """Whether search results are only sites' front pages ("nbcnews.com/",
-    "cbsnews.com/world/"): a search for "recent news headlines" returned five,
-    and she made up three stories from them (bxzc, 2026-11-06). A story's
-    address has an id, a date or a long slug; a front page's has at most one
-    short section ("world", "richland-wa")."""
+def _is_front_page(url: str) -> bool:
     from urllib.parse import urlparse
+    if not url:
+        return False
+    parts = urlparse(url if "://" in url else f"https://{url}")
+    path = parts.path.lower()
+    # An aggregator's topic page (news.google.com/topics/CAAq...) lists stories too.
+    if re.match(r"^/(?:topics?|sections?|hub)/", path):
+        return True
+    if "=" in parts.query:  # "?v=..." is a video, "?id=..." an article; "?_" is nothing
+        return False
+    segments = [seg for seg in path.split("/") if seg]
+    return len(segments) <= 1 and all(
+        re.fullmatch(r"[a-z]+(?:-[a-z]+){0,2}(?:\.html?)?", seg) for seg in segments)
+
+
+def front_pages_only(rows: Any) -> bool:
+    """Whether search results are sites' front pages ("nbcnews.com/",
+    "cbsnews.com/world/", "aol.com/?_"), two in three or more: a search for
+    "recent news headlines" returned five, and she made up three stories from
+    them (bxzc, 2026-11-06). A story's address has an id, a date or a long
+    slug; a front page's has at most one short section ("world", "richland-wa")."""
     rows = [r for r in rows or [] if isinstance(r, dict)]
     if len(rows) < 2:
         return False
-    for r in rows:
-        url = str(r.get("url") or r.get("href") or r.get("link") or "")
-        if not url:
-            return False
-        parts = urlparse(url if "://" in url else f"https://{url}")
-        segments = [s for s in parts.path.split("/") if s]
-        if parts.query or len(segments) > 1 or any(not re.fullmatch(r"[A-Za-z]+(?:-[A-Za-z]+){0,2}(?:\.html?)?", s) for s in segments):
-            return False
-    return True
+    fronts = sum(_is_front_page(str(r.get("url") or r.get("href") or r.get("link") or "")) for r in rows)
+    return fronts * 3 >= len(rows) * 2
 
 
 def tool_result_text(result: Any, limit: int = 4000, question: str = "") -> str:

@@ -488,6 +488,13 @@ def web_fetch(params: dict) -> dict:
 
     html = raw_bytes.decode("utf-8", errors="replace")
 
+    if params.get("headlines"):
+        # bxzc: a news site's front page, read for its stories. Its text is
+        # menus and blurbs; its links to articles are the headlines.
+        found = _headlines(html, url)
+        return {"ok": True, "title": _extract_content(html, url)[0], "url": url,
+                "domain": domain, "headlines": found, "count": len(found)}
+
     # Extract clean text via trafilatura → BeautifulSoup → regex fallback
     title, text = _extract_content(html, url)
 
@@ -582,6 +589,46 @@ def _text_with_breaks(html: str) -> str:
 def _is_preformatted(node) -> bool:
     style = (node.get("style") or "") if hasattr(node, "get") else ""
     return getattr(node, "name", "") == "pre" or "pre-" in style or "pre;" in style
+
+
+def _headlines(html: str, url: str, limit: int = 10) -> list:
+    """Links on a page that read like stories: a few words of text, pointing
+    at an article on the same site (an id, a date or a long slug in the path),
+    not a section, a login or a video."""
+    from urllib.parse import urljoin, urlparse
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return []
+    site = ".".join((urlparse(url).hostname or "").split(".")[-2:])
+    out, seen = [], set()
+    for a in BeautifulSoup(html, "html.parser").find_all("a", href=True):
+        whole = " ".join(a.get_text(" ").split())
+        # A card's link holds its heading and its summary: the heading is the headline.
+        heading = a.find(["h1", "h2", "h3", "h4"])
+        text = " ".join(heading.get_text(" ").split()) if heading else whole
+        text = re.sub(r"^\d{1,2}\s+", "", text)  # "4 US midterm..." from a most-read list
+        if not (25 <= len(text) <= 180) or len(text.split()) < 5:
+            continue
+        summary = whole[len(text):].strip() if heading and whole.startswith(text) else ""
+        link = urljoin(url, a["href"]).split("#")[0]
+        parts = urlparse(link)
+        if not (parts.hostname or "").endswith(site) or link in seen or text in seen:
+            continue
+        path = parts.path.lower()
+        if any(w in path for w in ("/video", "/live", "/login", "/subscribe", "/account", "/newsletter",
+                                   "cookie", "privacy", "/usingthe")):
+            continue
+        last = [seg for seg in path.split("/") if seg][-1:] or [""]
+        # An article: an id ("1954155", "c0lkz4e3rmxo"), a dated path, or a long slug.
+        if not (re.search(r"\d{4,}|/20\d\d/", path) or last[0].count("-") >= 3
+                or re.fullmatch(r"(?=[a-z0-9]*\d)[a-z0-9]{8,}", last[0])):
+            continue
+        seen.update((link, text))
+        out.append({"title": text, "url": link, **({"snippet": summary[:300]} if summary else {})})
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _extract_content(html: str, url: str) -> Tuple[str, str]:

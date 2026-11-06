@@ -35,6 +35,12 @@ def test_front_pages_are_told_apart_from_stories():
     assert front_pages_only(FRONT_PAGES)
     assert not front_pages_only(STORIES)
     assert not any(front_pages_only([FRONT_PAGES[0], s]) for s in STORIES)
+    # Live, 2026-11-06: an aggregator topic page and "aol.com/?_" among them.
+    live = [{"url": "https://apnews.com/"},
+            {"url": "https://news.google.com/topics/CAAqKggKIiRDQkFTRlFvSUwyMHZNRFZxYUdjU0JXVnVMVWRDR2dKVFJ5Z0FQAQ"},
+            {"url": "https://www.nbcnews.com/"}, {"url": "https://www.yahoo.com/news/"}, {"url": "https://www.aol.com/?_"}]
+    assert front_pages_only(live)
+    assert front_pages_only(FRONT_PAGES[:2] + STORIES[:1]) and not front_pages_only(FRONT_PAGES[:1] + STORIES[:2])
     assert not front_pages_only(FRONT_PAGES[:1])
 
 
@@ -90,3 +96,11 @@ def test_front_pages_are_read_for_their_headlines():
     assert asked[:len(FRONT_PAGES)] == [r["url"] for r in FRONT_PAGES] and asked[-1] == el.NEWS_FRONT_PAGES[0]
     assert el.headlines_for(STORIES, call=call) is None
     assert el.headlines_for(FRONT_PAGES, call=lambda m, p: {"ok": False}) is None
+
+
+def test_the_answer_says_when_it_was_read():
+    s = Sessions()
+    el.remember(s, "a", "recent news headlines", FRONT_PAGES, note="Headlines on the front page of BBC News.")
+    out = el.as_tool_result(el.recall(s, "a", "when were these published?"))["output"]
+    assert out["note"].startswith("Headlines on the front page of BBC News. Read ")
+    assert str(time.localtime().tm_year) in out["note"]

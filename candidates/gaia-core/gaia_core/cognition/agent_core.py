@@ -464,7 +464,11 @@ class AgentCore:
     }
 
     # ── Always-on LoRA adapter for identity/architecture ────────────────────
-    _DEFAULT_ADAPTER = os.getenv("GAIA_LORA_ADAPTER", "gaia_architecture")
+    # Off unless named (pqpo, 2026-11-06): the default "gaia_architecture" was
+    # trained in March for Qwen3.5-4B. Loading it into today's Prime failed
+    # half-way, left PEFT wrapped, and the next generation hit a CUDA assert
+    # (inf/nan probabilities) that killed Prime until restart — twice in a day.
+    _DEFAULT_ADAPTER = os.getenv("GAIA_LORA_ADAPTER", "")
     _ADAPTER_BASE_PATH = Path("/models/lora_adapters/tier1_global")
     # Models that support LoRA adapters (vLLM-backed)
     _ADAPTER_ELIGIBLE_MODELS = frozenset({"prime", "cpu_prime"})
@@ -622,6 +626,8 @@ class AgentCore:
         # Only vLLM-backed models support LoRA
         resolved = model_name.lower()
         if not any(tag in resolved for tag in ("prime",)):
+            return None
+        if not self._DEFAULT_ADAPTER:
             return None
         # Check that the adapter has both config AND actual weight files
         adapter_dir = self._ADAPTER_BASE_PATH / self._DEFAULT_ADAPTER
@@ -3294,7 +3300,9 @@ class AgentCore:
                             if front_pages_only(_results[:3]):
                                 _formatted += FRONT_PAGES_NOTE + "\n"
                             from gaia_core.cognition import earlier_lookup as _el
-                            _el.remember(self.session_manager, session_id, _query, _results)
+                            _el.remember(self.session_manager, session_id, _query, _results,
+                                         note=(f"Headlines on the front page of {_front['source']} ({_front['url']})."
+                                               if _front else ""))
                             if _page_content:
                                 _excerpt = " ".join(str(_page_content).split())[:2500]
                                 _formatted += f"--- Excerpt of the first result ({_first_url}) ---\n"
@@ -3370,9 +3378,12 @@ class AgentCore:
                             _front = _el.headlines_for(_out.get("results") or [])
                             if _front:
                                 _out["results"] = _front["results"]
-                                _out["note"] = f"Headlines on the front page of {_front['source']} ({_front['url']}), read just now."
+                                _out["note"] = (f"Headlines on the front page of {_front['source']} ({_front['url']}), "
+                                                f"read {_el.read_at(time.time())}.")
                             _el.remember(self.session_manager, session_id,
-                                         _out.get("query") or user_input, _out.get("results") or [])
+                                         _out.get("query") or user_input, _out.get("results") or [],
+                                         note=(f"Headlines on the front page of {_front['source']} ({_front['url']})."
+                                               if _front else ""))
                     except Exception:
                         logger.debug("Earlier lookup: could not keep routed results", exc_info=True)
                     ts_write({

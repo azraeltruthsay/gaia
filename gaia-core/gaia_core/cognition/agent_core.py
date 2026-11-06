@@ -464,7 +464,11 @@ class AgentCore:
     }
 
     # ── Always-on LoRA adapter for identity/architecture ────────────────────
-    _DEFAULT_ADAPTER = os.getenv("GAIA_LORA_ADAPTER", "gaia_architecture")
+    # Off unless named (pqpo, 2026-11-06): the default "gaia_architecture" was
+    # trained in March for Qwen3.5-4B. Loading it into today's Prime failed
+    # half-way, left PEFT wrapped, and the next generation hit a CUDA assert
+    # (inf/nan probabilities) that killed Prime until restart — twice in a day.
+    _DEFAULT_ADAPTER = os.getenv("GAIA_LORA_ADAPTER", "")
     _ADAPTER_BASE_PATH = Path("/models/lora_adapters/tier1_global")
     # Models that support LoRA adapters (vLLM-backed)
     _ADAPTER_ELIGIBLE_MODELS = frozenset({"prime", "cpu_prime"})
@@ -622,6 +626,8 @@ class AgentCore:
         # Only vLLM-backed models support LoRA
         resolved = model_name.lower()
         if not any(tag in resolved for tag in ("prime",)):
+            return None
+        if not self._DEFAULT_ADAPTER:
             return None
         # Check that the adapter has both config AND actual weight files
         adapter_dir = self._ADAPTER_BASE_PATH / self._DEFAULT_ADAPTER
@@ -3189,13 +3195,28 @@ class AgentCore:
             # search directly. This injects results into the packet so the model
             # just needs to format them, not decide to search.
             _lowered_input = (user_input or "").lower()
+            # bxzc: "summarize the top 3 stories" / "which outlet put these
+            # out?" ask about the search a moment ago: answered from what it
+            # returned, as a tool that already ran, with no new search.
+            _lookup_recalled = None
+            try:
+                from gaia_core.cognition import earlier_lookup
+                _lookup_recalled = earlier_lookup.recall(self.session_manager, session_id, user_input)
+                if _lookup_recalled:
+                    packet.content.data_fields.append(DataField(
+                        key='tool_result', value=earlier_lookup.as_tool_result(_lookup_recalled),
+                        type='tool_execution_result', source='earlier_lookup'))
+                    logger.info("Earlier lookup: answering from the search for %r (%d results)",
+                                _lookup_recalled.get("query", "")[:60], len(_lookup_recalled.get("results") or []))
+            except Exception:
+                logger.debug("Earlier lookup failed (non-fatal)", exc_info=True)
             _web_pre_executed = False  # set when results land in the packet below
             _web_request = any(kw in _lowered_input for kw in [
                 "web tool", "web search", "search the web", "search online",
                 "look it up", "look up online", "use your web",
                 "search for the", "search for it",
             ])
-            if _web_request and not (
+            if _web_request and not _lookup_recalled and not (
                 packet.tool_routing and
                 packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
             ):
@@ -3262,12 +3283,26 @@ class AgentCore:
                             # one token per line; Core answered with nothing.
                             # The page now follows as an excerpt, whitespace
                             # collapsed so the budget holds prose, not newlines.
+                            # bxzc: only news sites' front pages came back: read
+                            # the stories on one rather than answer from blurbs.
+                            from gaia_core.cognition import earlier_lookup as _el
+                            _front = _el.headlines_for(_results)
+                            if _front:
+                                _results, _page_content = _front["results"], ""
+                                _query = f"{_query} (headlines read from {_front['source']})"
                             _formatted = f"--- Web Search Results (query: {_query}) ---\n"
-                            for _r in _results[:3]:
+                            for _r in _results[:10 if _front else 3]:
                                 _formatted += f"  Title: {_r.get('title', '?')}\n"
                                 _formatted += f"  URL: {_r.get('href', _r.get('url', '?'))}\n"
                                 _formatted += f"  {_r.get('body', _r.get('snippet', ''))[:500]}\n\n"
                             _formatted += "--- End of Web Search Results ---\n"
+                            from gaia_common.utils.tool_call_parser import FRONT_PAGES_NOTE, front_pages_only
+                            if front_pages_only(_results[:3]):
+                                _formatted += FRONT_PAGES_NOTE + "\n"
+                            from gaia_core.cognition import earlier_lookup as _el
+                            _el.remember(self.session_manager, session_id, _query, _results,
+                                         note=(f"Headlines on the front page of {_front['source']} ({_front['url']})."
+                                               if _front else ""))
                             if _page_content:
                                 _excerpt = " ".join(str(_page_content).split())[:2500]
                                 _formatted += f"--- Excerpt of the first result ({_first_url}) ---\n"
@@ -3298,6 +3333,8 @@ class AgentCore:
             # routing pass would run the same search a second time.
             if _web_pre_executed:
                 logger.info("Tool routing skipped: web search already pre-executed this turn")
+            elif _lookup_recalled:
+                logger.info("Tool routing skipped: answering from the earlier search")
             elif self._should_use_tool_routing(plan, user_input):
                 logger.info(f"Tool routing triggered for intent: {plan.intent}")
                 packet = self._run_tool_routing_loop(
@@ -3330,6 +3367,25 @@ class AgentCore:
                     # Tool was executed - the result is now in the packet
                     # Continue to normal processing which will include the tool result in context
                     logger.info("Tool executed successfully, continuing with enhanced context")
+                    try:
+                        _sel = packet.tool_routing.selected_tool
+                        _out = packet.tool_routing.execution_result.output if packet.tool_routing.execution_result else None
+                        if (_sel and _sel.tool_name == "web" and (_sel.params or {}).get("action") == "search"
+                                and isinstance(_out, dict)):
+                            from gaia_core.cognition import earlier_lookup as _el
+                            # bxzc: front pages only — the tool_result field holds
+                            # this same dict, so she answers from the headlines.
+                            _front = _el.headlines_for(_out.get("results") or [])
+                            if _front:
+                                _out["results"] = _front["results"]
+                                _out["note"] = (f"Headlines on the front page of {_front['source']} ({_front['url']}), "
+                                                f"read {_el.read_at(time.time())}.")
+                            _el.remember(self.session_manager, session_id,
+                                         _out.get("query") or user_input, _out.get("results") or [],
+                                         note=(f"Headlines on the front page of {_front['source']} ({_front['url']})."
+                                               if _front else ""))
+                    except Exception:
+                        logger.debug("Earlier lookup: could not keep routed results", exc_info=True)
                     ts_write({
                         "type": "tool_routing",
                         "stage": "continuing_with_result",
@@ -3475,13 +3531,17 @@ class AgentCore:
                                               or is_conversation_followup(user_input, history))
             _followup = (not _pushback and not _conv_recall
                          and is_knowledge_followup(user_input, history))
+            if _lookup_recalled:
+                _pushback = _conv_recall = _followup = False
             # Outcome ledger (gjuh.2): a dispute is the strongest signal the
             # last answer went wrong; the miner joins it to that turn's records.
             if _pushback:
                 outcome_ledger.record_pushback(session_id, packet.header.packet_id, user_input)
             _memory_answer = False
             try:
-                if _pushback:
+                if _lookup_recalled:
+                    _grounding_ctx = None  # answered from the earlier search (bxzc)
+                elif _pushback:
                     from gaia_core.cognition.knowledge_router import (
                         disputed_exchange, ground_conversation)
                     _disputed_q, _disputed = disputed_exchange(history, user_input)
@@ -3532,7 +3592,7 @@ class AgentCore:
                     )
                 outcome_ledger.record_lookup(
                     session_id, packet.header.packet_id,
-                    mode=("pushback" if _pushback else "conversation" if _conv_recall
+                    mode=("earlier_lookup" if _lookup_recalled else "pushback" if _pushback else "conversation" if _conv_recall
                           else "follow-up" if _followup
                           else "recall" if _kr_skip else "ground"),
                     query=getattr(_grounding_ctx, "query", "") or user_input,

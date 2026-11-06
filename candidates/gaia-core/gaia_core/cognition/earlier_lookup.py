@@ -36,7 +36,7 @@ def refers_to_results(text: str) -> bool:
     return bool(_REFERS_RE.search(text or ""))
 
 
-def remember(session_manager, session_id: str, query: str, results: List[Dict[str, Any]]) -> None:
+def remember(session_manager, session_id: str, query: str, results: List[Dict[str, Any]], note: str = "") -> None:
     """Keep a search's results for the turns after it."""
     rows = []
     for r in results or []:
@@ -46,7 +46,7 @@ def remember(session_manager, session_id: str, query: str, results: List[Dict[st
                          "snippet": str(r.get("snippet") or r.get("body") or "")[:600]})
     try:
         session_manager.set_session_meta(session_id, META_KEY, {
-            "query": (query or "")[:200], "results": rows[:_MAX_ROWS], "ts": time.time()})
+            "query": (query or "")[:200], "results": rows[:_MAX_ROWS], "ts": time.time(), "note": note[:300]})
     except Exception:
         logger.debug("Earlier lookup: could not keep results", exc_info=True)
 
@@ -66,12 +66,27 @@ def recall(session_manager, session_id: str, text: str, now: Optional[float] = N
     return lookup
 
 
+def read_at(ts: float) -> str:
+    """When the results were read, in the operator's time: with none given,
+    she dated BBC headlines "November 11, 2020" (2026-11-06)."""
+    import os
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        when = datetime.fromtimestamp(ts, ZoneInfo(os.environ.get("GAIA_USER_TZ", "America/Los_Angeles")))
+    except Exception:
+        when = datetime.fromtimestamp(ts)
+    return when.strftime("%A, %B %-d, %Y at %-I:%M %p")
+
+
 def as_tool_result(lookup: dict) -> dict:
     """The packet's tool_result for a turn answered from the earlier search."""
     query = lookup.get("query") or ""
     label = f'your web search for "{query}" a moment ago' if query else "your web search a moment ago"
+    note = " ".join(x for x in (lookup.get("note") or "",
+                                f"Read {read_at(float(lookup.get('ts') or time.time()))}.") if x)
     return {"tool": label, "params": {}, "success": True,
-            "output": {"query": query, "results": lookup.get("results") or []}}
+            "output": {"query": query, "note": note, "results": lookup.get("results") or []}}
 
 
 # Front pages she can read for headlines. The ones a search returns are
