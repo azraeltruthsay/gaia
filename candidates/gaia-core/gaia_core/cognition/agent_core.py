@@ -106,6 +106,7 @@ logger = logging.getLogger("GAIA.AgentCore")
 HISTORY_SUMMARY_THRESHOLD = 20
 WHOLE_DOC_CHARS = 9000
 PLAIN_DOC_CHARS = 1200
+WHOLE_FALLBACK_CHARS = 3000
 _RECITATION_FETCHES = 8  # Pages compared when learning a work from the web
 _RECITATION_FETCH_SECONDS = 30  # Enough for eight; a slow site must not hold the turn
 _MIN_WORK_CHARS = 50  # Short poems are short: The Red Wheelbarrow is ~100
@@ -7927,11 +7928,25 @@ RESULT: COMPLEX (reason: <brief reason>)
             max_tokens=600 if opinion else 320, temperature=0.3)
         reply = "".join(e.get("value", "") for e in events if isinstance(e, dict) and e.get("type") == "token").strip()
         keep = keeps_to_text(reply, part, user_input, opinion=opinion)
+        if not keep:
+            # One more try: the same request passed 6/6 when asked directly and
+            # failed once live (albm, 2026-11-06). The rejected reply is logged
+            # so the next failure can be read, not guessed at.
+            self.logger.info("Founding documents: her words set aside, trying once more: %r", reply[:300])
+            events = self.generate_continuation(
+                messages=document_answer_messages(as_request(user_input), title, part), session_id=session_id,
+                max_tokens=600 if opinion else 320, temperature=0.5)
+            reply = "".join(e.get("value", "") for e in events if isinstance(e, dict) and e.get("type") == "token").strip()
+            keep = keeps_to_text(reply, part, user_input, opinion=opinion)
         self.logger.info("Founding documents: answered from %s (her words kept: %s)", title, keep)
         if keep:
             answer = reply
         elif opinion:  # the words of the document aren't a view of it
             answer = f"I read {title}, but I couldn't put a view of it together that I can stand behind just now."
+        elif whole and len(part) <= WHOLE_FALLBACK_CHARS:
+            # Asked to review the whole of a short document: all of it, not the
+            # paragraph whose words matched "review your blueprints".
+            answer = f"From {title}:\n\n{part.strip()}"
         else:
             answer = f"From {title}:\n\n{excerpt_for(part, user_input, limit=PLAIN_DOC_CHARS)}"
         if not hasattr(self, "_turn_sources"):

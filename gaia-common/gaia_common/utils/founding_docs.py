@@ -8,6 +8,11 @@ _NAMED = (
     (r"\bconstitution\b", "gaia_constitution.md", "the GAIA Constitution"),
     (r"\blayered\s+identity\b", "layered_identity_model.md", "the Layered Identity Model"),
     (r"\bmindscape\b", "mindscape_manifest.md", "the Mindscape Manifest"),
+    # albm: "Can you review your blueprints?", "how many containers are used to
+    # run the architecture?" — she made up a palace room called BLUEPRINT.
+    (r"\b(?:your|gaia'?s)\s+(?:own\s+)?(?:blueprints?|services|containers|infrastructure|system\s+architecture)\b"
+     r"|\bhow\s+many\s+(?:containers|services)\b|\b(?:containers|services)\s+(?:that\s+)?(?:run|make\s+up)\s+(?:you|your)\b",
+     "your_services.md", "Your Services"),
     (r"\bhow\s+(?:does\s+)?your\s+mind\s+works?\b|\bhow\s+(?:do\s+)?you\s+work\b|\byour\s+(?:cognitive\s+)?(?:architecture|mechanisms|inner\s+workings)\b"
      r"|\b(?:are\s+you|you're|you\s+are)\s+(?:\w+\s+){0,2}(?:conscious|sentient|self-aware)\b|\byour\s+consciousness\b"
      r"|\bdo\s+you\s+(?:really\s+|actually\s+)?(?:have|feel)\s+(?:any\s+)?(?:feelings|emotions)\b",
@@ -23,7 +28,9 @@ _SOMEONE_ELSES_RE = re.compile(
     r"human\s+rights|war|national)\b", re.IGNORECASE)
 _HERS_RE = re.compile(r"\b(?:your|yours|gaia(?:'s)?|her|you)\b", re.IGNORECASE)
 _BARE_ARTICLE_RE = re.compile(r"\b[Aa]rticle\s+(?:[IVXLC]+|[A-G])\b(?!\s+of\b)")
-_READ_IT_RE = re.compile(r"\bread\b|\bwhole\b|\bentire\b|\ball\s+of\b|\bthrough\b", re.IGNORECASE)
+# "review your blueprints" too (albm): given the intro alone, she summarised
+# services it didn't name and her words were set aside for a quote.
+_READ_IT_RE = re.compile(r"\bread\b|\breview\b|\bwhole\b|\bentire\b|\ball\s+of\b|\bthrough\b", re.IGNORECASE)
 _ANY_ARTICLE_RE = re.compile(r"\barticle\b", re.IGNORECASE)
 _OPINION_RE = re.compile(
     r"\b(?:think|thoughts?|feel|opinion|make\s+of|agree|disagree|like|believe|reflect|judge?ment|judge|impression|conscious|consciousness|sentient|self-aware|feelings|emotions|"
@@ -58,3 +65,20 @@ def asks_opinion(text: str) -> bool:
 def refers_back(text: str) -> bool:
     """An opinion asked of what she just read: "what do you think of it?"."""
     return asks_opinion(text) and bool(_BACK_RE.search(text or ""))
+
+
+_ABILITY_RE = re.compile(r"^\s*(?:ok(?:ay)?,?\s+|so,?\s+|hey,?\s+)?(?:can|could|would|will)\s+you\s+(?:please\s+)?(?P<rest>.+?)\s*[?.!]*\s*$",
+                         re.IGNORECASE | re.DOTALL)
+
+
+def as_request(text: str) -> str:
+    """"Can you review your blueprints?" as what it asks for: "Review your
+    blueprints." Asked the question, Prime answered "Yes, I can..." and
+    described the blueprints from nowhere ("in my free time"); asked to do
+    it, she summarised the document 6/6 (albm, 2026-11-06)."""
+    m = _ABILITY_RE.match(text or "")
+    if not m:
+        return text
+    rest = m.group("rest").strip()
+    return rest[:1].upper() + rest[1:] + "."
+

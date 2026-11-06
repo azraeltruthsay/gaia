@@ -30,6 +30,8 @@ HEARTBEAT_SESSION_ID = "gaia_heartbeat_session"
 # Deterministic triage fast-path thresholds (86x audit #2). Configurable.
 _TRIAGE_MIN_SEED_CHARS = int(os.environ.get("TRIAGE_MIN_SEED_CHARS", "12"))
 _TRIAGE_STALE_DAYS = float(os.environ.get("TRIAGE_STALE_DAYS", "14"))
+# Seed types a sleep task plants as a report, not a thought of hers (gb7y).
+_NOTICE_SEED_TYPES = frozenset({"docs_maintenance", "knowledge_ingestion"})
 
 # Triage system prompt for Lite
 _TRIAGE_SYSTEM_PROMPT = """\
@@ -380,6 +382,13 @@ class ThoughtSeedHeartbeat:
         """
         # Fast-path: knowledge gap seeds skip LLM triage and go straight to ACT
         seed_type = seed_data.get("seed_type", "general")
+        # gb7y: a sleep task's notice ("10 stale docs... review and apply",
+        # "curriculum pairs... review and approve") is for whoever runs her,
+        # not a thought of hers. Run as a turn it read as an instruction, and
+        # she said she had committed the docs and approved the pairs, with no
+        # tool for either. Archived where the operator can find it; no turn.
+        if seed_type in _NOTICE_SEED_TYPES:
+            return ("archive", f"{seed_type} notice: for the operator, not a turn")
         if seed_type == "knowledge_gap":
             return ("act", "Knowledge gap — auto-routing to research")
 

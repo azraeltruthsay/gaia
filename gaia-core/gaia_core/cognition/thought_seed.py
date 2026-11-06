@@ -82,6 +82,26 @@ def save_thought_seed(seed_text: str, packet: CognitionPacket, config: Config) -
         return None
 
 
+def same_seed_waiting(seed_text: str, seeds_dir: Path = SEEDS_DIR) -> bool:
+    """Whether a seed with this exact text is already waiting (unreviewed or
+    pending). The docs-maintenance sleep task planted the same "10 stale docs"
+    notice every ~11 minutes: 13,668 of them by 2026-11-06 (gb7y)."""
+    text = (seed_text or "").strip()
+    if not text:
+        return False
+    for d in (seeds_dir, seeds_dir / "pending"):
+        if not d.exists():
+            continue
+        for f in d.glob("seed_*.json"):
+            try:
+                with open(f, "r", encoding="utf-8") as fp:
+                    if (json.load(fp).get("seed") or "").strip() == text:
+                        return True
+            except Exception:
+                continue
+    return False
+
+
 def list_unreviewed_seeds():
     seeds = []
     if not SEEDS_DIR.exists():

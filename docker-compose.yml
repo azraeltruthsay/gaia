@@ -236,11 +236,11 @@ services:
       # never installed here before the engine became one shared mount — keep off.
       - GAIA_ENGINE_AWARENESS=${GAIA_ENGINE_AWARENESS:-0}
       - GAIA_ENGINE_COGPACKET_COMPRESS=${GAIA_ENGINE_COGPACKET_COMPRESS:-0}
-      # Paused 2026-11-05: the thought-seed heartbeat ran old seeds as turns and
-      # she claimed actions she never took ("will git commit", "approved the
-      # curriculum pairs"). Also stops the idle heartbeat and lite journal.
-      # Back on with HEARTBEAT_ENABLED=1 once the seed turns are grounded.
-      - HEARTBEAT_ENABLED=${HEARTBEAT_ENABLED:-0}
+      # gb7y: paused 2026-11-05 after the thought-seed heartbeat ran sleep-task
+      # notices as turns and she claimed actions she never took. Back on
+      # 2026-11-06: notices are archived without a turn. 0 pauses the idle
+      # heartbeat, lite journal and audio commentary too.
+      - HEARTBEAT_ENABLED=${HEARTBEAT_ENABLED:-1}
       - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/cuda/lib64
       - VLLM_GPU_MEMORY_UTILIZATION=0.3
       # Voice gear (heo): when the consciousness matrix loads Core as the GGUF on
