@@ -108,14 +108,16 @@ def by_embedding(rows, model="/models/all-MiniLM-L6-v2", k=3):
     return got
 
 
-def by_core(rows, url):
+def by_core(rows, url, plain=False):
     got, secs = [], []
     for x in rows:
         ctx = f'Previous message: "{x["prev_user"][:200]}"\n' if x["prev_user"] else ""
         prompt = (f"Sort a message sent to GAIA into one of these:\n{MENU}\n{ctx}"
                   f'Message: "{x["text"][:400]}"\nAnswer with one word from the list.')
-        body = json.dumps({"messages": [{"role": "user", "content": prompt}], "max_tokens": 6, "temperature": 0.0,
-                           "chat_template_kwargs": {"enable_thinking": False}}).encode()
+        req = {"messages": [{"role": "user", "content": prompt}], "max_tokens": 6, "temperature": 0.0}
+        if not plain:  # Gemma 4 12B thought at length when told enable_thinking=False (2026-11-06)
+            req["chat_template_kwargs"] = {"enable_thinking": False}
+        body = json.dumps(req).encode()
         t = time.time()
         out = json.load(urllib.request.urlopen(
             urllib.request.Request(url, body, {"Content-Type": "application/json"}), timeout=180))
@@ -131,6 +133,7 @@ if __name__ == "__main__":
     ap.add_argument("ways", nargs="+", choices=["rules", "embed", "core", "hybrid"])
     ap.add_argument("--data", default=DATA)
     ap.add_argument("--url", default="http://gaia-core:8092/v1/chat/completions")
+    ap.add_argument("--plain", action="store_true", help="send no chat_template_kwargs")
     a = ap.parse_args()
     rows = json.load(open(a.data))
     done = {}
@@ -145,6 +148,6 @@ if __name__ == "__main__":
             got = [g if f else h for g, h, f in zip(r, e, fired)]
         else:
             got = {"rules": lambda: by_rules(rows), "embed": lambda: by_embedding(rows),
-                   "core": lambda: by_core(rows, a.url)}[way]()
+                   "core": lambda: by_core(rows, a.url, a.plain)}[way]()
         done[way] = got
         report(way, rows, got)
