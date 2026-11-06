@@ -15,12 +15,11 @@ html[data-theme="light"] {
 }
 html[data-theme="light"] body { font-size: 15px; line-height: 1.5; }
 html[data-theme="light"] :is(pre, code, kbd, samp, textarea.code, .xterm, .xterm *, .palace-card pre) { font-family: var(--font-code); }
+html[data-theme="light"] .unified-brain { background: #1a1a2e; border-radius: 8px; margin: 6px; box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.5); }
 html[data-theme="light"] .panel-header { text-shadow: none; }
 html[data-theme="light"] .chat-fp-attach-remove { color: #1a1f2b; }
 html[data-theme="light"] .chat-fp-attach-name { color: #1a1f2b; }
 html[data-theme="light"] .legend-swatch.synapse-dot { box-shadow: 0 0 3px rgba(0, 0, 0, 0.5); }
-html[data-theme="light"] .neuron-fiber.tier-core.idle { stroke: #0d47a1; }
-html[data-theme="light"] .neuron-fiber.tier-prime.idle { stroke: #6a1b9a; }
 html[data-theme="light"] .chat-msg { border-bottom: 1px solid rgba(0, 0, 0, 0.03); }
 html[data-theme="light"] .chat-msg.user { background: rgba(0, 0, 0, 0.03); }
 html[data-theme="light"] .chat-msg.gaia::before { color: #1b6e20; }

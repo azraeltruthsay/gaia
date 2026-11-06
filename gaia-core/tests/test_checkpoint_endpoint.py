@@ -5,6 +5,12 @@ from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from gaia_common.utils.service_auth import auth_headers
+
+
+def _signed():
+    """The endpoint needs service auth wherever a key is installed, as in the containers."""
+    return auth_headers("POST", "/cognition/checkpoint")
 
 
 @pytest.fixture
@@ -53,7 +59,7 @@ def test_checkpoint_endpoint_returns_200(client):
         mock_lj_inst = MockLJ.return_value
         mock_lj_inst.write_entry.return_value = "Test journal entry"
 
-        resp = client.post("/cognition/checkpoint")
+        resp = client.post("/cognition/checkpoint", headers=_signed())
 
     assert resp.status_code == 200
     data = resp.json()
@@ -70,7 +76,7 @@ def test_checkpoint_endpoint_returns_503_when_not_initialized():
 
     try:
         test_client = TestClient(main_mod.app, raise_server_exceptions=False)
-        resp = test_client.post("/cognition/checkpoint")
+        resp = test_client.post("/cognition/checkpoint", headers=_signed())
         assert resp.status_code == 503
     finally:
         main_mod._ai_manager = old_ai
@@ -94,7 +100,7 @@ def test_checkpoint_endpoint_handles_prime_failure(client):
         mock_lj_inst = MockLJ.return_value
         mock_lj_inst.write_entry.return_value = "Entry ok"
 
-        resp = client.post("/cognition/checkpoint")
+        resp = client.post("/cognition/checkpoint", headers=_signed())
 
     assert resp.status_code == 200
     data = resp.json()
@@ -123,7 +129,7 @@ def test_checkpoint_endpoint_lite_skipped_no_model(client):
         mock_lj_inst = MockLJ.return_value
         mock_lj_inst.write_entry.return_value = None  # No model available
 
-        resp = client.post("/cognition/checkpoint")
+        resp = client.post("/cognition/checkpoint", headers=_signed())
 
     assert resp.status_code == 200
     data = resp.json()
