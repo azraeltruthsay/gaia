@@ -7921,8 +7921,9 @@ RESULT: COMPLEX (reason: <brief reason>)
         if not hasattr(self, "_docs_read"):
             self._docs_read = {}
         self._docs_read[session_id] = named
+        from gaia_common.utils.founding_docs import as_request
         events = self.generate_continuation(
-            messages=document_answer_messages(user_input, title, part), session_id=session_id,
+            messages=document_answer_messages(as_request(user_input), title, part), session_id=session_id,
             max_tokens=600 if opinion else 320, temperature=0.3)
         reply = "".join(e.get("value", "") for e in events if isinstance(e, dict) and e.get("type") == "token").strip()
         keep = keeps_to_text(reply, part, user_input, opinion=opinion)
