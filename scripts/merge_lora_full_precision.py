@@ -69,21 +69,29 @@ def main():
             written.append((fname, list(shard)))
             shard, size = {}, 0
 
+    # The base is memory-mapped, and every page read stays resident while the
+    # file is open: one open pass over the 12B's single 24 GB file peaked at
+    # 17.2 GiB. Reopening after each written shard drops what was mapped.
     for path in base_files:
         with safe_open(path, "pt") as h:
-            for key in h.keys():
-                t = h.get_tensor(key)
-                if key in targets:
-                    A, B = lora[targets[key]]
-                    t = (t.float() + (B @ A) * scale).to(t.dtype)
-                    merged += 1
-                nbytes = t.numel() * t.element_size()
-                if shard and size + nbytes > limit:
-                    flush()
-                shard[key] = t
-                size += nbytes
-                if len(dtypes) < 8:
-                    dtypes.add(str(t.dtype))
+            keys = list(h.keys())
+        h = safe_open(path, "pt")
+        for key in keys:
+            t = h.get_tensor(key)
+            if key in targets:
+                A, B = lora[targets[key]]
+                t = (t.float() + (B @ A) * scale).to(t.dtype)
+                merged += 1
+            nbytes = t.numel() * t.element_size()
+            if shard and size + nbytes > limit:
+                flush()
+                del h
+                h = safe_open(path, "pt")
+            shard[key] = t
+            size += nbytes
+            if len(dtypes) < 8:
+                dtypes.add(str(t.dtype))
+        del h
     flush()
     if merged != len(lora):
         raise SystemExit(f"merged {merged} modules but the adapter holds {len(lora)}")

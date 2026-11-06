@@ -40,6 +40,7 @@ import gc
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import time
@@ -108,6 +109,19 @@ def _detect_chat_template(model_path: str) -> str:
     return "gemma4"
 
 
+# --house-no-think (2qus): the engine, with thinking off, opens the answer as
+# "<|turn>assistant<turn|>\n<|think|>\n\n<|think|>\n\n". Training without that
+# block taught a model nothing about it; a stock Gemma 4 (12B) reads <|think|>
+# as "start thinking". With the flag, samples carry the block on the prompt
+# side (masked), so the model learns to answer after an empty thought.
+HOUSE_NO_THINK = False
+HOUSE_NO_THINK_BLOCK = "<|think|>\n\n<|think|>\n\n"
+
+
+def _gemma_assistant_open() -> str:
+    return "<|turn>assistant<turn|>\n" + (HOUSE_NO_THINK_BLOCK if HOUSE_NO_THINK else "")
+
+
 def format_text_pair(instruction: str, output: str) -> str:
     """Format a text-only training pair in the active chat template."""
     if CHAT_TEMPLATE == "chatml":
@@ -118,7 +132,7 @@ def format_text_pair(instruction: str, output: str) -> str:
     # Gemma 4 (default)
     return (
         f"<|turn>user<turn|>\n{instruction}\n"
-        f"<|turn>assistant<turn|>\n{output}<turn|>"
+        f"{_gemma_assistant_open()}{output}<turn|>"
     )
 
 
@@ -134,7 +148,7 @@ def format_vision_prompt(instruction: str, output: str, img_placeholder: str) ->
         )
     return (
         f"<|turn>user<turn|>\n{img_placeholder}\n{instruction}\n"
-        f"<|turn>assistant<turn|>\n{output}<turn|>"
+        f"{_gemma_assistant_open()}{output}<turn|>"
     )
 
 
@@ -150,7 +164,7 @@ def format_audio_prompt(instruction: str, output: str, audio_placeholder: str) -
         )
     return (
         f"<|turn>user<turn|>\n{audio_placeholder}\n{instruction}\n"
-        f"<|turn>assistant<turn|>\n{output}<turn|>"
+        f"{_gemma_assistant_open()}{output}<turn|>"
     )
 
 
@@ -159,7 +173,10 @@ def _assistant_marker_string() -> str:
     """Assistant turn marker for the active chat template. Tokens up to and
     including this marker are masked from the loss (prompt + image/audio
     soft-token placeholders); only the answer that follows is scored."""
-    return "<|im_start|>assistant" if CHAT_TEMPLATE == "chatml" else "<|turn>assistant<turn|>"
+    if CHAT_TEMPLATE == "chatml":
+        return "<|im_start|>assistant"
+    # With the no-think block, it is part of the prompt: masked, not learned.
+    return _gemma_assistant_open() if HOUSE_NO_THINK else "<|turn>assistant<turn|>"
 
 
 def _last_subseq_end(haystack, needle):
@@ -895,7 +912,17 @@ def main():
                              "'auto' (default) picks chatml for Qwen-family "
                              "base models, gemma4 otherwise. Must match what "
                              "the engine emits at inference time.")
+    parser.add_argument("--house-no-think", action="store_true",
+                        help="Gemma house format: put the engine's empty <|think|> block after the "
+                             "assistant open in every sample (prompt side, masked). Use for a model "
+                             "whose training gave <|think|> another meaning (stock Gemma 4).")
+    parser.add_argument("--chunked-loss", action="store_true",
+                        help="Compute the loss over the vocabulary in checkpointed chunks instead "
+                             "of full logits (Gemma 4 12B: 262k vocab; full logits failed at 1024 tokens).")
     args = parser.parse_args()
+
+    global HOUSE_NO_THINK
+    HOUSE_NO_THINK = bool(args.house_no_think)
 
     # Allow CLI to point at a different curriculum without editing globals.
     global VISION_CURRICULUM, VISION_IMAGES_ROOT, ADAPTER_DIR, MERGED_DIR, BASE_MODEL, WARMUP_STEPS, LORA_R, LORA_ALPHA, TEXT_CURRICULUM
@@ -1215,6 +1242,24 @@ def main():
         task_type=TaskType.CAUSAL_LM, bias="none",
     )
     model = get_peft_model(model, lora_config)
+    # Coverage (2qus): an earlier trainer fell back to a path that trained 8 of
+    # 32 layers and the identity never baked. Every layer must carry LoRA, and
+    # every LoRA weight must be on the GPU (none offloaded to CPU or meta).
+    import collections as _co
+    _per_layer, _off_gpu = _co.Counter(), 0
+    for _name, _mod in model.named_modules():
+        if hasattr(_mod, "lora_A") and len(getattr(_mod, "lora_A", {})):
+            _m = re.search(r"language_model\.layers\.(\d+)\.", _name)
+            if _m:
+                _per_layer[int(_m.group(1))] += 1
+            _off_gpu += sum(p.device.type != "cuda" for p in _mod.lora_A.parameters())
+    _n_layers = model.config.get_text_config().num_hidden_layers
+    _missing = [i for i in range(_n_layers) if not _per_layer.get(i)]
+    log.info("LoRA coverage: %d/%d layers, %d modules (per layer: %s), off-GPU LoRA weights: %d",
+             _n_layers - len(_missing), _n_layers, sum(_per_layer.values()),
+             sorted(set(_per_layer.values())), _off_gpu)
+    if _missing or _off_gpu:
+        raise SystemExit(f"LoRA coverage incomplete: layers without LoRA {_missing[:10]}, off-GPU weights {_off_gpu}")
     trainable, total = model.get_nb_trainable_parameters()
     log.info("  LoRA trainable: %d / %d (%.3f%%)", trainable, total,
              100 * trainable / total)
@@ -1245,6 +1290,28 @@ def main():
     )
 
     collator = MultimodalCollator(processor, processor.tokenizer.pad_token_id)
+
+    def _chunked_lm_loss(model, inputs, labels, chunk=256):
+        """Mean next-token loss over labelled positions without materialising
+        [seq, vocab] logits: each chunk's logits are rebuilt in backward
+        (checkpoint). Same value as the full loss (6.0353 vs 6.0353 on the
+        12B, 2026-11-06); at 1024 tokens the full logits cost ~2 GB."""
+        from torch.utils.checkpoint import checkpoint
+        inner = model.base_model.model if hasattr(model, "base_model") else model
+        hidden = inner.model(**inputs, return_dict=True).last_hidden_state
+        h, y = hidden[:, :-1], labels[:, 1:].to(hidden.device)
+        w = inner.lm_head.weight
+        cap = inner.config.get_text_config().final_logit_softcapping
+
+        def piece(hc, yc):
+            lg = hc @ w.t()
+            if cap:
+                lg = torch.tanh(lg / cap) * cap
+            return torch.nn.functional.cross_entropy(
+                lg.float().reshape(-1, lg.shape[-1]), yc.reshape(-1), ignore_index=-100, reduction="sum")
+        total = sum(checkpoint(piece, h[:, i:i + chunk], y[:, i:i + chunk], use_reentrant=False)
+                    for i in range(0, h.shape[1], chunk))
+        return total / (y != -100).sum().clamp(min=1)
 
     class MMLossTrainer(Trainer):
         model_accepts_loss_kwargs = False
@@ -1280,17 +1347,20 @@ def main():
                          tuple(ids.shape) if ids is not None else None,
                          n_audio_in_ids, infshape, ifmshape, ifm_sum)
                 self._logged_audio_shapes = True
-            outputs = model(**inputs)
-            logits = outputs.logits
-            if labels is None:
-                return outputs.loss if return_outputs is False else (outputs.loss, outputs)
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100)
-            loss = loss_fct(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1),
-            )
+            if labels is not None and getattr(args, "chunked_loss", False):
+                loss, outputs = _chunked_lm_loss(model, inputs, labels), None
+            else:
+                outputs = model(**inputs)
+                logits = outputs.logits
+                if labels is None:
+                    return outputs.loss if return_outputs is False else (outputs.loss, outputs)
+                shift_logits = logits[..., :-1, :].contiguous()
+                shift_labels = labels[..., 1:].contiguous()
+                loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-100)
+                loss = loss_fct(
+                    shift_logits.view(-1, shift_logits.size(-1)),
+                    shift_labels.view(-1),
+                )
 
             # Per-category accumulation. With BATCH_SIZE=1 every batch is one
             # sample so attribution is exact; multi-sample batches would need
