@@ -4,7 +4,11 @@ Usage: python nf4_save_and_identity_probe.py <src> <out-or-empty> [adapter]"""
 import json, sys, time, torch
 from transformers import AutoModelForImageTextToText, AutoTokenizer, BitsAndBytesConfig
 src, out, adapter = sys.argv[1], sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 else "")
-q = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16)
+# Media layers stay bf16 in the saved copy (the 12B unified model's patch and
+# projection layers; quantized, they degrade image/audio features).
+q = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16,
+                       llm_int8_skip_modules=["lm_head", "vision_tower", "audio_tower", "embed_vision",
+                                              "embed_audio", "vision_embedder"])
 torch.cuda.reset_peak_memory_stats(); t = time.time()
 m = AutoModelForImageTextToText.from_pretrained(src, quantization_config=q, device_map={"": 0}, dtype=torch.bfloat16).eval()
 if adapter:
