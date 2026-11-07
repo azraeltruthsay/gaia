@@ -61,7 +61,7 @@ class TransitionTrigger(str, Enum):
     TRAINING_COMPLETE = "training_complete"   # Study finished training
     USER_REQUEST = "user_request"            # Manual transition from dashboard/API
     EXTENDED_IDLE = "extended_idle"           # Long idle → deeper sleep
-    PREEMPT = "preempt"                      # Wake signal during MEDITATION
+    PREEMPT = "preempt"                      # Unused since 6fez: nothing pre-empts MEDITATION
     ENGAGE_CLUTCH = "engage_clutch"          # Shift from PARKED → AWAKE (Gear P→1)
     BOOT_TO_PARK = "boot_to_park"            # Initial system boot into PARKED state
 
@@ -116,10 +116,13 @@ TRANSITIONS: Dict[LifecycleState, Dict[TransitionTrigger, LifecycleState]] = {
         TransitionTrigger.TRAINING_SCHEDULED: LifecycleState.MEDITATION,
         TransitionTrigger.IDLE_TIMEOUT: LifecycleState.PARKED,
     },
+    # Nothing interrupts training (Azrael, 2026-11-07, 6fez): a background
+    # journal task's Prime call woke the GPU 12 minutes into a 12B training run
+    # and Prime sat beside it for two hours. Only TRAINING_COMPLETE ends it here;
+    # an explicit park/awake still sets the state directly. Work that needs Prime
+    # meanwhile skips its turn or goes to Core on the CPU.
     LifecycleState.MEDITATION: {
         TransitionTrigger.TRAINING_COMPLETE: RESTING_STATE,
-        TransitionTrigger.PREEMPT: RESTING_STATE,
-        TransitionTrigger.WAKE_SIGNAL: RESTING_STATE,
     },
     LifecycleState.SLEEP: {
         TransitionTrigger.WAKE_SIGNAL: RESTING_STATE,
