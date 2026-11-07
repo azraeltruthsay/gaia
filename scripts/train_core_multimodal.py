@@ -919,6 +919,16 @@ def main():
     parser.add_argument("--chunked-loss", action="store_true",
                         help="Compute the loss over the vocabulary in checkpointed chunks instead "
                              "of full logits (Gemma 4 12B: 262k vocab; full logits failed at 1024 tokens).")
+    parser.add_argument("--lr", type=float, default=None,
+                        help="Learning rate (default %s). The 12B diverged at 2e-4 (2026-11-07)." % LEARNING_RATE)
+    parser.add_argument("--optim", default="paged_adamw_8bit",
+                        help="Optimizer for TrainingArguments (e.g. paged_adamw_32bit)")
+    parser.add_argument("--save-total-limit", type=int, default=2,
+                        help="Checkpoints to keep; 0 keeps all. With 2, the 12B's good checkpoints "
+                             "were rotated out before its loss diverged.")
+    parser.add_argument("--divergence-guard", type=float, default=0.0,
+                        help="Stop when the logged loss stays above this multiple of its best "
+                             "(after warm-up) for 5 logs in a row. 0 = off.")
     args = parser.parse_args()
 
     global HOUSE_NO_THINK
@@ -1273,16 +1283,16 @@ def main():
         max_steps=args.steps,
         per_device_train_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=GRAD_ACCUM,
-        learning_rate=LEARNING_RATE,
+        learning_rate=args.lr or LEARNING_RATE,
         warmup_steps=WARMUP_STEPS,
         max_grad_norm=0.5,
         logging_steps=10,
         save_steps=max(50, min(args.save_steps, args.steps // 2)),
-        save_total_limit=2,
+        save_total_limit=(args.save_total_limit or None),
         bf16=True,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
-        optim="paged_adamw_8bit",
+        optim=args.optim,
         report_to="none",
         remove_unused_columns=False,
         dataloader_pin_memory=False,
@@ -1412,10 +1422,32 @@ def main():
             except Exception:
                 pass
 
+    class DivergenceGuard(TrainerCallback):
+        """Stop a run whose loss has left its floor (2qus). The 12B's first run
+        fell to 0.29, a gradient spike at step ~2010 sent it to 7.0, and it
+        spent the remaining 1,300 steps between 3.8 and 7."""
+        def __init__(self, factor, patience=5):
+            self.factor, self.patience, self.best, self.bad = factor, patience, None, 0
+
+        def on_log(self, a, state, control, logs=None, **kw):
+            loss = (logs or {}).get("loss")
+            if loss is None or state.global_step <= max(WARMUP_STEPS, 50):
+                return
+            self.best = loss if self.best is None else min(self.best, loss)
+            self.bad = self.bad + 1 if loss > self.factor * self.best else 0
+            if self.bad >= self.patience:
+                log.error("Divergence guard: loss %.3f > %.1fx best %.3f for %d logs at step %d; stopping",
+                          loss, self.factor, self.best, self.bad, state.global_step)
+                control.should_training_stop = True
+                control.should_save = False
+
+    _callbacks = [RunRecorderCallback()]
+    if args.divergence_guard:
+        _callbacks.append(DivergenceGuard(args.divergence_guard))
     trainer = MMLossTrainer(
         model=model, args=training_args,
         train_dataset=dataset, data_collator=collator,
-        callbacks=[RunRecorderCallback()],
+        callbacks=_callbacks,
     )
 
     # 7. Train
