@@ -116,9 +116,19 @@ def _detect_chat_template(model_path: str) -> str:
 # side (masked), so the model learns to answer after an empty thought.
 HOUSE_NO_THINK = False
 HOUSE_NO_THINK_BLOCK = "<|think|>\n\n<|think|>\n\n"
+# --house-no-think-mix F: the block on a share F of samples, bare on the rest.
+# The engine opens the answer bare whenever thinking isn't turned off (gaia-core
+# sends enable_thinking=True by default; the media paths always did), and the
+# 12B trained only with the block leaked "thought"/"renderer" there (2026-11-07).
+# Trained on both, it answers directly after either.
+HOUSE_NO_THINK_MIX = None
 
 
-def _gemma_assistant_open() -> str:
+def _gemma_assistant_open(sample_key: str = "") -> str:
+    if HOUSE_NO_THINK_MIX is not None:
+        import zlib
+        take = (zlib.crc32(sample_key.encode("utf-8", "replace")) % 1000) < HOUSE_NO_THINK_MIX * 1000
+        return "<|turn>assistant<turn|>\n" + (HOUSE_NO_THINK_BLOCK if take else "")
     return "<|turn>assistant<turn|>\n" + (HOUSE_NO_THINK_BLOCK if HOUSE_NO_THINK else "")
 
 
@@ -132,7 +142,7 @@ def format_text_pair(instruction: str, output: str) -> str:
     # Gemma 4 (default)
     return (
         f"<|turn>user<turn|>\n{instruction}\n"
-        f"{_gemma_assistant_open()}{output}<turn|>"
+        f"{_gemma_assistant_open(instruction + output)}{output}<turn|>"
     )
 
 
@@ -148,7 +158,7 @@ def format_vision_prompt(instruction: str, output: str, img_placeholder: str) ->
         )
     return (
         f"<|turn>user<turn|>\n{img_placeholder}\n{instruction}\n"
-        f"{_gemma_assistant_open()}{output}<turn|>"
+        f"{_gemma_assistant_open(instruction + output)}{output}<turn|>"
     )
 
 
@@ -164,7 +174,7 @@ def format_audio_prompt(instruction: str, output: str, audio_placeholder: str) -
         )
     return (
         f"<|turn>user<turn|>\n{audio_placeholder}\n{instruction}\n"
-        f"{_gemma_assistant_open()}{output}<turn|>"
+        f"{_gemma_assistant_open(instruction + output)}{output}<turn|>"
     )
 
 
@@ -176,6 +186,8 @@ def _assistant_marker_string() -> str:
     if CHAT_TEMPLATE == "chatml":
         return "<|im_start|>assistant"
     # With the no-think block, it is part of the prompt: masked, not learned.
+    if HOUSE_NO_THINK_MIX is not None:
+        return "<|turn>assistant<turn|>"  # the block, when present, is skipped by the collator
     return _gemma_assistant_open() if HOUSE_NO_THINK else "<|turn>assistant<turn|>"
 
 
@@ -487,6 +499,8 @@ class MultimodalCollator:
                 if isinstance(tid, int) and tid >= 0:
                     self._modality_token_ids.add(tid)
         self._missing_marker_warned = False
+        # With --house-no-think-mix the block may follow the marker: masked too.
+        self._think_block_ids = list(tok("\n" + HOUSE_NO_THINK_BLOCK, add_special_tokens=False)["input_ids"])
 
     def __call__(self, batch):
         import torch
@@ -522,6 +536,9 @@ class MultimodalCollator:
                     )
                     self._missing_marker_warned = True
             else:
+                blk = self._think_block_ids
+                if HOUSE_NO_THINK_MIX is not None and real_ids[answer_start:answer_start + len(blk)] == blk:
+                    answer_start += len(blk)
                 labels[:answer_start] = -100
             # 2) Mask padding positions.
             labels[mask == 0] = -100
@@ -916,6 +933,10 @@ def main():
                         help="Gemma house format: put the engine's empty <|think|> block after the "
                              "assistant open in every sample (prompt side, masked). Use for a model "
                              "whose training gave <|think|> another meaning (stock Gemma 4).")
+    parser.add_argument("--house-no-think-mix", type=float, default=None,
+                        help="Gemma house format: put the no-think block on this share of samples "
+                             "(0-1) and open the rest bare, so the model answers directly after "
+                             "either. The block is masked either way. Overrides --house-no-think.")
     parser.add_argument("--chunked-loss", action="store_true",
                         help="Compute the loss over the vocabulary in checkpointed chunks instead "
                              "of full logits (Gemma 4 12B: 262k vocab; full logits failed at 1024 tokens).")
@@ -931,8 +952,9 @@ def main():
                              "(after warm-up) for 5 logs in a row. 0 = off.")
     args = parser.parse_args()
 
-    global HOUSE_NO_THINK
+    global HOUSE_NO_THINK, HOUSE_NO_THINK_MIX
     HOUSE_NO_THINK = bool(args.house_no_think)
+    HOUSE_NO_THINK_MIX = args.house_no_think_mix
 
     # Allow CLI to point at a different curriculum without editing globals.
     global VISION_CURRICULUM, VISION_IMAGES_ROOT, ADAPTER_DIR, MERGED_DIR, BASE_MODEL, WARMUP_STEPS, LORA_R, LORA_ALPHA, TEXT_CURRICULUM
@@ -1113,6 +1135,8 @@ def main():
         "lm_head",
         # Gemma 4 tower names
         "vision_tower", "audio_tower", "embed_vision", "embed_audio",
+        # Gemma 4 12B unified (encoder-free): patches -> features (2026-11-07)
+        "vision_embedder",
         # Qwen3-VL / Qwen2-VL tower names
         "visual", "vision_model",
     ]
@@ -1194,7 +1218,7 @@ def main():
     # (it grounds at inference only because the base pathway + inference-time
     # dequant carry it). Cleaning them at train time should improve both
     # vision and audio grounding. No-op if absent / already bf16.
-    for _sub in ("vision_tower", "embed_vision", "embed_audio"):
+    for _sub in ("vision_tower", "embed_vision", "embed_audio", "vision_embedder"):
         _dn = dequantize_tower_linear4bit(model, _sub)
         if _dn:
             log.info("Dequantized %d Linear4bit under '%s' → bf16 (clean training features)", _dn, _sub)
