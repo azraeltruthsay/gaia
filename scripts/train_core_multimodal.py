@@ -122,6 +122,7 @@ HOUSE_NO_THINK_BLOCK = "<|think|>\n\n<|think|>\n\n"
 # 12B trained only with the block leaked "thought"/"renderer" there (2026-11-07).
 # Trained on both, it answers directly after either.
 HOUSE_NO_THINK_MIX = None
+LAZY_VISION = False  # --lazy-vision: make pixel tensors when a sample is drawn
 
 
 def _gemma_assistant_open(sample_key: str = "") -> str:
@@ -249,6 +250,27 @@ def _load_wav_mono_16k(path: str):
     return data
 
 
+_BOS_CACHE: dict = {}
+
+
+def _media_text(processor, text: str) -> str:
+    """Text for processor(text=..., images/audio=...), with <bos> when the
+    processor won't add it. The 12B unified processor doesn't (E4B's does);
+    at inference that garbled every image and audio answer (gaia-engine
+    b01c394), and training must see what inference sends (2026-11-07)."""
+    tok = processor.tokenizer
+    key = id(processor)
+    if key not in _BOS_CACHE:
+        try:
+            first = processor(text=["x"], return_tensors="pt")["input_ids"][0].tolist()[:1]
+            _BOS_CACHE[key] = bool(first) and first[0] == tok.bos_token_id
+        except Exception:
+            _BOS_CACHE[key] = True
+    if _BOS_CACHE[key] or not tok.bos_token or text.startswith(tok.bos_token):
+        return text
+    return tok.bos_token + text
+
+
 def build_dataset(text_path: str | None, vision_path: str | None,
                   images_root: str, processor,
                   audio_path: str | None = None, audios_root: str | None = None):
@@ -321,7 +343,7 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                 # uses a fixed 896×896 input, but smaller crops still work
                 # and the processor handles the resize.
 
-                text = format_vision_prompt(d["instruction"], d["output"], img_tok)
+                text = _media_text(processor, format_vision_prompt(d["instruction"], d["output"], img_tok))
                 processed = processor(
                     text=[text], images=[image],
                     return_tensors="pt", padding=False, truncation=True,
@@ -337,6 +359,14 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                     "is_vision": True,
                     "category": "vision",
                 }
+                if LAZY_VISION:
+                    # Pixels are made again when the sample is drawn: kept for all
+                    # 3,186 images, the 12B's 7.7 MB each was OOM-killed (2026-11-07).
+                    sample["_lazy_vision"] = (image_path, text)
+                    del processed, image
+                    samples.append(sample)
+                    vision_count += 1
+                    continue
                 # Strip leading batch dim from everything — the collator
                 # re-stacks to add a single batch dim at call time. If we
                 # leave pixel_values as [1, patches, dim], we end up with
@@ -374,7 +404,7 @@ def build_dataset(text_path: str | None, vision_path: str | None,
                     log.warning("Audio load failed for %s: %s", audio_full, e)
                     continue
 
-                text = format_audio_prompt(d["instruction"], d["output"], audio_tok)
+                text = _media_text(processor, format_audio_prompt(d["instruction"], d["output"], audio_tok))
                 # NOTE: do NOT pass truncation=True. Gemma4Processor with
                 # truncation enabled clips input_features way below the real
                 # frame count even when input_ids is well under max_length
@@ -437,6 +467,19 @@ def build_dataset(text_path: str | None, vision_path: str | None,
 
         def __getitem__(self, idx):
             s = self.data[idx]
+            if "_lazy_vision" in s:
+                image_path, text = s["_lazy_vision"]
+                processed = processor(text=[text], images=[Image.open(image_path).convert("RGB")],
+                                      return_tensors="pt", padding=False, truncation=True,
+                                      max_length=MAX_SEQ_LENGTH)
+                s = dict(s, input_ids=processed["input_ids"].squeeze(0),
+                         attention_mask=processed["attention_mask"].squeeze(0))
+                pv = processed.get("pixel_values")
+                if pv is not None:
+                    s["pixel_values"] = pv.squeeze(0) if pv.dim() > 3 else pv[0] if pv.dim() == 3 else pv
+                for k in ("mm_token_type_ids", "image_position_ids"):
+                    if k in processed:
+                        s[k] = processed[k].squeeze(0)
             out = {
                 "input_ids": s["input_ids"],
                 "attention_mask": s["attention_mask"],
@@ -937,6 +980,9 @@ def main():
                         help="Gemma house format: put the no-think block on this share of samples "
                              "(0-1) and open the rest bare, so the model answers directly after "
                              "either. The block is masked either way. Overrides --house-no-think.")
+    parser.add_argument("--lazy-vision", action="store_true",
+                        help="Process each image when its sample is drawn instead of holding every "
+                             "sample's pixels in memory (the 12B's 3,186 images were OOM-killed).")
     parser.add_argument("--chunked-loss", action="store_true",
                         help="Compute the loss over the vocabulary in checkpointed chunks instead "
                              "of full logits (Gemma 4 12B: 262k vocab; full logits failed at 1024 tokens).")
@@ -955,6 +1001,8 @@ def main():
     global HOUSE_NO_THINK, HOUSE_NO_THINK_MIX
     HOUSE_NO_THINK = bool(args.house_no_think)
     HOUSE_NO_THINK_MIX = args.house_no_think_mix
+    global LAZY_VISION
+    LAZY_VISION = bool(args.lazy_vision)
 
     # Allow CLI to point at a different curriculum without editing globals.
     global VISION_CURRICULUM, VISION_IMAGES_ROOT, ADAPTER_DIR, MERGED_DIR, BASE_MODEL, WARMUP_STEPS, LORA_R, LORA_ALPHA, TEXT_CURRICULUM
