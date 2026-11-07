@@ -678,7 +678,13 @@ async def gpu_wake():
         return {"ok": False, "message": "maintenance mode active", "state": "suppressed"}
 
     if _lifecycle_machine is not None:
-        from gaia_common.lifecycle.states import TransitionTrigger
+        from gaia_common.lifecycle.states import LifecycleState, TransitionTrigger
+        # 6fez: training holds the GPU until it is released; a wake never
+        # pre-empts it (the lifecycle table no longer allows it either).
+        _state = getattr(getattr(_lifecycle_machine, "_snapshot", None), "state", None)
+        if getattr(_state, "value", _state) == LifecycleState.MEDITATION.value:
+            logger.info("GPU wake suppressed — training (meditation) holds the GPU")
+            return {"ok": False, "message": "training holds the GPU", "state": "meditation"}
         result = await _lifecycle_machine.transition(
             TransitionTrigger.WAKE_SIGNAL, reason="gpu_wake")
         if result.ok:

@@ -564,13 +564,51 @@ class VLLMRemoteModel:
 
     # ── Self-Healing ──────────────────────────────────────────────────────────
 
+    _training_cache: tuple = (0.0, False)
+
+    def _training_holds_gpu(self) -> bool:
+        """Whether GAIA is in meditation (training owns the GPU). Cached 15 s;
+        False if the orchestrator can't be asked."""
+        import os
+        now = time.time()
+        when, value = VLLMRemoteModel._training_cache
+        if now - when < 15:
+            return value
+        orchestrator = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
+        try:
+            state = requests.get(f"{orchestrator}/lifecycle/state", timeout=3).json().get("state")
+            value = str(state).lower() == "meditation"
+        except Exception:
+            value = False
+        VLLMRemoteModel._training_cache = (now, value)
+        return value
+
+    def _while_training(self, path: str, payload: dict) -> dict:
+        """Prime's call while training holds the GPU: Core on the CPU answers a
+        plain chat completion; anything else (an adapter of Prime's, another
+        endpoint) is refused so its caller skips the turn."""
+        import os
+        if self._active_adapter or not path.endswith("/chat/completions"):
+            raise RuntimeError("Prime unavailable: training holds the GPU (skipping this turn)")
+        core = os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092").rstrip("/")
+        body = dict(payload)
+        body.pop("model", None)
+        logger.info("Prime is unavailable while GAIA trains: Core on the CPU answers this call")
+        r = self._session.post(f"{core}{path}", json=body, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json()
+
     def _request_prime_load(self) -> None:
         """Ask orchestrator to wake Prime when it's unreachable.
 
         This is GAIA healing herself — Core detects Prime is down and
         presses the orchestrator button to fix it. Glass stays on.
+        Never during training (6fez): nothing pre-empts it.
         """
         import os
+        if self._training_holds_gpu():
+            logger.info("Self-healing: Prime not woken — training holds the GPU")
+            return
         orchestrator = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
         try:
             resp = requests.post(
@@ -616,6 +654,11 @@ class VLLMRemoteModel:
                 r = self._session.post(url, json=payload, timeout=self.timeout)
                 # Retry on 503 (vLLM model-loading state), not other errors
                 if r.status_code == 503 and attempt < self._MAX_RETRIES:
+                    # 6fez: while training holds the GPU, Prime is not woken.
+                    # A plain call is answered by Core on the CPU; one that needs
+                    # Prime's own adapter skips its turn.
+                    if attempt == 1 and self._training_holds_gpu():
+                        return self._while_training(path, payload)
                     # On first 503, request model load from orchestrator
                     if attempt == 1:
                         try:
