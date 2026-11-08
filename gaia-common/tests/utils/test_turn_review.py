@@ -90,10 +90,22 @@ def test_turns_in_window_with_routing_and_replies(tmp_path):
 def test_earlier_reviews_left_out_unless_asked(tmp_path):
     log, hist = _setup(tmp_path)
     r = T.review_turns(log, hist, since=T.parse_window_bound(60, NOW), now=NOW)
-    assert "1 earlier review(s) of your turns left out" in r["text"] and "Look back" not in r["text"]
+    assert "1 turn(s) from earlier reviews of yourself left out" in r["text"] and "Look back" not in r["text"]
     r = T.review_turns(log, hist, since=T.parse_window_bound(60, NOW), now=NOW, include_reviews=True)
     assert r["count"] == 3 and "Look back" in r["text"]
     assert "introspect(trace) called mid-reply" in r["text"]
+
+
+def test_follow_up_in_review_session_left_out(tmp_path):
+    log, hist = _setup(tmp_path)
+    log.write_text(LOG.replace(
+        _l("16:35:12", "INFO", "GAIA.Core.API", "Processing packet web_c"),
+        _l("16:30:00", "INFO", "GAIA.PromptBuilder", "Final prompt assembled for session 'rev1'. Messages: 2") + "\n"
+        + _l("16:31:00", "INFO", "GAIA.Core.API", "Processing packet web_f: 'Which turns exactly?...' from web") + "\n"
+        + _l("16:31:01", "INFO", "GAIA.PromptBuilder", "Final prompt assembled for session 'rev1'. Messages: 4") + "\n"
+        + _l("16:35:12", "INFO", "GAIA.Core.API", "Processing packet web_c")))
+    r = T.review_turns(log, hist, since=T.parse_window_bound(60, NOW), now=NOW)
+    assert "Which turns exactly" not in r["text"] and "2 turn(s) from earlier reviews" in r["text"]
 
 
 def test_recurring_warnings_left_out(tmp_path):
@@ -125,3 +137,62 @@ def test_parse_window_bound():
     assert T.parse_window_bound("2026-11-08T16:00:00Z", NOW).hour == 16
     assert T.parse_window_bound("2026-11-08 16:00", NOW).minute == 0
     assert T.parse_window_bound("", NOW) is None and T.parse_window_bound("nonsense", NOW) is None
+
+
+PLAYBOOK = """---
+name: ts-misrouted-request
+description: x
+status: active
+domain: troubleshooting
+seen_in: [turns, logs]
+---
+# A request took the wrong path
+
+## Symptoms
+- A turn shows `tool routing fired` for an intent that needs no tool,
+  especially when the selector then says `no tool needed`.
+- You were asked to make something and talked *about* it.
+
+## Find it
+1. not a symptom
+"""
+
+
+def _skills(tmp_path):
+    d = tmp_path / "skills"
+    (d / "ts-misrouted-request").mkdir(parents=True)
+    (d / "ts-misrouted-request" / "SKILL.md").write_text(PLAYBOOK)
+    (d / "study").mkdir()
+    (d / "study" / "SKILL.md").write_text(PLAYBOOK.replace("troubleshooting", "training").replace("ts-misrouted-request", "study"))
+    (d / "ts-old").mkdir()
+    (d / "ts-old" / "SKILL.md").write_text(PLAYBOOK.replace("active", "retired").replace("ts-misrouted-request", "ts-old"))
+    (d / "ts-gear").mkdir()
+    (d / "ts-gear" / "SKILL.md").write_text(PLAYBOOK.replace("seen_in: [turns, logs]", "seen_in: [gear, logs]").replace("ts-misrouted-request", "ts-gear"))
+    return d
+
+
+def test_playbook_symptoms_only_active_troubleshooting(tmp_path):
+    got = T.playbook_symptoms(_skills(tmp_path))
+    assert [n for n, _ in got] == ["ts-misrouted-request"]
+    bullets = got[0][1]
+    assert bullets[0] == "A turn shows `tool routing fired` for an intent that needs no tool, especially when the selector then says `no tool needed`."
+    assert bullets[1] == "You were asked to make something and talked about it."
+    assert not any("not a symptom" in b for b in bullets)
+
+
+def test_review_lists_criteria_without_verdicts(tmp_path):
+    log, hist = _setup(tmp_path)
+    r = T.review_turns(log, hist, since=T.parse_window_bound(60, NOW), now=NOW, skills_dir=_skills(tmp_path))
+    text = r["text"]
+    assert "What your troubleshooting playbooks say to look for:" in text
+    assert text.index("Write a haiku") < text.index("What your troubleshooting playbooks")
+    assert r["playbooks"] == ["ts-misrouted-request"]
+    # the turn is described, not judged
+    assert "wrong" not in text.split("What your troubleshooting playbooks")[0].lower()
+
+
+def test_criteria_fit_inside_budget(tmp_path):
+    log, hist = _setup(tmp_path)
+    r = T.review_turns(log, hist, since=T.parse_window_bound(60, NOW), now=NOW,
+                       skills_dir=_skills(tmp_path), text_budget=700)
+    assert len(r["text"]) < 1400 and "playbooks say" in r["text"]

@@ -267,7 +267,7 @@ DOMAIN_TOOLS: Dict[str, dict] = {
 
     # ── Introspect ─────────────────────────────────────────────────────
     "introspect": {
-        "description": "Self-inspection — turns: review your own past turns, how each went (what was asked, intent, routing, tools used, reply); world: your state now; recall: system events (sleep, wake, messages received), not how turns went; logs: raw service log lines; issue_*/issues: your issue ledger; tools/describe: tool discovery",
+        "description": "Self-inspection — turns: review your own past turns, how each went (what was asked, intent, routing, tools used, reply); world: your state now; recall: system events (sleep, wake, messages received), not how turns went; logs: raw service log lines; tools/describe: tool discovery",
         "actions": {
             # a0aw.6: your turns over a window — what was asked, intent, routing, tools, reply
             "turns": {
@@ -287,24 +287,6 @@ DOMAIN_TOOLS: Dict[str, dict] = {
                            "since": "minutes|ISO?", "until": "ISO?"},
                 "maps_to": "introspect_logs",
             },
-            # a0aw.1: record a bug you found in yourself; it becomes a bead
-            "issue_file": {
-                "params": {"title": "string", "symptom": "string", "evidence": "string",
-                           "suspected_cause": "string?", "playbook": "string?"},
-                "maps_to": "issue_file",
-            },
-            "issue_note": {
-                "params": {"id": "string", "text": "string"},
-                "maps_to": "issue_note",
-            },
-            "issue_status": {
-                "params": {"id": "string", "status": "string", "note": "string?"},
-                "maps_to": "issue_status",
-            },
-            "issues": {
-                "params": {"status": "string?", "id": "string?"},
-                "maps_to": "issue_list",
-            },
             "count_chars": {
                 "params": {"text": "string", "char": "string"},
                 "maps_to": "count_chars",
@@ -317,6 +299,23 @@ DOMAIN_TOOLS: Dict[str, dict] = {
                 "params": {"tool_name": "string"},
                 "maps_to": "describe_tool",
             },
+        },
+    },
+
+    # ── Issue ledger (a0aw.1) ──────────────────────────────────────────
+    # Its own domain: asked to record a bug, she reached for issue(action=file)
+    # twice before it existed (ycx7, 2026-11-08).
+    "issue": {
+        "description": "Your issue ledger — bugs you find in yourself; each becomes a bead. file needs evidence: the lines introspect showed you",
+        "actions": {
+            "file": {
+                "params": {"title": "string", "symptom": "string", "evidence": "string",
+                           "suspected_cause": "string?", "playbook": "string?"},
+                "maps_to": "issue_file",
+            },
+            "note": {"params": {"id": "string", "text": "string"}, "maps_to": "issue_note"},
+            "status": {"params": {"id": "string", "status": "string", "note": "string?"}, "maps_to": "issue_status"},
+            "list": {"params": {"status": "string?", "id": "string?"}, "maps_to": "issue_list"},
         },
     },
 

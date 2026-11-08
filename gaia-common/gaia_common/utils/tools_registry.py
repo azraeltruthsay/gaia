@@ -758,7 +758,7 @@ TOOLS = {
                 "suspected_cause": {"type": "string", "description": "Where you think it comes from, if you know."},
                 "playbook": {"type": "string", "description": "Troubleshooting playbook you followed (e.g. ts-misrouted-request)."},
             },
-            "required": ["title", "symptom", "evidence"]
+            "required": ["title"]
         }
     },
     "issue_note": {
@@ -769,7 +769,7 @@ TOOLS = {
                 "id": {"type": "string", "description": "Issue id (gi-xxxxxx)."},
                 "text": {"type": "string"},
             },
-            "required": ["id", "text"]
+            "required": ["id"]
         }
     },
     "issue_status": {

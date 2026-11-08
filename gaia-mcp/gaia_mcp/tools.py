@@ -340,11 +340,13 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "introspect_logs": lambda p: _introspect_logs_impl(p),
         "introspect_turns": lambda p: _introspect_turns_impl(p),
         # a0aw.1: her issue ledger (Record step of the self-repair loop)
+        # Her natural names are accepted too: description for symptom, note for text.
         "issue_file": lambda p: _issue_ledger().file_issue(
-            p.get("title", ""), p.get("symptom", ""), p.get("evidence") or [],
-            suspected_cause=p.get("suspected_cause", ""), playbook=p.get("playbook", ""),
+            p.get("title", ""), p.get("symptom") or p.get("description", ""),
+            p.get("evidence") or p.get("quote") or p.get("lines") or [],
+            suspected_cause=p.get("suspected_cause") or p.get("cause", ""), playbook=p.get("playbook", ""),
             source=p.get("source", "self")),
-        "issue_note": lambda p: _issue_ledger().note_issue(str(p.get("id", "")), p.get("text", "")),
+        "issue_note": lambda p: _issue_ledger().note_issue(str(p.get("id", "")), p.get("text") or p.get("note", "")),
         "issue_status": lambda p: _issue_ledger().set_status(
             str(p.get("id", "")), p.get("status", ""), note=p.get("note", "")),
         "issue_list": lambda p: (_issue_ledger().get_issue(str(p["id"])) if p.get("id")
@@ -2042,7 +2044,8 @@ def _introspect_turns_impl(params: dict) -> dict:
         Path(_LOG_FILE_MAP["gaia-core"]), Path(os.environ.get("GAIA_CHAT_HISTORY_DIR", "/logs/chat_history")),
         since=since, until=until, limit=int(params.get("limit") or 12),
         search=str(params.get("search") or ""), session=str(params.get("session") or ""),
-        include_reviews=bool(params.get("include_reviews")))
+        include_reviews=bool(params.get("include_reviews")),
+        skills_dir=Path(os.environ.get("GAIA_SKILLS_DIR", "/knowledge/skills")))
     raw = result.pop("_raw_lines", [])
     _issue_ledger().record_shown(result["text"].splitlines() + raw)
     return result

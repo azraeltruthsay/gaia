@@ -130,7 +130,8 @@ def test_shown_lines_expire(tmp_path, monkeypatch):
 def test_tool_wiring():
     assert ACTION_TO_LEGACY[("introspect", "turns")] == "introspect_turns"
     assert "introspect_turns" in TOOLS and "introspect_turns" in SAFE_SIDECAR_TOOLS
-    for action, legacy in [("issue_file", "issue_file"), ("issue_note", "issue_note"),
-                           ("issue_status", "issue_status"), ("issues", "issue_list")]:
-        assert ACTION_TO_LEGACY[("introspect", action)] == legacy
+    for action, legacy in [("file", "issue_file"), ("note", "issue_note"),
+                           ("status", "issue_status"), ("list", "issue_list")]:
+        assert ACTION_TO_LEGACY[("issue", action)] == legacy
         assert legacy in TOOLS and legacy in SAFE_SIDECAR_TOOLS
+    assert not any(a.startswith("issue") for (d, a) in ACTION_TO_LEGACY if d == "introspect")

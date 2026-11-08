@@ -18,8 +18,8 @@ logs, and the fix and its lesson both stay with her, is the point.
 | Step | Who / what | Exists? |
 |---|---|---|
 | **Notice** | `introspect(action=turns)` (a0aw.6): her turns over a window (default 24 h), one block each — asked, intent, routing fired / selector choice, tools run (routed and mid-reply), which mind answered, reply head; her current turn and earlier self-reviews left out; warnings that recur across turns dropped. `logs` honours since/until. Also: the other mind's per-reply check (b9ts), samvega, thought seeds | yes |
-| **Match** | troubleshooting playbooks: `/knowledge/skills/ts-*/SKILL.md` (Unified Skills format, palace-indexed via `skill_palace`) | **started** (2 playbooks) |
-| **Record** | her issue ledger: `introspect(action=issue_file / issue_note / issue_status / issues)` → `/shared/issues/ledger.jsonl` (`gaia_common/utils/issue_ledger.py`); evidence required, duplicates of open issues refused, 10/day cap. Host bridge `scripts/gaia_issue_bridge.py` makes each a bead (`gaia-found`) and writes bead id + status back (`beads.json`) | **yes** (a0aw.1); bridge timer in `scripts/systemd/`, installed by hand |
+| **Match** | troubleshooting playbooks (`/knowledge/skills/ts-*/SKILL.md`, Unified Skills format, palace-indexed). Playbooks with `seen_in: [turns, …]` have their Symptoms listed under the turn view (ycx7): criteria read from her own files, no verdicts in code | **yes** (ycx7) |
+| **Record** | her issue ledger: `issue(action=file / note / status / list)` → `/shared/issues/ledger.jsonl` (`gaia_common/utils/issue_ledger.py`); evidence required, duplicates of open issues refused, 10/day cap. Host bridge `scripts/gaia_issue_bridge.py` makes each a bead (`gaia-found`) and writes bead id + status back (`beads.json`) | **yes** (a0aw.1); bridge timer in `scripts/systemd/`, installed by hand |
 | **Propose** | CodeMind ANALYZE → PROPOSE (`build_fix_prompt`, `codemind_patch` search/replace blocks), candidate files only | yes, never closed on code |
 | **Test** | candidate pytest for the touched module, plus a new regression test she writes | **gap**: `codemind_validator` does syntax + ruff + diff-safety only |
 | **Validate** | the live symptom gone on `gaia-core-candidate` (replay the turn that showed it) | **gap**: no replay step |
@@ -84,3 +84,15 @@ not do her steps for her.
   fine — no invented findings, but no criteria either → `ycx7` (Match). The view also
   surfaced two real bugs she can find herself: `bz6f` (GAIA-CORE-081, native tool call
   abandoned mid-stream) and `av4l` (claimed a check after an invalid `introspect.trace`).
+- **2026-11-08, Match** (`ycx7`): playbook symptoms listed under the turn view. Gear 2
+  (Prime), 6 clean probes: never invented a turn; named the haiku misroute (`mjcg`) by
+  line with the right playbook once, and unprompted found `weco` ("Excalibur. ."),
+  `afsf` (grounding on a poem), a missing vector index (3/6, filed `guga`), a checkpoint
+  warning (`70am`); some reasoning confused. Two contamination fixes on the way: whole
+  review conversations are left out of the view; playbooks opt in by `seen_in` (the
+  gear playbook made her claim gear mismatches no turn showed). The ledger got its own
+  `issue` domain (she reached for `issue(action=file)` before it existed).
+- **2026-11-08, Record in chat**: not yet. Asked to file what she found, she guessed
+  shapes, then repeated "the issue tool isn't implemented". Blocked by `bz6f`, by tool
+  results not carrying into the next turn, and by echoing her own prior reply →
+  `6839`: do Notice→Match→Record inside one task (`a0aw.4`).

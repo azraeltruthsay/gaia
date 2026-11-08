@@ -9,6 +9,11 @@ head of the reply (from chat history). It states what the log says; noticing
 what went wrong is hers.
 
 The turn the request is made from (the newest, still without a reply) is left out.
+
+Below the turns go the Symptoms of her active troubleshooting playbooks (ycx7):
+what her playbooks say to look for, read from her own SKILL.md files, so a
+playbook she updates changes her next review. Criteria, not verdicts — no code
+here decides that a turn went wrong.
 Every returned line can be cited as issue evidence (see issue_ledger.record_shown).
 """
 
@@ -257,10 +262,57 @@ def render_turn(t: dict, recurring: frozenset = frozenset()) -> List[str]:
     return lines
 
 
+_FRONT = re.compile(r"\A---\n(.*?)\n---\n", re.S)
+
+
+def playbook_symptoms(skills_dir: Path, budget: int = 1400) -> List[tuple]:
+    """(name, [symptom, ...]) for each active troubleshooting playbook, from
+    the '## Symptoms' section of its SKILL.md. Bullets are joined to one line;
+    playbooks are cut once the budget is spent."""
+    out: List[tuple] = []
+    if not skills_dir or not Path(skills_dir).is_dir():
+        return out
+    used = 0
+    for path in sorted(Path(skills_dir).glob("*/SKILL.md")):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = _FRONT.match(text)
+        front = m.group(1) if m else ""
+        if not re.search(r"^domain:\s*troubleshooting\s*$", front, re.M):
+            continue
+        if re.search(r"^status:\s*(retired|draft|inactive)\s*$", front, re.M):
+            continue
+        # A playbook says where its symptoms can be seen; only those visible in
+        # turns belong here (gear evidence lives in /consciousness/gear, and
+        # listing it made her claim a gear mismatch with no turn to show).
+        seen_in = re.search(r"^seen_in:\s*\[?([^\]\n]*)", front, re.M)
+        if not seen_in or "turns" not in seen_in.group(1):
+            continue
+        name = (re.search(r"^name:\s*(\S+)", front, re.M) or [None, path.parent.name])[1]
+        sec = re.search(r"^## Symptoms\s*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+        if not sec:
+            continue
+        bullets: List[str] = []
+        for line in sec.group(1).splitlines():
+            if line.lstrip().startswith("- "):
+                bullets.append(line.lstrip()[2:].strip())
+            elif line.strip() and bullets:
+                bullets[-1] += " " + line.strip()
+        bullets = [b.replace("*", "") for b in bullets if b]
+        cost = len(name) + sum(len(b) + 4 for b in bullets)
+        if not bullets or (out and used + cost > budget):
+            continue
+        out.append((name, bullets))
+        used += cost
+    return out
+
+
 def review_turns(log_file: Path, history_dir: Path, since: Optional[datetime] = None,
                  until: Optional[datetime] = None, limit: int = 12, search: str = "",
-                 session: str = "", now: Optional[datetime] = None, text_budget: int = 3400,
-                 include_reviews: bool = False) -> dict:
+                 session: str = "", now: Optional[datetime] = None, text_budget: int = 3600,
+                 include_reviews: bool = False, skills_dir: Optional[Path] = None) -> dict:
     now = now or datetime.now(timezone.utc)
     since = since or now - timedelta(hours=1)
     turns = split_turns(read_log_lines(log_paths(log_file), since))
@@ -273,9 +325,16 @@ def review_turns(log_file: Path, history_dir: Path, since: Optional[datetime] = 
     # Her earlier looks at herself are left out unless asked for: their replies
     # are past conclusions ("nothing wrong"), and with them in view she repeated
     # them instead of reading the turns (a0aw.6, 2026-11-08).
+    # The whole conversation counts: a follow-up in a review session ("which
+    # turns exactly?") made no tool call, and its reply fed her old answer back.
     reviews = 0
     if not include_reviews:
-        kept = [t for t in turns if not any(e.startswith("introspect") for e in t["executed"])]
+        def _is_review(t):
+            return any(e.startswith("introspect") for e in t["executed"])
+        review_sessions = {t.get("session") for t in turns if _is_review(t) and t.get("session")}
+        if excluded is not None and excluded.get("session"):
+            review_sessions.add(excluded["session"])
+        kept = [t for t in turns if not _is_review(t) and t.get("session") not in review_sessions]
         reviews, turns = len(turns) - len(kept), kept
 
     if until:
@@ -296,6 +355,13 @@ def review_turns(log_file: Path, history_dir: Path, since: Optional[datetime] = 
     recurring = frozenset(w for w, c in counts.items() if c > 1)
 
     window = f"{since:%Y-%m-%d %H:%M} to {(until or now):%Y-%m-%d %H:%M} UTC"
+    criteria = playbook_symptoms(skills_dir) if skills_dir else []
+    criteria_lines = []
+    if criteria:
+        criteria_lines.append("What your troubleshooting playbooks say to look for:")
+        for name, bullets in criteria:
+            criteria_lines += [f"  {name}:"] + [f"   - {b}" for b in bullets]
+        text_budget -= sum(len(x) + 1 for x in criteria_lines)
     rendered = [render_turn(t, recurring) for t in turns]
     while len(rendered) > 1 and sum(len("\n".join(r)) + 1 for r in rendered) > text_budget:
         rendered.pop(0)
@@ -306,15 +372,17 @@ def review_turns(log_file: Path, history_dir: Path, since: Optional[datetime] = 
     if excluded:
         header += "; this turn left out"
     if reviews:
-        header += f"; {reviews} earlier review(s) of your turns left out"
+        header += f"; {reviews} turn(s) from earlier reviews of yourself left out"
     body = [header]
     if recurring:
         body.append(f"({len(recurring)} warning kinds recur across turns and are left out; introspect logs shows them)")
     body += [ln for r in rendered for ln in r]
+    body += criteria_lines
     return {
         "ok": True,
         "text": "\n".join(body),
         "count": total,
+        "playbooks": [name for name, _ in criteria],
         "turns": [{"ref": t["ref"], "packet": t["packet"], "session": t.get("session")} for t in turns],
         "_raw_lines": [ln for t in turns for ln in t["_lines"]],
     }
