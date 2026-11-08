@@ -22,6 +22,8 @@ SAFE_SIDECAR_TOOLS = {
     "fragment_write", "fragment_read", "fragment_assemble",
     "fragment_list_pending", "fragment_clear",
     "introspect_logs",
+    # a0aw.1: appends to her own issue ledger only
+    "issue_file", "issue_note", "issue_status", "issue_list",
 }
 
 

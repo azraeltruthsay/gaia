@@ -267,7 +267,7 @@ DOMAIN_TOOLS: Dict[str, dict] = {
 
     # ── Introspect ─────────────────────────────────────────────────────
     "introspect": {
-        "description": "Self-inspection — world state, logs, events, tool discovery",
+        "description": "Self-inspection — world state, logs, events, your issue ledger, tool discovery",
         "actions": {
             "world": {
                 "params": {},
@@ -280,6 +280,24 @@ DOMAIN_TOOLS: Dict[str, dict] = {
             "logs": {
                 "params": {"service": "string", "lines": "integer?", "search": "string?", "level": "string?"},
                 "maps_to": "introspect_logs",
+            },
+            # a0aw.1: record a bug you found in yourself; it becomes a bead
+            "issue_file": {
+                "params": {"title": "string", "symptom": "string", "evidence": "string",
+                           "suspected_cause": "string?", "playbook": "string?"},
+                "maps_to": "issue_file",
+            },
+            "issue_note": {
+                "params": {"id": "string", "text": "string"},
+                "maps_to": "issue_note",
+            },
+            "issue_status": {
+                "params": {"id": "string", "status": "string", "note": "string?"},
+                "maps_to": "issue_status",
+            },
+            "issues": {
+                "params": {"status": "string?", "id": "string?"},
+                "maps_to": "issue_list",
             },
             "count_chars": {
                 "params": {"text": "string", "char": "string"},

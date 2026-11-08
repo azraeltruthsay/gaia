@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the GAIA issue bridge every 10 minutes (a0aw.1)
+
+# Install (user units):
+#   cp scripts/systemd/gaia-issue-bridge.* ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now gaia-issue-bridge.timer
+# WSL: user units stop with the last session unless `loginctl enable-linger $USER`.
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

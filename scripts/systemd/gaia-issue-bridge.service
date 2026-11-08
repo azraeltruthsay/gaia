@@ -1,0 +1,9 @@
+[Unit]
+Description=Mirror GAIA's issue ledger into beads (a0aw.1)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/gaia/GAIA_Project
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=BEADS_DIR=/gaia/GAIA_Project/.beads
+ExecStart=/usr/bin/python3 /gaia/GAIA_Project/scripts/gaia_issue_bridge.py

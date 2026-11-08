@@ -338,6 +338,18 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "palace_lookup_revalidate": lambda p: _palace_lookup_revalidate_impl(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
+        # a0aw.1: her issue ledger (Record step of the self-repair loop)
+        "issue_file": lambda p: _issue_ledger().file_issue(
+            p.get("title", ""), p.get("symptom", ""), p.get("evidence") or [],
+            suspected_cause=p.get("suspected_cause", ""), playbook=p.get("playbook", ""),
+            source=p.get("source", "self")),
+        "issue_note": lambda p: _issue_ledger().note_issue(str(p.get("id", "")), p.get("text", "")),
+        "issue_status": lambda p: _issue_ledger().set_status(
+            str(p.get("id", "")), p.get("status", ""), note=p.get("note", "")),
+        "issue_list": lambda p: (_issue_ledger().get_issue(str(p["id"])) if p.get("id")
+                                 else _issue_ledger().list_issues(
+                                     status=p.get("status", ""),
+                                     include_closed=bool(p.get("include_closed")))),
         "replace": lambda p: _replace_impl(p),
         # Discord integration
         "send_discord_message": lambda p: _send_discord_message_impl(p),
@@ -2008,6 +2020,11 @@ def _cfr_review_conversation(params: dict) -> dict:
 
 # Severity levels in ascending order
 _LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
+
+
+def _issue_ledger():
+    from gaia_common.utils import issue_ledger
+    return issue_ledger
 
 
 def _introspect_logs_impl(params: dict) -> dict:

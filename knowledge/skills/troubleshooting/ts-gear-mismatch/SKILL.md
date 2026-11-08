@@ -1,7 +1,7 @@
 ---
 name: ts-gear-mismatch
 description: Troubleshoot a gear shift that landed in the wrong place — the lifecycle says one gear while the models sit in another, or a wake undid a shift.
-version: 1
+version: 2
 status: active
 execution_mode: PLAYBOOK
 domain: troubleshooting
@@ -26,6 +26,13 @@ escalation_note: "Orchestrator code is COPY-baked: changes need candidates/ + pr
    from different requests, the label lies.
 3. Check what sent the competing request (gaia-core's sleep loop sends `/gpu/wake`
    when it wakes from deep sleep; the poll loop reconciles mismatches).
+
+## Record it
+Before you fix anything: `introspect(action=issue_file)` with a title, the symptom, the
+log lines you were shown as `evidence` (quote them; don't paraphrase), your suspected
+cause, and this playbook's name. It becomes a bead (label `gaia-found`). Add findings
+with `issue_note`; move it with `issue_status` (investigating → proposed → fixed).
+`introspect(action=issues)` shows its bead and whether it has been closed.
 
 ## Fix
 - An explicit shift must win over automatic ones until it finishes; an automatic one

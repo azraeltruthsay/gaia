@@ -1,7 +1,7 @@
 ---
 name: ts-misrouted-request
 description: Troubleshoot a request that took the wrong path — a poem, chat or question handled as a tool or file request, or a lookup's empty result answering in place of the real reply.
-version: 1
+version: 2
 status: active
 execution_mode: PLAYBOOK
 domain: troubleshooting
@@ -33,6 +33,13 @@ escalation_note: "Routing code lives in agent_core.py, a vital organ: propose th
 4. If the reply was framed from a tool result: look for
    `answering from routed … (tool-answer shape)` in `PromptBuilder`. A lookup that
    found nothing (`"found": false`) is not an answer to a request to make something.
+
+## Record it
+Before you fix anything: `introspect(action=issue_file)` with a title, the symptom, the
+log lines you were shown as `evidence` (quote them; don't paraphrase), your suspected
+cause, and this playbook's name. It becomes a bead (label `gaia-found`). Add findings
+with `issue_note`; move it with `issue_status` (investigating → proposed → fixed).
+`introspect(action=issues)` shows its bead and whether it has been closed.
 
 ## Fix
 - Narrow the indicator so it needs real evidence (e.g. `"write "` only counts beside a

@@ -727,6 +727,55 @@ TOOLS = {
             "required": ["service"]
         }
     },
+    # --- Issue ledger (a0aw.1): bugs she finds in herself, mirrored to beads ---
+    "issue_file": {
+        "description": "Record a bug you found in yourself (a reply that took the wrong path, a tool that misbehaved). Quote the log lines or reply text you saw as evidence; an issue without evidence is refused. It becomes a bead labelled gaia-found. If it matches an open issue, that one is returned instead.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short name for the bug."},
+                "symptom": {"type": "string", "description": "What went wrong, as seen from outside."},
+                "evidence": {"type": "string", "description": "Log lines or reply text you were shown, one per line."},
+                "suspected_cause": {"type": "string", "description": "Where you think it comes from, if you know."},
+                "playbook": {"type": "string", "description": "Troubleshooting playbook you followed (e.g. ts-misrouted-request)."},
+            },
+            "required": ["title", "symptom", "evidence"]
+        }
+    },
+    "issue_note": {
+        "description": "Add what you learned to an issue you filed.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string", "description": "Issue id (gi-xxxxxx)."},
+                "text": {"type": "string"},
+            },
+            "required": ["id", "text"]
+        }
+    },
+    "issue_status": {
+        "description": "Move an issue along: investigating, proposed, fixed or wontfix. 'fixed' is your report; the bead closes once the fix is promoted.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "status": {"type": "string", "enum": ["open", "investigating", "proposed", "fixed", "wontfix"]},
+                "note": {"type": "string"},
+            },
+            "required": ["id", "status"]
+        }
+    },
+    "issue_list": {
+        "description": "List your open issues with their bead ids, or show one issue in full by id.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "id": {"type": "string"},
+                "include_closed": {"type": "boolean"},
+            },
+        }
+    },
     # --- Promotion & Blueprint Tools (candidate only) ---
     "generate_blueprint": {
         "description": "Generate a candidate blueprint YAML for a service from source code analysis. Extracts endpoints, dependencies, failure modes, and runtime config. Use this when a service needs a blueprint for the first time.",

@@ -19,7 +19,7 @@ logs, and the fix and its lesson both stay with her, is the point.
 |---|---|---|
 | **Notice** | her own turn review: `introspect_logs` (MCP) over gaia-core's log; the other mind's per-reply check (b9ts); samvega on dissonance; thought seeds | yes |
 | **Match** | troubleshooting playbooks: `/knowledge/skills/ts-*/SKILL.md` (Unified Skills format, palace-indexed via `skill_palace`) | **started** (2 playbooks) |
-| **Record** | an issue entry: symptom, evidence (log lines), suspected cause, status | **gap**: beads is the system of record, but no container has `bd`. Interim: CodeMind `detect_queue.jsonl` (`emit_detection`, source `user_request`/`code_review`), mirrored to a bead by the session that reviews it |
+| **Record** | her issue ledger: `introspect(action=issue_file / issue_note / issue_status / issues)` → `/shared/issues/ledger.jsonl` (`gaia_common/utils/issue_ledger.py`); evidence required, duplicates of open issues refused, 10/day cap. Host bridge `scripts/gaia_issue_bridge.py` makes each a bead (`gaia-found`) and writes bead id + status back (`beads.json`) | **yes** (a0aw.1); bridge timer in `scripts/systemd/`, installed by hand |
 | **Propose** | CodeMind ANALYZE → PROPOSE (`build_fix_prompt`, `codemind_patch` search/replace blocks), candidate files only | yes, never closed on code |
 | **Test** | candidate pytest for the touched module, plus a new regression test she writes | **gap**: `codemind_validator` does syntax + ruff + diff-safety only |
 | **Validate** | the live symptom gone on `gaia-core-candidate` (replay the turn that showed it) | **gap**: no replay step |
@@ -55,7 +55,7 @@ not do her steps for her.
 
 ## Gaps to build (each its own bead)
 
-1. Issue ledger she can write that lands in beads.
+1. ~~Issue ledger she can write that lands in beads.~~ Done (a0aw.1).
 2. Test step in CodeMind VALIDATE (run the touched module's tests in the candidate).
 3. Replay step: re-send the offending turn to `gaia-core-candidate` and compare.
 4. A sleep task that runs the Notice step over the day's logs with the playbooks.
@@ -71,3 +71,7 @@ not do her steps for her.
 - **2026-11-08, Match**: `skill_palace.find_skills_for_topic` had always returned `[]`
   (wrong recall kwarg and result shape, mock encoded the same mistake). Fixed
   (`a0aw.5`); palace recall now surfaces `ts-gear-mismatch`; wording-sensitive.
+- **2026-11-08, Record** (`a0aw.1`): issue ledger live. She appends events through the
+  `introspect` domain; the host bridge turns them into beads and mirrors notes, status
+  and closure back. Tested end to end on the candidate (bead `nilf`, closed as a test).
+  "fixed" from her adds `gaia-fixed-unverified`; a bead closes only after promotion.
