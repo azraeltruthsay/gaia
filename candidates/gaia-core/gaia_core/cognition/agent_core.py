@@ -10769,12 +10769,21 @@ Start your response with the first line of the file."""
         lowered = (user_input or "").lower()
 
         # File operation indicators
-        file_indicators = [
-            "read ", "open ", "show ", "view ", "cat ",
-            "write ", "save ", "create file",
+        file_signals = [
             ".md", ".txt", ".json", ".py", ".yaml", ".yml",
             "/gaia", "/knowledge", "/app", "/docs"
         ]
+        file_indicators = [
+            "read ", "open ", "show ", "view ", "cat ",
+            "save ", "create file",
+        ] + file_signals
+        # yn31: "write " alone is a creative verb ("Write a two-line poem")
+        # far more often than a file op; it routed a poem to palace(work),
+        # whose not-found result then stood in for the poem. It counts only
+        # beside a file signal.
+        if "write " in lowered and (
+                "file" in lowered or any(s in lowered for s in file_signals)):
+            return True
 
         # Command execution indicators
         exec_indicators = [

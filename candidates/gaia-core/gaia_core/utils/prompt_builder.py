@@ -18,11 +18,16 @@ from gaia_common.utils.tokenizer import count_tokens
 from gaia_common.utils.packet_templates import render_gaia_packet_template
 from gaia_common.utils.world_state import format_world_state_snapshot
 from gaia_common.utils.tool_call_parser import tool_answer_messages, tool_result_text
+
 from gaia_core.utils import gaia_rescue_helper
 
 logger = logging.getLogger("GAIA.PromptBuilder")
 
 SUMMARY_DIR = "data/shared/summaries"
+
+# Intents that ask her to make something (yn31): a lookup that found nothing
+# is not their answer.
+GENERATIVE_INTENTS = frozenset({"brainstorming", "brainstorm", "creative_writing"})
 
 # --- Canary Token System ---
 # Per-session unique tokens embedded in system prompts. If a user's input
@@ -1137,6 +1142,17 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                 # Rendered inside GAIA's full system prompt, Core re-called the
                 # tool on every live try (4/4) instead of answering from it.
                 output = tr.get('output', {})
+                # yn31: a lookup routing chose on its own that found nothing
+                # did not serve a request to make something. Framed as "You
+                # already did that", Core described the poem instead of
+                # writing it. Make-something intents answer from the full
+                # prompt instead.
+                _intent = getattr(getattr(packet, 'intent', None), 'user_intent', '') or ''
+                if (isinstance(output, dict) and output.get('found') is False
+                        and _intent in GENERATIVE_INTENTS):
+                    logger.info("PromptBuilder: routed %s found nothing for generative intent '%s' — full prompt",
+                                tool_name, _intent)
+                    break
                 if output:
                     _action = (tr.get('params') or {}).get('action')
                     _routed_answer = (f"{tool_name}({_action})" if _action and _action not in tool_name

@@ -685,6 +685,13 @@ async def gpu_wake():
         if getattr(_state, "value", _state) == LifecycleState.MEDITATION.value:
             logger.info("GPU wake suppressed — training (meditation) holds the GPU")
             return {"ok": False, "message": "training holds the GPU", "state": "meditation"}
+        # a0un: an explicit shift (e.g. POST /consciousness/awake) syncs the FSM
+        # only when it finishes, so mid-shift the FSM still reads asleep and a
+        # wake would apply the resting gear over it. The shift already wakes her.
+        _in_flight = getattr(_consciousness_matrix, "explicit_config_in_flight", None)
+        if _in_flight:
+            logger.info("GPU wake dropped — explicit shift to '%s' in flight", _in_flight)
+            return {"ok": True, "message": f"explicit shift to {_in_flight} in flight", "state": _in_flight}
         result = await _lifecycle_machine.transition(
             TransitionTrigger.WAKE_SIGNAL, reason="gpu_wake")
         if result.ok:

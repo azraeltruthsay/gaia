@@ -83,6 +83,9 @@ class ConsciousnessMatrix:
 
     def __init__(self, lifecycle_machine=None):
         self._lifecycle_machine = lifecycle_machine
+        # a0un: the explicit shift (awake/focusing/... via the API) being applied
+        # now, so a wake signal can stand aside instead of overriding it.
+        self._explicit_config_in_flight: Optional[str] = None
 
         # Load defaults from shared constants, with env var overrides
         cfg = self._load_config()
@@ -335,26 +338,46 @@ class ConsciousnessMatrix:
             self._tiers["core"].actual = ConsciousnessLevel.UNCONSCIOUS
 
         results = {}
-        for tier, level in targets.items():
-            # r2kn: nano is deprecated (socat alias → gaia-core:8092). Acting on
-            # it here posts /model/unload to Core's live engine mid-use — the
-            # same trap training() already sidesteps. Skip it everywhere.
-            if tier == "nano":
-                continue
-            results[tier] = await self.set_target(tier, level)
+        if sync_lifecycle:
+            self._explicit_config_in_flight = config_name
+        try:
+            for tier, level in targets.items():
+                # r2kn: nano is deprecated (socat alias → gaia-core:8092). Acting on
+                # it here posts /model/unload to Core's live engine mid-use — the
+                # same trap training() already sidesteps. Skip it everywhere.
+                if tier == "nano":
+                    continue
+                results[tier] = await self.set_target(tier, level)
+        finally:
+            if sync_lifecycle and self._explicit_config_in_flight == config_name:
+                self._explicit_config_in_flight = None
 
         result = {"configuration": config_name, "results": results}
 
         if sync_lifecycle:
-            lifecycle = await self._sync_lifecycle(config_name)
-            if lifecycle:
-                result["lifecycle"] = lifecycle
+            if self._active_config != config_name:
+                # a0un: another configuration was applied while this one ran
+                # (2026-11-08: a gpu_wake applied focusing mid-awake, then this
+                # sync labelled gear 2 "awake"). Don't stamp a state the tiers
+                # aren't in.
+                logger.warning("Configuration '%s' was replaced by '%s' mid-flight — not syncing lifecycle",
+                               config_name, self._active_config)
+                result["superseded_by"] = self._active_config
+            else:
+                lifecycle = await self._sync_lifecycle(config_name)
+                if lifecycle:
+                    result["lifecycle"] = lifecycle
 
         # Notify gaia-core to refresh its model pool after tier changes.
         # This clears stale gpu_prime entries that cause ReadTimeout errors.
         await self._notify_core_refresh_pool()
 
         return result
+
+    @property
+    def explicit_config_in_flight(self) -> Optional[str]:
+        """The explicit shift being applied right now, if any (a0un)."""
+        return self._explicit_config_in_flight
 
     async def apply_for_lifecycle(self, config_name: str) -> dict:
         """Apply a configuration on behalf of the LifecycleMachine.

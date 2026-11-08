@@ -366,7 +366,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 16G
+          memory: 20G  # 2qus: 12B Core Q8 on CPU is ~11 GiB resident
         reservations:
           memory: 8G
           devices:
