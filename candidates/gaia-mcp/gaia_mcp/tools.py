@@ -338,6 +338,7 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "palace_lookup_revalidate": lambda p: _palace_lookup_revalidate_impl(p),
         # Self-introspection tools
         "introspect_logs": lambda p: _introspect_logs_impl(p),
+        "introspect_turns": lambda p: _introspect_turns_impl(p),
         # a0aw.1: her issue ledger (Record step of the self-repair loop)
         "issue_file": lambda p: _issue_ledger().file_issue(
             p.get("title", ""), p.get("symptom", ""), p.get("evidence") or [],
@@ -2027,6 +2028,26 @@ def _issue_ledger():
     return issue_ledger
 
 
+def _introspect_turns_impl(params: dict) -> dict:
+    """a0aw.6: her turns over a time window, one block per turn (Notice step)."""
+    from gaia_common.utils import turn_review
+    # The selector sees action names, not params, so asks like "the last three hours"
+    # arrive without a window: default to a day and let the budget keep the newest.
+    hours = params.get("hours")
+    since = turn_review.parse_window_bound(
+        params.get("since") or params.get("start_time")
+        or (float(hours) * 60 if str(hours or "").replace(".", "", 1).isdigit() else 24 * 60))
+    until = turn_review.parse_window_bound(params.get("until") or params.get("end_time"))
+    result = turn_review.review_turns(
+        Path(_LOG_FILE_MAP["gaia-core"]), Path(os.environ.get("GAIA_CHAT_HISTORY_DIR", "/logs/chat_history")),
+        since=since, until=until, limit=int(params.get("limit") or 12),
+        search=str(params.get("search") or ""), session=str(params.get("session") or ""),
+        include_reviews=bool(params.get("include_reviews")))
+    raw = result.pop("_raw_lines", [])
+    _issue_ledger().record_shown(result["text"].splitlines() + raw)
+    return result
+
+
 def _introspect_logs_impl(params: dict) -> dict:
     """View recent service logs for self-diagnosis."""
     service = params.get("service")
@@ -2083,8 +2104,23 @@ def _introspect_logs_impl(params: dict) -> dict:
     if search:
         all_lines = [line for line in all_lines if search in line.lower()]
 
-    # Take the last N lines
-    result_lines = all_lines[-lines_requested:]
+    # a0aw.6: honour a time window (she asked with start_time; it was ignored and
+    # she got the tail, i.e. her own turn). Minutes back or ISO; untimed lines drop.
+    from gaia_common.utils import turn_review
+    since = turn_review.parse_window_bound(params.get("since") or params.get("start_time"))
+    until = turn_review.parse_window_bound(params.get("until") or params.get("end_time"))
+    if since or until:
+        windowed = []
+        for line in all_lines:
+            m = turn_review.LOG_LINE.match(line[:400])
+            ts = turn_review._ts(m.group(1)) if m else None
+            if ts and (not since or ts >= since) and (not until or ts <= until):
+                windowed.append(line)
+        all_lines = windowed
+
+    # Take the last N lines; a line can hold a whole packet, so cap each
+    result_lines = [ln if len(ln) <= 500 else ln[:500] + " …" for ln in all_lines[-lines_requested:]]
+    _issue_ledger().record_shown(result_lines)
 
     return {
         "ok": True,

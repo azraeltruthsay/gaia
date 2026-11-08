@@ -13,6 +13,8 @@ EVIDENCE = ["2026-11-08 INFO AgentCore: Tool routing triggered for intent: brain
 def _file(tmp_path, title="Haiku about a cat routed to a tool",
           symptom="A request for a haiku about a cat went through tool routing", **kw):
     kw.setdefault("evidence", EVIDENCE)
+    ev = kw["evidence"]
+    L.record_shown(ev.splitlines() if isinstance(ev, str) else ev, base=tmp_path)
     return L.file_issue(title, symptom, base=tmp_path, **kw)
 
 
@@ -99,7 +101,35 @@ def test_corrupt_line_skipped(tmp_path):
     assert L.get_issue(iid, base=tmp_path)["ok"]
 
 
+def test_evidence_must_match_what_she_was_shown(tmp_path):
+    L.record_shown(["[gaia-core.log:39065] 16:27:21 web session yn31",
+                    "  intent brainstorming | tool routing fired (intent brainstorming) | selector: no tool needed"],
+                   base=tmp_path)
+    invented = L.file_issue("generate_code sent to nano", "a generate_code call went to nano",
+                            ["generate_code (0.596) was sent to nano"], base=tmp_path)
+    assert not invented["ok"] and "introspect" in invented["error"]
+    seen = L.file_issue("Haiku routed", "routing fired on a haiku",
+                        ["tool routing fired (intent brainstorming)", "generate_code (0.596) was sent to nano"],
+                        base=tmp_path)
+    assert seen["ok"] and seen["evidence_verified"] == [True, False]
+    assert L.get_issue(seen["id"], base=tmp_path)["issue"]["evidence_verified"] == [True, False]
+
+
+def test_user_reported_issue_needs_no_shown_match(tmp_path):
+    r = L.file_issue("Stray period", "Azrael saw 'Excalibur. .'", ["Excalibur. ."], source="user", base=tmp_path)
+    assert r["ok"] and r["evidence_verified"] == [False]
+
+
+def test_shown_lines_expire(tmp_path, monkeypatch):
+    L.record_shown(["tool routing fired (intent brainstorming)"], base=tmp_path)
+    assert L.verify_evidence(["tool routing fired (intent brainstorming)"], base=tmp_path) == [True]
+    monkeypatch.setattr(L, "SHOWN_TTL_S", -1)
+    assert L.verify_evidence(["tool routing fired (intent brainstorming)"], base=tmp_path) == [False]
+
+
 def test_tool_wiring():
+    assert ACTION_TO_LEGACY[("introspect", "turns")] == "introspect_turns"
+    assert "introspect_turns" in TOOLS and "introspect_turns" in SAFE_SIDECAR_TOOLS
     for action, legacy in [("issue_file", "issue_file"), ("issue_note", "issue_note"),
                            ("issue_status", "issue_status"), ("issues", "issue_list")]:
         assert ACTION_TO_LEGACY[("introspect", action)] == legacy

@@ -64,7 +64,10 @@ def bd(*args: str, dry: bool = False) -> str:
 def describe(ev: dict) -> str:
     parts = [f"Filed by GAIA ({ev['id']}, source: {ev.get('source') or 'self'}).", "",
              f"Symptom: {ev.get('symptom', '')}", "", "Evidence (what she was shown):"]
-    parts += [f"    {line}" for line in ev.get("evidence", [])]
+    marks = ev.get("evidence_verified") or []
+    for i, line in enumerate(ev.get("evidence", [])):
+        mark = "" if i >= len(marks) else ("[seen] " if marks[i] else "[NOT in what she was shown] ")
+        parts.append(f"    {mark}{line}")
     if ev.get("suspected_cause"):
         parts += ["", f"Suspected cause: {ev['suspected_cause']}"]
     if ev.get("playbook"):

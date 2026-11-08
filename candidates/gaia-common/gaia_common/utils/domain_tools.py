@@ -267,8 +267,13 @@ DOMAIN_TOOLS: Dict[str, dict] = {
 
     # ── Introspect ─────────────────────────────────────────────────────
     "introspect": {
-        "description": "Self-inspection — world state, logs, events, your issue ledger, tool discovery",
+        "description": "Self-inspection — turns: review your own past turns, how each went (what was asked, intent, routing, tools used, reply); world: your state now; recall: system events (sleep, wake, messages received), not how turns went; logs: raw service log lines; issue_*/issues: your issue ledger; tools/describe: tool discovery",
         "actions": {
+            # a0aw.6: your turns over a window — what was asked, intent, routing, tools, reply
+            "turns": {
+                "params": {"hours": "number?", "since": "minutes|ISO?", "until": "ISO?", "search": "string?", "limit": "integer?"},
+                "maps_to": "introspect_turns",
+            },
             "world": {
                 "params": {},
                 "maps_to": "world_state",
@@ -278,7 +283,8 @@ DOMAIN_TOOLS: Dict[str, dict] = {
                 "maps_to": "recall_events",
             },
             "logs": {
-                "params": {"service": "string", "lines": "integer?", "search": "string?", "level": "string?"},
+                "params": {"service": "string", "lines": "integer?", "search": "string?", "level": "string?",
+                           "since": "minutes|ISO?", "until": "ISO?"},
                 "maps_to": "introspect_logs",
             },
             # a0aw.1: record a bug you found in yourself; it becomes a bead

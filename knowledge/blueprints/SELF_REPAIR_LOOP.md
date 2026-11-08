@@ -17,7 +17,7 @@ logs, and the fix and its lesson both stay with her, is the point.
 
 | Step | Who / what | Exists? |
 |---|---|---|
-| **Notice** | her own turn review: `introspect_logs` (MCP) over gaia-core's log; the other mind's per-reply check (b9ts); samvega on dissonance; thought seeds | yes |
+| **Notice** | `introspect(action=turns)` (a0aw.6): her turns over a window (default 24 h), one block each — asked, intent, routing fired / selector choice, tools run (routed and mid-reply), which mind answered, reply head; her current turn and earlier self-reviews left out; warnings that recur across turns dropped. `logs` honours since/until. Also: the other mind's per-reply check (b9ts), samvega, thought seeds | yes |
 | **Match** | troubleshooting playbooks: `/knowledge/skills/ts-*/SKILL.md` (Unified Skills format, palace-indexed via `skill_palace`) | **started** (2 playbooks) |
 | **Record** | her issue ledger: `introspect(action=issue_file / issue_note / issue_status / issues)` → `/shared/issues/ledger.jsonl` (`gaia_common/utils/issue_ledger.py`); evidence required, duplicates of open issues refused, 10/day cap. Host bridge `scripts/gaia_issue_bridge.py` makes each a bead (`gaia-found`) and writes bead id + status back (`beads.json`) | **yes** (a0aw.1); bridge timer in `scripts/systemd/`, installed by hand |
 | **Propose** | CodeMind ANALYZE → PROPOSE (`build_fix_prompt`, `codemind_patch` search/replace blocks), candidate files only | yes, never closed on code |
@@ -75,3 +75,12 @@ not do her steps for her.
   `introspect` domain; the host bridge turns them into beads and mirrors notes, status
   and closure back. Tested end to end on the candidate (bead `nilf`, closed as a test).
   "fixed" from her adds `gaia-fixed-unverified`; a bead closes only after promotion.
+- **2026-11-08, Notice** (`a0aw.6`): turn view live; everything introspect shows her is
+  kept 2 h (`shown.jsonl`) and an issue she files herself needs at least one evidence
+  line that matches it. Probes in both gears: the selector needed the action described
+  (it took `recall` for "look back"), a default window (it sees action names, not
+  params), and her earlier reviews hidden (she repeated their "nothing wrong"). After
+  that: `turns` chosen 3/3 in gear 1, she was shown the haiku misroute and judged it
+  fine — no invented findings, but no criteria either → `ycx7` (Match). The view also
+  surfaced two real bugs she can find herself: `bz6f` (GAIA-CORE-081, native tool call
+  abandoned mid-stream) and `av4l` (claimed a check after an invalid `introspect.trace`).

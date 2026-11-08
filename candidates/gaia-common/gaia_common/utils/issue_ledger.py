@@ -11,9 +11,11 @@ beads.json, which she reads.
     beads.json    — the bridge's. {"issues": {gi-id: {"bead", "bead_status", ...}},
                     "ledger_offset": <events already mirrored>}
 
-An issue needs evidence (the log lines or reply text she saw), not only a
-suspicion: the loop's first probe showed her inventing a finding that was not in
-anything she had been shown. Filing an issue that matches an open one returns
+An issue needs evidence, and the evidence is checked (a0aw.6): every line
+introspect shows her (turns, logs) is kept for two hours in shown.jsonl, and
+an issue she files herself is refused unless at least one evidence line matches
+something she was shown. The loop's first probe had her inventing a finding that
+was in nothing she had been given. Each line's result is kept with the issue. Filing an issue that matches an open one returns
 the open one instead of a duplicate (CodeMind once proposed the same false
 positive 134 times).
 """
@@ -31,6 +33,9 @@ from typing import Dict, List, Optional
 ISSUES_DIR = Path(os.environ.get("GAIA_ISSUES_DIR", "/shared/issues"))
 LEDGER = "ledger.jsonl"
 BEADS_MAP = "beads.json"
+SHOWN = "shown.jsonl"
+SHOWN_TTL_S = 2 * 3600
+_SHOWN_MAX_LINES = 20000
 
 STATUSES = ("open", "investigating", "proposed", "fixed", "wontfix")
 MAX_NEW_PER_DAY = 10
@@ -85,6 +90,74 @@ def _append(event: dict, base: Optional[Path] = None) -> None:
         fh.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
+def _norm(text) -> str:
+    text = str(text).lower().strip().strip('"\'`').strip()
+    return " ".join(text.split())
+
+
+def record_shown(lines, base: Optional[Path] = None) -> None:
+    """Remember what introspect showed her, so her evidence can be checked."""
+    lines = [str(ln)[:600] for ln in (lines or []) if str(ln).strip()]
+    if not lines:
+        return
+    d = _dir(base)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / SHOWN
+        now = time.time()
+        keep = []
+        if path.is_file() and path.stat().st_size > 4 * 1024 * 1024:
+            for raw in path.read_text(encoding="utf-8").splitlines():
+                try:
+                    if json.loads(raw).get("ts", 0) >= now - SHOWN_TTL_S:
+                        keep.append(raw)
+                except json.JSONDecodeError:
+                    continue
+            path.write_text("\n".join(keep) + ("\n" if keep else ""), encoding="utf-8")
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"ts": now, "lines": lines}, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def _shown_lines(base: Optional[Path] = None) -> List[str]:
+    path = _dir(base) / SHOWN
+    if not path.is_file():
+        return []
+    cutoff = time.time() - SHOWN_TTL_S
+    out: List[str] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        try:
+            entry = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("ts", 0) >= cutoff:
+            out.extend(_norm(ln) for ln in entry.get("lines", []))
+    return out[-_SHOWN_MAX_LINES:]
+
+
+def verify_evidence(evidence: List[str], base: Optional[Path] = None) -> List[bool]:
+    """For each evidence line: does it match something introspect showed her in
+    the last two hours? A quote inside a shown line, a shown line inside the
+    quote, or (for a paraphrased quote) 80% of its words in one shown line."""
+    shown = _shown_lines(base)
+    out = []
+    for ev in evidence:
+        e = _norm(ev)
+        ok = False
+        if len(e) >= 8 and shown:
+            toks = _tokens(e)
+            for line in shown:
+                if e in line or (len(line) >= 20 and line in e):
+                    ok = True
+                    break
+                if len(toks) >= 4 and len(toks & _tokens(line)) >= 0.8 * len(toks):
+                    ok = True
+                    break
+        out.append(ok)
+    return out
+
+
 def _beads_map(base: Optional[Path] = None) -> dict:
     path = _dir(base) / BEADS_MAP
     try:
@@ -106,6 +179,7 @@ def issues(base: Optional[Path] = None) -> Dict[str, dict]:
                 "title": ev.get("title", ""),
                 "symptom": ev.get("symptom", ""),
                 "evidence": ev.get("evidence", []),
+                "evidence_verified": ev.get("evidence_verified", []),
                 "suspected_cause": ev.get("suspected_cause", ""),
                 "playbook": ev.get("playbook", ""),
                 "source": ev.get("source", ""),
@@ -146,6 +220,13 @@ def file_issue(title: str, symptom: str, evidence, suspected_cause: str = "",
         return {"ok": False, "error": "evidence is required: quote the log lines or reply text you saw "
                                       "(introspect logs first); an issue with no evidence is a guess"}
 
+    verified = verify_evidence(evidence, base)
+    reported = (source or "").lower().startswith("user")
+    if not reported and not any(verified):
+        return {"ok": False, "error": "none of the evidence matches anything introspect showed you in the last "
+                                      "two hours. Look first (introspect turns or logs), then quote the lines "
+                                      "you saw. If a person reported this to you, file it with source 'user'."}
+
     current = issues(base)
     probe = f"{title} {symptom}"
     for issue in current.values():
@@ -165,9 +246,11 @@ def file_issue(title: str, symptom: str, evidence, suspected_cause: str = "",
     ts = time.time()
     iid = "gi-" + hashlib.sha1(f"{title}|{symptom}|{ts}".encode()).hexdigest()[:6]
     _append({"event": "file", "id": iid, "ts": ts, "title": title, "symptom": symptom,
-             "evidence": evidence, "suspected_cause": _clip(suspected_cause),
+             "evidence": evidence, "evidence_verified": verified, "suspected_cause": _clip(suspected_cause),
              "playbook": _clip(playbook, 80), "source": _clip(source, 40)}, base)
-    return {"ok": True, "id": iid, "message": f"Filed {iid}. It becomes a bead (label gaia-found) "
+    unverified = len(verified) - sum(verified)
+    note = f" {unverified} evidence line(s) did not match what you were shown and are marked unverified." if unverified else ""
+    return {"ok": True, "id": iid, "evidence_verified": verified, "message": f"Filed {iid}.{note} It becomes a bead (label gaia-found) "
                                               "when the bridge next runs; `issues` shows its bead id."}
 
 

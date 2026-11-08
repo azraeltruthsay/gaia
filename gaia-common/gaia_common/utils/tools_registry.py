@@ -722,9 +722,28 @@ TOOLS = {
                     "type": "string",
                     "enum": ["DEBUG", "INFO", "WARNING", "ERROR"],
                     "description": "Minimum severity level to include."
-                }
+                },
+                "since": {"type": ["string", "number"], "description": "Only lines at or after this: minutes back or ISO time (UTC)."},
+                "until": {"type": ["string", "number"], "description": "Only lines at or before this: minutes back or ISO time (UTC)."},
+                "start_time": {"type": ["string", "number"], "description": "Same as since."},
+                "end_time": {"type": ["string", "number"], "description": "Same as until."}
             },
             "required": ["service"]
+        }
+    },
+    "introspect_turns": {
+        "description": "Review your own recent turns over a time window, one block per turn: what was asked, the intent, whether tool routing fired and what the selector chose, which tools ran, which mind answered, and the start of the reply. The turn you are in is left out. Use this to look back for turns that went wrong; quote its lines as evidence.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "since": {"type": ["string", "number"], "description": "Start of the window: minutes back or an ISO time (UTC). Default: the last 24 hours."},
+                "hours": {"type": "number", "description": "Same as since, in hours back."},
+                "until": {"type": ["string", "number"], "description": "End of the window: ISO time (UTC) or minutes back. Default now."},
+                "search": {"type": "string", "description": "Only turns whose question contains this text."},
+                "session": {"type": "string", "description": "Only turns from this session."},
+                "limit": {"type": "integer", "description": "Most recent N turns in the window (default 12, max 25)."},
+                "include_reviews": {"type": "boolean", "description": "Include turns where you reviewed yourself with introspect (left out by default)."},
+            },
         }
     },
     # --- Issue ledger (a0aw.1): bugs she finds in herself, mirrored to beads ---

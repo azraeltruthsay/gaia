@@ -81,7 +81,9 @@ def test_a_word_finds_its_relatives():
 def test_she_wakes_into_the_resting_gear_and_gear_one_stays_on_request():
     from gaia_common.lifecycle.states import LifecycleState as S, RESTING_STATE, TransitionTrigger as T, validate_transition
     assert RESTING_STATE == S.FOCUSING
-    for state in (S.PARKED, S.SLEEP, S.DEEP_SLEEP, S.MEDITATION):
+    for state in (S.PARKED, S.SLEEP, S.DEEP_SLEEP):
         assert validate_transition(state, T.WAKE_SIGNAL) == RESTING_STATE
         assert validate_transition(state, T.USER_REQUEST, target=S.FOCUSING) == S.FOCUSING
+    # 6fez: nothing interrupts training — a wake signal leaves MEDITATION alone
+    assert validate_transition(S.MEDITATION, T.WAKE_SIGNAL) is None
     assert validate_transition(S.PARKED, T.USER_REQUEST, target=S.AWAKE) == S.AWAKE
