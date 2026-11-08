@@ -176,17 +176,22 @@ def find_skills_for_topic(query: str, *, limit: int = 5) -> list[str]:
     if palace is None:
         return []
     try:
-        hits = palace.recall(query, limit=limit * 3) if hasattr(palace, "recall") else []
+        # MemPalace.recall takes top_k and returns {"results": [...]}; each
+        # hit's text is under "content". Called with limit= against a list-
+        # returning mock, this returned [] on every live call (2026-11-08).
+        recalled = palace.recall(query, top_k=limit * 3) if hasattr(palace, "recall") else []
     except Exception as e:
-        logger.debug("find_skills_for_topic recall failed: %s", e)
+        logger.warning("find_skills_for_topic recall failed: %s", e)
         return []
+    hits = recalled.get("results", []) if isinstance(recalled, dict) else recalled
 
     seen: set[str] = set()
     out: list[str] = []
     for hit in hits or []:
         if not isinstance(hit, dict):
             continue
-        text = (hit.get("text") or hit.get("body") or hit.get("compressed") or "")
+        text = (hit.get("content") or hit.get("text") or hit.get("body")
+                or hit.get("compressed") or "")
         if not isinstance(text, str):
             continue
         # Look for the "skill:<name>" prefix anywhere in the text

@@ -28,7 +28,9 @@ def mock_palace():
     whatever the test programs into .recall_results."""
     mock = MagicMock()
     mock.recall_results = []
-    mock.recall.side_effect = lambda q, limit=None: list(mock.recall_results)
+    # Same shape as MemPalace.recall: top_k, and a dict with "results".
+    mock.recall.side_effect = lambda q, top_k=5, **kw: {
+        "ok": True, "results": list(mock.recall_results)}
     reset_for_tests(mock)
     return mock
 
@@ -209,3 +211,15 @@ class TestIntegrationSanity:
         ]
         skills = find_skills_for_topic("scaffold")
         assert skills == ["blueprint"]
+
+
+def test_real_palace_hit_shape_finds_the_skill(mock_palace):
+    """2026-11-08: live hits carry their text under "content" (AAAK line)."""
+    mock_palace.recall_results = [{
+        "palace_id": "2026-11-08_db8644f303", "wing": "technical", "room": "infrastructure",
+        "content": ('technical|infrastructure|2026-11-08|skill_load:ts-misrouted-request\n'
+                    '0:TRO|ts-misrouted-request_troubleshoot_request|"skill:ts-misrouted-request '
+                    'handles Troubleshoot a request that took the wrong path (v1)"'),
+        "score": "3",
+    }]
+    assert find_skills_for_topic("request that took the wrong path") == ["ts-misrouted-request"]
