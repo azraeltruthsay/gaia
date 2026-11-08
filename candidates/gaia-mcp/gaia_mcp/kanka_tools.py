@@ -26,7 +26,9 @@ import requests as req_lib
 logger = logging.getLogger("GAIA.KankaTools")
 
 _KANKA_API_BASE = "https://api.kanka.io/1.0"
-_DEFAULT_CAMPAIGN_ID = 36323  # "Dawn of An Age" (owner)
+# Default campaign when a call names none. 162151 = "Sunrise in the Valley" (active campaign
+# since 2026-11-08); 36323 = "Dawn of An Age" (the original Strauthauk world).
+_DEFAULT_CAMPAIGN_ID = int(os.getenv("KANKA_DEFAULT_CAMPAIGN_ID", "162151"))
 
 _VALID_ENTITY_TYPES = frozenset({
     "characters", "locations", "journals", "items", "events",

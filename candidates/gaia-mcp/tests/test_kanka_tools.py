@@ -35,7 +35,9 @@ def reset_singleton():
 
 class TestKankaClient:
 
-    def test_missing_api_key_returns_error(self):
+    def test_missing_api_key_returns_error(self, monkeypatch):
+        # api_key="" falls back to the env var, so clear it or a real key leaks in.
+        monkeypatch.delenv("KANKA_API_KEY", raising=False)
         client = KankaClient(api_key="")
         result = client.get("campaigns")
         assert result["ok"] is False
