@@ -39,6 +39,11 @@ DEFAULT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL_SECONDS", "300"))
 MAX_DRIFT_MINUTES = int(os.environ.get("HEARTBEAT_MAX_DRIFT_MINUTES", "2"))
 CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415")
 NANO_ENDPOINT = os.environ.get("NANO_ENDPOINT", "http://gaia-core:8092")
+# The engine answers one request at a time. Asleep, a sleep task can hold Core on
+# the CPU for ~17 s per request (docs_maintenance), and the canary waits its turn
+# behind it: at 15 s it timed out about one check in fifteen while she was fine
+# (6nw3). Long enough to wait out one request in flight; a hung engine still fails.
+CHECK_TIMEOUT = int(os.environ.get("HEARTBEAT_TIMEOUT_SECONDS", "60"))
 STATE_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "heartbeat" / "time_check.json"
 
 
@@ -132,7 +137,7 @@ def run_time_check(endpoint: str = NANO_ENDPOINT) -> Dict[str, Any]:
             data=payload,
             headers={"Content-Type": "application/json"},
         )
-        with urlopen(req, timeout=15) as resp:
+        with urlopen(req, timeout=CHECK_TIMEOUT) as resp:
             result = json.loads(resp.read().decode())
 
         response_text = (
