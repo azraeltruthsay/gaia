@@ -479,6 +479,20 @@ class SleepTaskScheduler:
             min_interval_seconds=1800,
         ))
 
+        # a0aw.4: she reads her own turns against her troubleshooting playbooks
+        # and files what went wrong (Notice -> Match -> Record in one pass).
+        # SELF_REVIEW_ENABLED=0 turns it off.
+        if os.environ.get("SELF_REVIEW_ENABLED", "1") != "0":
+            self.register_task(SleepTask(
+                task_id="self_review",
+                task_type="SELF_IMPROVE",
+                priority=4,
+                interruptible=True,
+                estimated_duration_seconds=300,
+                handler=self._run_self_review,
+                min_interval_seconds=4 * 3600,
+            ))
+
     # ------------------------------------------------------------------
     # Scheduling
     # ------------------------------------------------------------------
@@ -1529,6 +1543,22 @@ class SleepTaskScheduler:
     # ------------------------------------------------------------------
     # codemind_cycle (CODEMIND) — autonomous code self-improvement
     # ------------------------------------------------------------------
+
+    def _run_self_review(self, **kwargs) -> None:
+        """a0aw.4: review her turns since the last review and file what went wrong."""
+        from pathlib import Path
+        from gaia_core.cognition.self_review import model_generator, run_self_review
+        if self.model_pool is None:
+            logger.info("self_review skipped: no model pool")
+            return
+        result = run_self_review(
+            model_generator(self.model_pool),
+            log_file=Path(os.environ.get("GAIA_CORE_LOG", "/logs/gaia-core.log")),
+            history_dir=Path(os.environ.get("GAIA_CHAT_HISTORY_DIR", "/logs/chat_history")),
+            skills_dir=Path(os.environ.get("GAIA_SKILLS_DIR", "/knowledge/skills")),
+            check_interrupted=self.check_interrupted,
+        )
+        logger.info("self_review: %s", {k: v for k, v in result.items() if k != "refused"})
 
     def _run_codemind_cycle(self, **kwargs) -> None:
         """Run a CodeMind autonomous improvement cycle during sleep.

@@ -196,3 +196,17 @@ def test_criteria_fit_inside_budget(tmp_path):
     r = T.review_turns(log, hist, since=T.parse_window_bound(60, NOW), now=NOW,
                        skills_dir=_skills(tmp_path), text_budget=700)
     assert len(r["text"]) < 1400 and "playbooks say" in r["text"]
+
+
+def test_oldest_first_shows_first_turns_and_their_times(tmp_path):
+    log = tmp_path / "gaia-core.log"
+    log.write_text(LOG)
+    hist = tmp_path / "hist"
+    hist.mkdir()
+    since = datetime(2026, 11, 8, 16, 0, tzinfo=timezone.utc)
+    r = T.review_turns(log, hist, since=since, now=NOW, limit=1, oldest_first=True)
+    assert len(r["turns"]) == 1 and r["turns"][0]["packet"] == "web_a"
+    assert r["turns"][0]["ts"].startswith("2026-11-08T16:27:12")
+    assert "the first 1 shown" in r["text"]
+    newest = T.review_turns(log, hist, since=since, now=NOW, limit=1)
+    assert newest["turns"][0]["packet"] != "web_a"

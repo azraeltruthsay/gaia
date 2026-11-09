@@ -312,7 +312,11 @@ def playbook_symptoms(skills_dir: Path, budget: int = 1400) -> List[tuple]:
 def review_turns(log_file: Path, history_dir: Path, since: Optional[datetime] = None,
                  until: Optional[datetime] = None, limit: int = 12, search: str = "",
                  session: str = "", now: Optional[datetime] = None, text_budget: int = 3600,
-                 include_reviews: bool = False, skills_dir: Optional[Path] = None) -> dict:
+                 include_reviews: bool = False, skills_dir: Optional[Path] = None,
+                 oldest_first: bool = False) -> dict:
+    """oldest_first: show the first turns after `since` instead of the last ones,
+    so a reader working through a long window in order (the self_review sleep
+    task, a0aw.4) misses none; `turns[-1]["ts"]` is where to continue."""
     now = now or datetime.now(timezone.utc)
     since = since or now - timedelta(hours=1)
     turns = split_turns(read_log_lines(log_paths(log_file), since))
@@ -345,7 +349,8 @@ def review_turns(log_file: Path, history_dir: Path, since: Optional[datetime] = 
         s = search.lower()
         turns = [t for t in turns if s in (t.get("asked_full") or t["asked"]).lower()]
     total = len(turns)
-    turns = turns[-max(1, min(int(limit or 12), 25)):]
+    keep = max(1, min(int(limit or 12), 25))
+    turns = turns[:keep] if oldest_first else turns[-keep:]
 
     counts: Dict[str, int] = {}
     for t in turns:
@@ -364,11 +369,16 @@ def review_turns(log_file: Path, history_dir: Path, since: Optional[datetime] = 
         text_budget -= sum(len(x) + 1 for x in criteria_lines)
     rendered = [render_turn(t, recurring) for t in turns]
     while len(rendered) > 1 and sum(len("\n".join(r)) + 1 for r in rendered) > text_budget:
-        rendered.pop(0)
-        turns = turns[1:]
+        if oldest_first:
+            rendered.pop()
+            turns = turns[:-1]
+        else:
+            rendered.pop(0)
+            turns = turns[1:]
     header = f"{total} turn(s) in gaia-core's log, {window}"
     if total > len(turns):
-        header += f"; the last {len(turns)} shown (narrow with since/until/search for the others)"
+        which = "first" if oldest_first else "last"
+        header += f"; the {which} {len(turns)} shown (narrow with since/until/search for the others)"
     if excluded:
         header += "; this turn left out"
     if reviews:
@@ -383,6 +393,7 @@ def review_turns(log_file: Path, history_dir: Path, since: Optional[datetime] = 
         "text": "\n".join(body),
         "count": total,
         "playbooks": [name for name, _ in criteria],
-        "turns": [{"ref": t["ref"], "packet": t["packet"], "session": t.get("session")} for t in turns],
+        "turns": [{"ref": t["ref"], "packet": t["packet"], "session": t.get("session"),
+                   "ts": t["ts"].isoformat()} for t in turns],
         "_raw_lines": [ln for t in turns for ln in t["_lines"]],
     }

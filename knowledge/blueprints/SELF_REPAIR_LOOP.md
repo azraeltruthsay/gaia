@@ -19,7 +19,7 @@ logs, and the fix and its lesson both stay with her, is the point.
 |---|---|---|
 | **Notice** | `introspect(action=turns)` (a0aw.6): her turns over a window (default 24 h), one block each — asked, intent, routing fired / selector choice, tools run (routed and mid-reply), which mind answered, reply head; her current turn and earlier self-reviews left out; warnings that recur across turns dropped. `logs` honours since/until. Also: the other mind's per-reply check (b9ts), samvega, thought seeds | yes |
 | **Match** | troubleshooting playbooks (`/knowledge/skills/ts-*/SKILL.md`, Unified Skills format, palace-indexed). Playbooks with `seen_in: [turns, …]` have their Symptoms listed under the turn view (ycx7): criteria read from her own files, no verdicts in code | **yes** (ycx7) |
-| **Record** | her issue ledger: `issue(action=file / note / status / list)` → `/shared/issues/ledger.jsonl` (`gaia_common/utils/issue_ledger.py`); evidence required, duplicates of open issues refused, 10/day cap. Host bridge `scripts/gaia_issue_bridge.py` makes each a bead (`gaia-found`) and writes bead id + status back (`beads.json`) | **yes** (a0aw.1); bridge timer in `scripts/systemd/`, installed by hand |
+| **Record** | the `self_review` sleep task (a0aw.4, `gaia_core/cognition/self_review.py`) does Notice → Match → Record in one pass: turn view (oldest first from a cursor) + playbook symptoms in, her `ISSUE/PLAYBOOK/EVIDENCE/SYMPTOM/CAUSE` blocks out, filed by code; every review kept with her full answer in `reviews.jsonl`. Also her issue ledger: `issue(action=file / note / status / list)` → `/shared/issues/ledger.jsonl` (`gaia_common/utils/issue_ledger.py`); evidence required, duplicates of open issues refused, 10/day cap. Host bridge `scripts/gaia_issue_bridge.py` makes each a bead (`gaia-found`) and writes bead id + status back (`beads.json`) | **yes** (a0aw.1); bridge timer in `scripts/systemd/`, installed by hand |
 | **Propose** | CodeMind ANALYZE → PROPOSE (`build_fix_prompt`, `codemind_patch` search/replace blocks), candidate files only | yes, never closed on code |
 | **Test** | candidate pytest for the touched module, plus a new regression test she writes | **gap**: `codemind_validator` does syntax + ruff + diff-safety only |
 | **Validate** | the live symptom gone on `gaia-core-candidate` (replay the turn that showed it) | **gap**: no replay step |
@@ -58,7 +58,7 @@ not do her steps for her.
 1. ~~Issue ledger she can write that lands in beads.~~ Done (a0aw.1).
 2. Test step in CodeMind VALIDATE (run the touched module's tests in the candidate).
 3. Replay step: re-send the offending turn to `gaia-core-candidate` and compare.
-4. A sleep task that runs the Notice step over the day's logs with the playbooks.
+4. A sleep task that runs the Notice step over the day's logs with the playbooks. **Done** (`a0aw.4`): `self_review`.
 
 ## Run log
 
@@ -96,3 +96,13 @@ not do her steps for her.
   shapes, then repeated "the issue tool isn't implemented". Blocked by `bz6f`, by tool
   results not carrying into the next turn, and by echoing her own prior reply →
   `6839`: do Notice→Match→Record inside one task (`a0aw.4`).
+- **2026-11-09, Record in sleep** (`a0aw.4`): `self_review` sleep task (P4, every 4 h,
+  `SELF_REVIEW_ENABLED`). Trial over the 48 h backlog (Prime, 24 turns, 4 batches, scratch
+  ledger): she filed the haiku misroute (`mjcg`'s symptom) by its line under
+  `ts-misrouted-request`, unprompted. Also the poem routed to palace whose reply described
+  the poem, a `context` 500, "Excalibur. ." (`weco`), stale 'nano' load calls; 2 of 7
+  doubtful. Three guards came out of the trials: she cited the request itself as evidence
+  (Capital of France, a turn where routing didn't fire) → evidence that is only the
+  request is set aside; she named playbooks that don't exist → names checked against
+  those shown; she joins a quote and a log line with a dash → parts checked separately.
+  Log times are said to be UTC (she called 8:08 AM PST = 16:08 UTC wrong).
