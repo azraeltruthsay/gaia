@@ -106,3 +106,9 @@ not do her steps for her.
   request is set aside; she named playbooks that don't exist → names checked against
   those shown; she joins a quote and a log line with a dash → parts checked separately.
   Log times are said to be UTC (she called 8:08 AM PST = 16:08 UTC wrong).
+- **2026-11-09, first live self_review** (in sleep, 23 turns, 3 batches, 167 s; Prime when
+  up, Core otherwise): filed 3 → beads `z18l` (correct, but the same turn as `yn31`,
+  already fixed: closed as duplicate, and the closure reached her ledger), `pcsb`
+  (`context` 500, new), `iv01` (routing on two chat turns, new). `bz6f` fixed the same day:
+  inline tool turns now finish in the stream path and failed calls reach her next turn.
+  Still open on the chat path: she claims actions she never took (`9nxd`).
