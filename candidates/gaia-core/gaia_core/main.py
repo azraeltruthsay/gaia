@@ -1978,6 +1978,18 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 "error": _norm_msg,
                                 "hint": _hint,
                             })
+                            # bz6f / 6839: what the call returned stays in front of
+                            # her next turn, failures included. Only successes were
+                            # kept; a failed call then had only her reply about it
+                            # ("I filled it, it should now be recordable") to go on.
+                            if not _is_invalid_tool and tc.tool_name != "expand_context":
+                                try:
+                                    _agent_core.session_manager.record_tool_result(
+                                        session_id, tool=tc.tool_name, action=tc.tool_action or "",
+                                        title=f"{tc.tool_name}({tc.tool_action or ''}) call failed",
+                                        gist=str(_norm_msg))
+                                except Exception:
+                                    logger.debug("tool-ledger record of a failure failed (non-fatal)", exc_info=True)
 
                         # Show tool execution status to user. On failure, never show
                         # error detail here regardless of shape — _norm_msg is a
@@ -2316,34 +2328,36 @@ async def process_packet(packet_data: Dict[str, Any]):
                     "\n".join(x for x in (_self_facts_for_observer(history, full_response), _sources) if x),
                     session_id, bool(_tool_texts_for_observer), bool(_sources))
 
-            # 29yq: a native tool call detected mid-stream (ParseEventType.
-            # TOOL_CALL_DETECTED, above) BREAKS out of the loop consuming
-            # run_turn()'s generator (the `break` at the top of this function)
-            # to execute the tool and continue generation via
-            # generate_continuation() — a separate call. run_turn() itself is
-            # then abandoned mid-iteration: its generator is simply never
-            # advanced again, so whatever code inside it runs AFTER that
-            # token's `yield` — including, apparently, session persistence of
-            # the assistant turn — never executes. NOTE: final_packet_dict
-            # being None is NOT on its own a signal of this — run_turn()
-            # commonly finishes without ever yielding a terminal packet even
-            # on a clean, no-tool-call turn (gaia-web's discord_interface.py
-            # "sending accumulated response" fallback is the normal delivery
-            # path already, and run_turn persists that case fine on its own).
-            # Gate strictly on the abandonment condition itself
-            # (_pending_tool_calls nonempty = the break fired) so this safety
-            # net never double-persists an already-healthy turn.
+            # 29yq / bz6f: a native tool call detected mid-stream BREAKS out of
+            # the loop consuming run_turn()'s generator to run the tool and
+            # answer via generate_continuation(). run_turn() is never advanced
+            # again, so what it does after that token's yield — keeping the
+            # reply in the session, the lookup feedback — never runs, and its
+            # cleanup waited for garbage collection. This is the designed path
+            # for every inline tool call, so this turn is finished here: the
+            # generator is closed now, and the reply she actually gave (the
+            # continuation, not the text with the call in it) is kept.
+            # _pending_tool_calls nonempty = the break fired; a turn that
+            # finished on its own (final_packet_dict) kept itself already.
+            if _pending_tool_calls:
+                try:
+                    await loop.run_in_executor(None, gen.close)
+                except Exception:
+                    logger.debug("Closing the interrupted run_turn generator failed", exc_info=True)
             if _pending_tool_calls and not final_packet_dict and full_response.strip():
-                log_gaia_error(
-                    logger, "GAIA-CORE-081",
-                    f"session={session_id}: native tool call abandoned run_turn() "
-                    "mid-stream and its continuation was never persisted to "
-                    "session history — persisting and synthesizing a terminal "
-                    "packet as a safety net so this turn isn't silently dropped")
+                logger.info("session=%s: reply after inline tool call %s kept by the stream path",
+                            session_id, ", ".join(_t.tool_name + (f"({_t.tool_action})" if _t.tool_action else "")
+                                                  for _t in _pending_tool_calls))
                 try:
                     _agent_core.session_manager.add_message(session_id, "assistant", full_response)
                 except Exception:
-                    logger.warning("Safety-net session persistence failed", exc_info=True)
+                    log_gaia_error(logger, "GAIA-CORE-081",
+                                   f"session={session_id}: the reply after an inline tool call "
+                                   "could not be kept in session history", exc_info=True)
+                try:
+                    _agent_core._lookup_feedback(full_response, packet)
+                except Exception:
+                    logger.debug("Lookup feedback after inline tool call failed", exc_info=True)
                 from gaia_common.protocols.cognition_packet import PacketState
                 packet.status.state = PacketState.COMPLETED
                 packet.response.candidate = full_response
