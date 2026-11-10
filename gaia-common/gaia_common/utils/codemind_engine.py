@@ -103,7 +103,7 @@ DEFAULT_CONFIG = {
         "py_compile": True,
         "ruff": True,
         "ast_parse": True,
-        "pytest": False,
+        "pytest": True,  # a0aw.2: the touched module's tests, in the candidate (VERIFY)
     },
     "triggers": {
         "sleep_cycle": True,
@@ -200,7 +200,8 @@ class CodeMindEngine:
         CodeMindState.PROPOSE: {CodeMindState.VALIDATE, CodeMindState.IDLE},
         CodeMindState.VALIDATE: {CodeMindState.APPLY, CodeMindState.IDLE},
         CodeMindState.APPLY: {CodeMindState.VERIFY, CodeMindState.IDLE},
-        CodeMindState.VERIFY: {CodeMindState.PROMOTE, CodeMindState.IDLE},
+        # a0aw.2: failed tests send the fix back to PROPOSE
+        CodeMindState.VERIFY: {CodeMindState.PROMOTE, CodeMindState.PROPOSE, CodeMindState.IDLE},
         CodeMindState.PROMOTE: {CodeMindState.IDLE},
     }
 
@@ -287,7 +288,8 @@ class CodeMindEngine:
 
     def end_cycle(self, outcome: str = "complete") -> dict:
         """Finalize and log the cycle."""
-        self.transition(CodeMindState.IDLE)
+        if self.state != CodeMindState.IDLE:  # each detection already returns to IDLE
+            self.transition(CodeMindState.IDLE)
         result = {
             "cycle_id": self._current_cycle.cycle_id if self._current_cycle else "unknown",
             "outcome": outcome,

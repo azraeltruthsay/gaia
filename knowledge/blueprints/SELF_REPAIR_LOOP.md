@@ -21,7 +21,7 @@ logs, and the fix and its lesson both stay with her, is the point.
 | **Match** | troubleshooting playbooks (`/knowledge/skills/ts-*/SKILL.md`, Unified Skills format, palace-indexed). Playbooks with `seen_in: [turns, …]` have their Symptoms listed under the turn view (ycx7): criteria read from her own files, no verdicts in code | **yes** (ycx7) |
 | **Record** | the `self_review` sleep task (a0aw.4, `gaia_core/cognition/self_review.py`) does Notice → Match → Record in one pass: turn view (oldest first from a cursor) + playbook symptoms in, her `ISSUE/PLAYBOOK/EVIDENCE/SYMPTOM/CAUSE` blocks out, filed by code; every review kept with her full answer in `reviews.jsonl`. Also her issue ledger: `issue(action=file / note / status / list)` → `/shared/issues/ledger.jsonl` (`gaia_common/utils/issue_ledger.py`); evidence required, duplicates of open issues refused, 10/day cap. Host bridge `scripts/gaia_issue_bridge.py` makes each a bead (`gaia-found`) and writes bead id + status back (`beads.json`) | **yes** (a0aw.1); bridge timer in `scripts/systemd/`, installed by hand |
 | **Propose** | CodeMind ANALYZE → PROPOSE (`build_fix_prompt`, `codemind_patch` search/replace blocks), candidate files only | yes, never closed on code |
-| **Test** | candidate pytest for the touched module, plus a new regression test she writes | **gap**: `codemind_validator` does syntax + ruff + diff-safety only |
+| **Test** | candidate pytest for the touched module, plus a new regression test she writes | **yes** (a0aw.2): CodeMind's VERIFY runs the tests named after or importing the touched module in `gaia-core-candidate` (orchestrator `POST /candidate/test`, `gaia_common/utils/codemind_tests.py`); failure restores the file and goes back to PROPOSE once with the report. No covering test = not validated. She can't write the regression test yet |
 | **Validate** | the live symptom gone on `gaia-core-candidate` (replay the turn that showed it) | **gap**: no replay step |
 | **Promote** | `promote_pipeline.sh`; vital organs (`agent_core.py`, `main.py`, …) need Azrael's approval — CodeMind's `VITAL_ORGANS` gate | yes (gated) |
 | **Learn** | write or update the playbook that would have found this faster; record the outcome in the palace (`record_skill_outcome`); close the issue | partial (SkillCreator drafts from failure patterns) |
@@ -56,7 +56,9 @@ not do her steps for her.
 ## Gaps to build (each its own bead)
 
 1. ~~Issue ledger she can write that lands in beads.~~ Done (a0aw.1).
-2. Test step in CodeMind VALIDATE (run the touched module's tests in the candidate).
+2. ~~Test step in CodeMind VALIDATE (run the touched module's tests in the candidate).~~ Done (a0aw.2).
+5. Her issue becomes a CodeMind detection; a direct-fix path for a one-file behavioral bug.
+6. CodeMind writes a regression test with the fix.
 3. Replay step: re-send the offending turn to `gaia-core-candidate` and compare.
 4. A sleep task that runs the Notice step over the day's logs with the playbooks. **Done** (`a0aw.4`): `self_review`.
 
@@ -123,3 +125,10 @@ not do her steps for her.
   behind it, a correction is shown and kept in her history. Live: both 9nxd turns
   corrected; a real told-fact save and a greeting were not; asked again, she made a call
   and reported its failure instead of claiming success.
+- **2026-11-10, Test** (`a0aw.2`): live run of the real cycle against the real orchestrator,
+  model answers scripted: a proposal that broke `action_claims.claims` failed 11 of 35
+  candidate tests, the file was restored and the report went back to PROPOSE; the second
+  proposal passed 35 and was kept. On the way: tests can't run inside gaia-core (they write
+  to /shared, the knowledge graph and chat history, which there are production's), so they
+  run in the candidate container. Two gaps found for `mjcg`: no path from her issue to a
+  CodeMind detection, and behavioral issues only ever get a blueprint, not a fix.

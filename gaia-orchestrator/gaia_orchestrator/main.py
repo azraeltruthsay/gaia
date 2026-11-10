@@ -1156,6 +1156,69 @@ async def deploy_promote(request: DeployPromoteRequest):
     return {"ok": not errors, "promoted": promoted, "errors": errors}
 
 
+# a0aw.2: CodeMind's TEST step. The tests write to /shared, the knowledge
+# graph and chat history, so they run where the candidate's own volumes are
+# mounted: inside gaia-core-candidate, as a person runs them by hand.
+_CANDIDATE_TEST_TARGETS = {
+    # service -> (container, working dir, top-level dirs a test path may start with)
+    "gaia-core": ("gaia-core-candidate", "/app", ("tests/", "gaia_core/")),
+    "gaia-common": ("gaia-core-candidate", "/gaia-common", ("tests/", "gaia_common/")),
+}
+
+
+class CandidateTestRequest(BaseModel):
+    service: str
+    paths: list[str]
+    timeout: int = 300
+
+    @field_validator("service")
+    @classmethod
+    def _known_service(cls, v: str) -> str:
+        if v not in _CANDIDATE_TEST_TARGETS:
+            raise ValueError(f"no candidate test target for {v!r}")
+        return v
+
+    @field_validator("paths")
+    @classmethod
+    def _test_files_only(cls, v: list[str]) -> list[str]:
+        if not v or len(v) > 40:
+            raise ValueError("between 1 and 40 test paths")
+        for p in v:
+            name = p.rsplit("/", 1)[-1]
+            if (p.startswith(("/", "-")) or ".." in p.split("/") or not p.endswith(".py")
+                    or not name.startswith("test_") or any(c in p for c in " ;&|$`\\'\"")):
+                raise ValueError(f"not a test file path: {p!r}")
+        return v
+
+
+@app.post("/candidate/test")
+async def candidate_test(request: CandidateTestRequest):
+    """Run the given test files in the candidate container (a0aw.2).
+    Returns {ok, returncode, summary, output} where output is the tail of
+    pytest's report."""
+    container, workdir, prefixes = _CANDIDATE_TEST_TARGETS[request.service]
+    bad = [p for p in request.paths if not p.startswith(prefixes)]
+    if bad:
+        raise HTTPException(status_code=422, detail=f"paths outside {prefixes}: {bad}")
+    cmd = ["docker", "exec", "-w", workdir, container, "python", "-m", "pytest", "-q",
+           "-p", "no:cacheprovider", "--tb=short", "--no-header", *request.paths]
+    timeout = max(30, min(int(request.timeout), 900))
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(None, lambda: subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, check=False))
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "returncode": None, "summary": f"timed out after {timeout}s", "output": ""}
+    output = (result.stdout or "") + (result.stderr or "")
+    lines = [ln for ln in output.strip().splitlines() if ln.strip()]
+    summary = next((ln.strip("= ") for ln in reversed(lines)
+                    if " passed" in ln or " failed" in ln or " error" in ln or "no tests ran" in ln), "")
+    logger.info("Candidate tests (%s, %d file(s)): rc=%s %s",
+                request.service, len(request.paths), result.returncode, summary)
+    return {"ok": result.returncode == 0, "returncode": result.returncode,
+            "summary": summary, "output": output[-4000:]}
+
+
 # =============================================================================
 # Training Subprocess Monitoring
 # =============================================================================

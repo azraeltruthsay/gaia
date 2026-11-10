@@ -1589,6 +1589,7 @@ class SleepTaskScheduler:
             # nfi3: candidate files successfully fixed this cycle — becomes
             # a restart manifest at cycle end (self-deploy loop closure).
             _cycle_applied_files: list = []
+            _cycle_tested: list = []  # a0aw.2: what the candidate tests said
 
             # ── Direct seed bridge (fallback if initiative_cycle didn't run) ──
             # Initiative cycle is gated on serenity; this ensures seeds
@@ -1778,113 +1779,111 @@ class SleepTaskScheduler:
                     engine.transition(CodeMindState.IDLE)
                     continue
 
-                # ── s4r2 patch-mode: surgical SEARCH/REPLACE first ──
-                # Output tokens shrink from O(file) to O(change) and
-                # untouched code can't be mangled. Any parse/apply failure
-                # falls back to the legacy whole-file prompt below.
-                proposed_content = None
-                if bool(codemind_cfg.get("patch_mode", True)):
-                    from gaia_common.utils.codemind_patch import parse_patch_blocks, apply_patch
-                    patch_response = self._codemind_propose(engine.build_fix_prompt(
-                        file_path=file_path,
-                        issue_description=issue,
-                        file_content=original_content,
-                        patch_mode=True,
-                    ))
-                    if patch_response and patch_response.strip().startswith("CANNOT_FIX"):
-                        logger.info("CodeMind: LLM declined (patch mode): %s",
-                                    patch_response.strip()[:200])
+                # a0aw.2: PROPOSE → VALIDATE → APPLY → VERIFY (the touched
+                # module's tests in the candidate). Failed tests restore the
+                # file and go back to PROPOSE once, with what failed.
+                run_tests = bool(engine.config.get("validation", {}).get("pytest", True))
+                attempts = 1 + (int(codemind_cfg.get("test_retries", 1)) if run_tests else 0)
+                feedback = ""
+                for attempt in range(attempts):
+                    if attempt:
+                        engine.transition(CodeMindState.PROPOSE)
+                    self.check_interrupted()
+                    proposed_content = self._codemind_propose_fix(
+                        engine, file_path, issue + feedback, original_content, codemind_cfg)
+                    if proposed_content is None:
                         engine.transition(CodeMindState.IDLE)
-                        continue
-                    if patch_response:
-                        blocks, perr = parse_patch_blocks(patch_response)
-                        if perr:
-                            logger.info("CodeMind: patch parse failed (%s) — falling back to whole-file", perr)
-                        else:
-                            patched, aerr = apply_patch(original_content, blocks)
-                            if aerr:
-                                logger.info("CodeMind: patch apply failed (%s) — falling back to whole-file", aerr)
-                            else:
-                                proposed_content = patched
-                                logger.info("CodeMind: patch-mode fix applied (%d block(s))", len(blocks))
+                        break
 
-                if proposed_content is None:
-                    fix_prompt = engine.build_fix_prompt(
+                    # ── VALIDATE: syntax + lint + diff safety ──
+                    engine.transition(CodeMindState.VALIDATE)
+                    self.check_interrupted()
+
+                    val_result = validate_full(
+                        proposed_content, file_path,
+                        checks=engine.config.get("validation", {}),
+                    )
+                    safety = validate_diff_safety(original_content, proposed_content)
+
+                    change = CodeMindChange(
                         file_path=file_path,
-                        issue_description=issue,
-                        file_content=original_content,
+                        issue=issue,
+                        scope_tier=engine.config["scope_tiers"].get("tier2_supervised", 2),
+                        diff_summary=f"safety={safety.get('safe')}, ratio={safety.get('change_ratio', 'N/A')}",
+                        validation_result=val_result.to_dict(),
                     )
 
-                    proposed_content = self._codemind_propose(fix_prompt)
-                    if not proposed_content:
+                    if not val_result.passed:
+                        change.error = f"Validation failed: {val_result.errors}"
+                        logger.warning("CodeMind: validation failed for %s: %s", file_path, val_result.errors)
+                        engine.record_change(change)
                         engine.transition(CodeMindState.IDLE)
-                        continue
+                        break
 
-                    # Check for CANNOT_FIX
-                    if proposed_content.strip().startswith("CANNOT_FIX"):
-                        reason = proposed_content.strip()
-                        logger.info("CodeMind: LLM declined: %s", reason[:200])
+                    if not safety.get("safe", True):
+                        change.error = f"Diff safety failed: {safety.get('reason')}"
+                        logger.warning("CodeMind: diff too destructive for %s: %s", file_path, safety.get("reason"))
+                        engine.record_change(change)
                         engine.transition(CodeMindState.IDLE)
-                        continue
+                        break
 
-                # ── VALIDATE: syntax + lint + diff safety ──
-                engine.transition(CodeMindState.VALIDATE)
-                self.check_interrupted()
+                    # ── APPLY (if not dry_run) ──
+                    if cycle.dry_run:
+                        logger.info("CodeMind [dry_run]: would apply fix to %s", file_path)
+                        change.applied = False
+                        engine.record_change(change)
+                        engine.transition(CodeMindState.IDLE)
+                        break
 
-                val_result = validate_full(
-                    proposed_content, file_path,
-                    checks=engine.config.get("validation", {}),
-                )
-                safety = validate_diff_safety(original_content, proposed_content)
+                    engine.transition(CodeMindState.APPLY)
+                    self.check_interrupted()
 
-                change = CodeMindChange(
-                    file_path=file_path,
-                    issue=issue,
-                    scope_tier=engine.config["scope_tiers"].get("tier2_supervised", 2),
-                    diff_summary=f"safety={safety.get('safe')}, ratio={safety.get('change_ratio', 'N/A')}",
-                    validation_result=val_result.to_dict(),
-                )
+                    try:
+                        import shutil
+                        backup_path = f"{file_path}.bak"
+                        if not attempt:
+                            shutil.copy2(file_path, backup_path)
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write(proposed_content)
+                        logger.info("CodeMind: applied fix to %s (backup at %s)", file_path, backup_path)
+                    except Exception as e:
+                        change.error = f"Apply failed: {e}"
+                        logger.warning("CodeMind: apply failed for %s: %s", file_path, e)
+                        engine.record_change(change)
+                        engine.transition(CodeMindState.IDLE)
+                        break
 
-                if not val_result.passed:
-                    change.error = f"Validation failed: {val_result.errors}"
-                    logger.warning("CodeMind: validation failed for %s: %s", file_path, val_result.errors)
-                    engine.record_change(change)
-                    engine.transition(CodeMindState.IDLE)
-                    continue
+                    # ── VERIFY: the module's tests, in the candidate ──
+                    if run_tests:
+                        engine.transition(CodeMindState.VERIFY)
+                        from gaia_common.utils.codemind_tests import run_test_step
+                        tested = run_test_step(file_path)
+                        change.validation_result = {**(change.validation_result or {}), "tests": {
+                            k: tested.get(k) for k in ("ok", "service", "paths", "summary")}}
+                        if not tested.get("ok"):
+                            with open(file_path, "w", encoding="utf-8") as f:
+                                f.write(original_content)
+                            change.error = f"Tests failed: {tested.get('summary')}"
+                            logger.warning("CodeMind: tests failed for %s (%s); file restored%s",
+                                           file_path, tested.get("summary"),
+                                           ", proposing again" if attempt + 1 < attempts else "")
+                            engine.record_change(change)
+                            feedback = (
+                                "\n\nYour previous fix for this failed the module's tests in the candidate "
+                                f"({tested.get('summary')}). Their report:\n"
+                                f"{str(tested.get('output', ''))[-2000:]}\n"
+                                "Propose a fix that keeps these tests passing, or answer CANNOT_FIX.")
+                            if attempt + 1 >= attempts:
+                                engine.transition(CodeMindState.IDLE)
+                            continue
+                        logger.info("CodeMind: tests passed for %s: %s", file_path, tested.get("summary"))
+                        _cycle_tested.append(f"{os.path.basename(file_path)}: {tested.get('summary')}")
 
-                if not safety.get("safe", True):
-                    change.error = f"Diff safety failed: {safety.get('reason')}"
-                    logger.warning("CodeMind: diff too destructive for %s: %s", file_path, safety.get("reason"))
-                    engine.record_change(change)
-                    engine.transition(CodeMindState.IDLE)
-                    continue
-
-                # ── APPLY (if not dry_run) ──
-                if cycle.dry_run:
-                    logger.info("CodeMind [dry_run]: would apply fix to %s", file_path)
-                    change.applied = False
-                    engine.record_change(change)
-                    engine.transition(CodeMindState.IDLE)
-                    continue
-
-                engine.transition(CodeMindState.APPLY)
-                self.check_interrupted()
-
-                try:
-                    import shutil
-                    backup_path = f"{file_path}.bak"
-                    shutil.copy2(file_path, backup_path)
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(proposed_content)
                     change.applied = True
-                    logger.info("CodeMind: applied fix to %s (backup at %s)", file_path, backup_path)
                     _cycle_applied_files.append(file_path)
-                except Exception as e:
-                    change.error = f"Apply failed: {e}"
-                    logger.warning("CodeMind: apply failed for %s: %s", file_path, e)
-
-                engine.record_change(change)
-                engine.transition(CodeMindState.IDLE)
+                    engine.record_change(change)
+                    engine.transition(CodeMindState.IDLE)
+                    break
 
             result = engine.end_cycle("complete")
             logger.info("CodeMind cycle complete: %s", result)
@@ -1898,7 +1897,8 @@ class SleepTaskScheduler:
                     manifest, merr = build_manifest_for_files(
                         _cycle_applied_files,
                         requested_by="codemind",
-                        evidence=[f"validate_full + diff_safety passed on {len(_cycle_applied_files)} file(s)"],
+                        evidence=[f"validate_full + diff_safety passed on {len(_cycle_applied_files)} file(s)"]
+                        + [f"candidate tests: {t}" for t in _cycle_tested],
                     )
                     if merr:
                         logger.info("CodeMind: no self-deploy manifest (%s)", merr)
@@ -1919,6 +1919,48 @@ class SleepTaskScheduler:
 
         except Exception as e:
             logger.warning("CodeMind cycle failed: %s", e, exc_info=True)
+
+    # ------------------------------------------------------------------
+    def _codemind_propose_fix(self, engine, file_path: str, issue: str, original_content: str,
+                              codemind_cfg: dict) -> Optional[str]:
+        """The proposed new content of file_path, or None (declined or nothing).
+        s4r2 patch-mode first: surgical SEARCH/REPLACE, so output shrinks from
+        O(file) to O(change) and untouched code can't be mangled; any parse or
+        apply failure falls back to the whole-file prompt."""
+        if bool(codemind_cfg.get("patch_mode", True)):
+            from gaia_common.utils.codemind_patch import parse_patch_blocks, apply_patch
+            patch_response = self._codemind_propose(engine.build_fix_prompt(
+                file_path=file_path,
+                issue_description=issue,
+                file_content=original_content,
+                patch_mode=True,
+            ))
+            if patch_response and patch_response.strip().startswith("CANNOT_FIX"):
+                logger.info("CodeMind: LLM declined (patch mode): %s", patch_response.strip()[:200])
+                return None
+            if patch_response:
+                blocks, perr = parse_patch_blocks(patch_response)
+                if perr:
+                    logger.info("CodeMind: patch parse failed (%s) — falling back to whole-file", perr)
+                else:
+                    patched, aerr = apply_patch(original_content, blocks)
+                    if aerr:
+                        logger.info("CodeMind: patch apply failed (%s) — falling back to whole-file", aerr)
+                    else:
+                        logger.info("CodeMind: patch-mode fix applied (%d block(s))", len(blocks))
+                        return patched
+
+        proposed = self._codemind_propose(engine.build_fix_prompt(
+            file_path=file_path,
+            issue_description=issue,
+            file_content=original_content,
+        ))
+        if not proposed:
+            return None
+        if proposed.strip().startswith("CANNOT_FIX"):
+            logger.info("CodeMind: LLM declined: %s", proposed.strip()[:200])
+            return None
+        return proposed
 
     # ------------------------------------------------------------------
     @staticmethod

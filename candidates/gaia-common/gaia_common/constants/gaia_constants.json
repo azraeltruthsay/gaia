@@ -761,7 +761,7 @@
       "py_compile": true,
       "ruff": true,
       "ast_parse": true,
-      "pytest": false
+      "pytest": true
     },
     "triggers": {
       "sleep_cycle": true,
