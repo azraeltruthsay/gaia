@@ -35,6 +35,14 @@ def main() -> None:
     p.add_argument("--label", default="engine")
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--llama", action="store_true", help="send audio as llama-server input_audio")
+    p.add_argument("--llama-house", action="store_true",
+                   help="llama-server /completion with the GAIA engine's own house-format prompt "
+                        "(what a house-trained Core expects; --llama uses the GGUF's stock template)")
+    p.add_argument("--temperature", type=float, default=0.3,
+                   help="sampling temperature (battery default 0.3; 0 = greedy, for a per-test "
+                        "comparison of two engines)")
+    p.add_argument("--dump", default=None,
+                   help="write every test's reply to this JSON file ({fixture: [reply per run]})")
     p.add_argument("--fixtures", default=None,
                    help="dir holding vision/ and audio/ (default: test_assets next to this script, "
                         "else gaia-doctor/test_assets in the repo)")
@@ -57,22 +65,77 @@ def main() -> None:
     import cognitive_test_battery as b
 
     ep = a.engine.rstrip("/")
-    b.query_engine_with_image = functools.partial(b.query_engine_with_image, engine_endpoint=ep)
-    if a.llama:
+    temp = a.temperature
+
+    # The GAIA engine path, as the battery sends it (image_url / audio_url data
+    # URIs to /v1/chat/completions), with the temperature as a parameter.
+    def _gaia(prompt, path, kind, engine_endpoint=ep, timeout=120, max_tokens=80):
+        ext = os.path.splitext(path)[1].lower()
+        mime = (b._VISION_MIME_BY_EXT.get(ext, "image/jpeg") if kind == "image_url"
+                else b._AUDIO_MIME_BY_EXT.get(ext, "audio/wav"))
+        data = base64.b64encode(open(path, "rb").read()).decode()
+        payload = {"model": "/models/core", "messages": [{"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": kind, kind: {"url": f"data:{mime};base64,{data}"}}]}],
+            "max_tokens": max_tokens, "temperature": temp}
+        req = urllib.request.Request(f"{engine_endpoint}/v1/chat/completions", json.dumps(payload).encode(),
+                                     {"Content-Type": "application/json"})
+        r = json.load(urllib.request.urlopen(req, timeout=timeout))
+        return b._strip_think_tags(r.get("choices", [{}])[0].get("message", {}).get("content", ""))
+    b.query_engine_with_image = lambda prompt, path, **kw: _gaia(prompt, path, "image_url", **kw)
+    if a.llama_house:
+        # The prompt the GAIA engine builds for one user message of [text, media]
+        # (core.py _prepare_*_inputs, house format, enable_thinking=True):
+        #   <bos><|turn>user<turn|>\n{text}<media>\n<|turn>assistant<turn|>\n
+        # llama-server adds <bos> and wraps its media marker in the boa/eoa
+        # (boi/eoi) tokens, as the HF processor does.
+        # Recent llama-server builds randomize the media marker; /props says which.
+        props = json.load(urllib.request.urlopen(f"{ep}/props", timeout=30))
+        marker = props.get("media_marker") or "<__media__>"
+
+        def _house(prompt, path, engine_endpoint=ep, timeout=120, max_tokens=80):
+            text = f"<|turn>user<turn|>\n{prompt}{marker}\n<|turn>assistant<turn|>\n"
+            body = {"prompt": {"prompt_string": text,
+                               "multimodal_data": [base64.b64encode(open(path, "rb").read()).decode()]},
+                    "n_predict": max_tokens, "cache_prompt": False,
+                    # the HF engine's sampling for these requests: temperature 0.3 (battery),
+                    # top_p 0.9 and repetition_penalty 1.1 (engine defaults), top_k 64 (model's
+                    # generation_config); llama-server would otherwise use top_k 40 + min_p 0.05
+                    "temperature": temp, "top_p": 0.9, "top_k": 64, "min_p": 0.0,
+                    "repeat_penalty": 1.1, "repeat_last_n": 8192}
+            req = urllib.request.Request(f"{engine_endpoint}/completion", json.dumps(body).encode(),
+                                         {"Content-Type": "application/json"})
+            r = json.load(urllib.request.urlopen(req, timeout=timeout))
+            return b._strip_think_tags(r.get("content", ""))
+        b.query_engine_with_image = _house
+        b.query_engine_with_audio = _house
+    elif a.llama:
         def _audio(prompt, audio_path, engine_endpoint=ep, timeout=120, max_tokens=80):
             data = base64.b64encode(open(audio_path, "rb").read()).decode()
             fmt = os.path.splitext(audio_path)[1].lstrip(".").lower() or "wav"
             payload = {"messages": [{"role": "user", "content": [
                 {"type": "text", "text": prompt},
                 {"type": "input_audio", "input_audio": {"data": data, "format": fmt}}]}],
-                "max_tokens": max_tokens, "temperature": 0.3}
+                "max_tokens": max_tokens, "temperature": temp}
             req = urllib.request.Request(f"{engine_endpoint}/v1/chat/completions", json.dumps(payload).encode(),
                                          {"Content-Type": "application/json"})
             r = json.load(urllib.request.urlopen(req, timeout=timeout))
             return b._strip_think_tags(r["choices"][0]["message"]["content"])
         b.query_engine_with_audio = _audio
-    else:
-        b.query_engine_with_audio = functools.partial(b.query_engine_with_audio, engine_endpoint=ep)
+    if not (a.llama or a.llama_house):
+        b.query_engine_with_audio = lambda prompt, path, **kw: _gaia(prompt, path, "audio_url", **kw)
+
+    # Record every reply, keyed by fixture, for --dump.
+    replies: dict[str, list[str]] = {}
+
+    def _recorded(fn):
+        def wrap(prompt, path, **kw):
+            out = fn(prompt, path, **kw)
+            replies.setdefault(f"{os.path.basename(path)} | {prompt}", []).append(out)
+            return out
+        return wrap
+    b.query_engine_with_image = _recorded(b.query_engine_with_image)
+    b.query_engine_with_audio = _recorded(b.query_engine_with_audio)
 
     totals: dict[str, list[int]] = {"vision": [], "audio": []}
     size: dict[str, int] = {}
@@ -87,6 +150,9 @@ def main() -> None:
                   f"(errors {s.get('errors')}) fails={fails}", flush=True)
     for sec, xs in totals.items():
         print(f"{a.label} {sec} mean {sum(xs) / len(xs):.1f}/{size[sec]} over {len(xs)} runs: {xs}")
+    if a.dump:
+        with open(a.dump, "w") as f:
+            json.dump(replies, f, indent=1, ensure_ascii=False)
 
 
 if __name__ == "__main__":
