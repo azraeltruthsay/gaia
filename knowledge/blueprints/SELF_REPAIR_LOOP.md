@@ -20,7 +20,8 @@ logs, and the fix and its lesson both stay with her, is the point.
 | **Notice** | `introspect(action=turns)` (a0aw.6): her turns over a window (default 24 h), one block each — asked, intent, routing fired / selector choice, tools run (routed and mid-reply), which mind answered, reply head; her current turn and earlier self-reviews left out; warnings that recur across turns dropped. `logs` honours since/until. Also: the other mind's per-reply check (b9ts), samvega, thought seeds | yes |
 | **Match** | troubleshooting playbooks (`/knowledge/skills/ts-*/SKILL.md`, Unified Skills format, palace-indexed). Playbooks with `seen_in: [turns, …]` have their Symptoms listed under the turn view (ycx7): criteria read from her own files, no verdicts in code | **yes** (ycx7) |
 | **Record** | the `self_review` sleep task (a0aw.4, `gaia_core/cognition/self_review.py`) does Notice → Match → Record in one pass: turn view (oldest first from a cursor) + playbook symptoms in, her `ISSUE/PLAYBOOK/EVIDENCE/SYMPTOM/CAUSE` blocks out, filed by code; every review kept with her full answer in `reviews.jsonl`. Also her issue ledger: `issue(action=file / note / status / list)` → `/shared/issues/ledger.jsonl` (`gaia_common/utils/issue_ledger.py`); evidence required, duplicates of open issues refused, 10/day cap. Host bridge `scripts/gaia_issue_bridge.py` makes each a bead (`gaia-found`) and writes bead id + status back (`beads.json`) | **yes** (a0aw.1); bridge timer in `scripts/systemd/`, installed by hand |
-| **Propose** | CodeMind ANALYZE → PROPOSE (`build_fix_prompt`, `codemind_patch` search/replace blocks), candidate files only. Her open issues reach it once she names where (`issue(note/status, file=…)`, or a file/function in her cause or notes): `gaia_common/utils/codemind_issues.py` (a0aw.7) turns them into direct-fix detections, a large file is shown as the function she named, and the outcome goes back to her issue ('proposed' with the test result, or a note why not; 2 tries, a retry only after she adds something) | **yes** (a0aw.7); she can't yet find the place herself in sleep (a0aw.9) |
+| **Analyze** | the `issue_investigation` sleep task (a0aw.9, `gaia_core/cognition/issue_investigation.py`): for an open issue naming no place, she gets the issue and her matched playbook (whole, "Find it" included) and up to 8 actions — `SEARCH` / `READ` over the candidate packages — ending in `PLACE` + `NOTE` or `NOT_FOUND`. The place must be one she read or saw in a search result; a large file needs a function. The finding goes on her issue as a note with `file`. Transcripts in `investigations.jsonl` | **yes** (a0aw.9) |
+| **Propose** | CodeMind ANALYZE → PROPOSE (`build_fix_prompt`, `codemind_patch` search/replace blocks), candidate files only. Her open issues reach it once she names where (`issue(note/status, file=…)`, or a file/function in her cause or notes): `gaia_common/utils/codemind_issues.py` (a0aw.7) turns them into direct-fix detections, a large file is shown as the function she named, and the outcome goes back to her issue ('proposed' with the test result, or a note why not; 2 tries, a retry only after she adds something) | **yes** (a0aw.7); she finds the place herself in sleep (a0aw.9, `issue_investigation`) |
 | **Test** | candidate pytest for the touched module, plus a new regression test she writes | **yes** (a0aw.2): CodeMind's VERIFY runs the tests named after or importing the touched module in `gaia-core-candidate` (orchestrator `POST /candidate/test`, `gaia_common/utils/codemind_tests.py`); failure restores the file and goes back to PROPOSE once with the report. No covering test = not validated. She can't write the regression test yet |
 | **Validate** | the live symptom gone on `gaia-core-candidate` (replay the turn that showed it) | **gap**: no replay step |
 | **Promote** | `promote_pipeline.sh`; vital organs (`agent_core.py`, `main.py`, …) need Azrael's approval: a CodeMind fix touching one is written to `/shared/doctor/architect_queue/`, never `restart_requests/` (the `is_vital_organ` gate existed but nothing called it until a0aw.7) | yes (gated) |
@@ -59,7 +60,7 @@ not do her steps for her.
 2. ~~Test step in CodeMind VALIDATE (run the touched module's tests in the candidate).~~ Done (a0aw.2).
 5. ~~Her issue becomes a CodeMind detection; a direct-fix path for a one-file behavioral bug.~~ Done (a0aw.7).
 6. CodeMind writes a regression test with the fix (a0aw.8).
-7. She investigates an open issue in sleep and names where the bug is (a0aw.9).
+7. ~~She investigates an open issue in sleep and names where the bug is (a0aw.9).~~ Done.
 3. Replay step: re-send the offending turn to `gaia-core-candidate` and compare.
 4. A sleep task that runs the Notice step over the day's logs with the playbooks. **Done** (`a0aw.4`): `self_review`.
 
@@ -140,3 +141,15 @@ not do her steps for her.
   self-deploy request; only an absolute-path mismatch stopped it), and the issue ledger
   read `GAIA_ISSUES_DIR` once at import, so a test wrote into the candidate's real ledger
   (cleaned). Her two open issues name no place yet: nothing is attempted until she does.
+- **2026-11-10, Analyze** (`a0aw.9`): seven trials over her two open issues (scratch ledger,
+  Prime). First runs went nowhere because of the tool, not her: she searched whole sentences
+  and code she imagined, repeated failed searches, put a READ after a SEARCH in one reply,
+  and read a search-result line (`agent_core.py:10776:…`). Fixes: a conversation instead of
+  one growing prompt, several looks per reply, a search falls back to all-words and says
+  which of its words exist, a path in a search scopes it, READ takes `path:line` and names
+  the enclosing function, `path:function` resolves. After that she reached
+  `_should_use_tool_routing` on `iv01` in most runs (her note leaned on the yn31 `"write "`
+  case), and on `pcsb` alternated between a doubtful lead (`code_evaluator.py`) and an
+  honest "it's in gaia-mcp's code, which I can't read here". So every fix from her issues now
+  waits in the architect queue: her lead can be wrong and still pass the tests, and no
+  replay step checks the symptom yet.

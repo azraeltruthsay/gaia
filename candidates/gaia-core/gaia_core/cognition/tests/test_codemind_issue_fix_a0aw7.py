@@ -69,7 +69,7 @@ def test_issue_to_fix_on_a_large_vital_file(tmp_path, monkeypatch):
     assert m["promote_files"] == ["candidates/gaia-core/gaia_core/cognition/agent_core.py"]
 
 
-def test_non_vital_fix_self_deploys(tmp_path, monkeypatch):
+def test_issue_fix_waits_for_review_even_when_not_vital(tmp_path, monkeypatch):
     s, target, iid, shared, prompts = _setup(tmp_path, monkeypatch, "routing_rules.py")
     L.note_issue(iid, "it is in routing_rules", file="gaia_core/cognition/routing_rules.py")
     # no function named: a large file can't be shown, so nothing is tried
@@ -78,5 +78,10 @@ def test_non_vital_fix_self_deploys(tmp_path, monkeypatch):
     assert "name the function" in issue["notes"][-1]["text"]
     L.note_issue(iid, "the indicator list", file="AgentCore._should_use_tool_routing")
     s._run_codemind_cycle()
-    assert L.get_issue(iid)["issue"]["status"] == "proposed"
-    assert len(list((shared / "doctor" / "restart_requests").glob("*.json"))) == 1
+    issue = L.get_issue(iid)["issue"]
+    assert issue["status"] == "proposed" and "waiting for Azrael" in issue["notes"][-1]["text"]
+    # her lead can be wrong and still pass the tests: no self-deploy until a replay step exists
+    assert not list((shared / "doctor" / "restart_requests").glob("*.json"))
+    [queued] = list((shared / "doctor" / "architect_queue").glob("*.json"))
+    m = json.loads(queued.read_text())
+    assert m["vital_organs"] == [] and m["from_issues"][0].endswith("routing_rules.py")

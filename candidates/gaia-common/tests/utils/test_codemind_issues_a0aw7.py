@@ -42,6 +42,10 @@ def test_resolve(tmp_path):
     assert C.resolve("agent_core.py", root) == (agent, "")
     assert C.resolve("issue_ledger.py", root)[0].name == "issue_ledger.py"
     assert C.resolve("no_such_function", root) is None
+    for form in ("gaia-core/gaia_core/cognition/agent_core.py:_should_use_tool_routing",
+                 "agent_core.py::AgentCore._should_use_tool_routing", "agent_core.py#_should_use_tool_routing()"):
+        assert C.resolve(form, root) == (agent, "_should_use_tool_routing"), form
+    assert C.resolve("agent_core.py:not_there", root) is None
     assert C.resolve("../../etc/passwd.py", root) is None
 
 

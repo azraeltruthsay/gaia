@@ -84,6 +84,14 @@ def resolve(ref: str, repo_root: Optional[Path] = None) -> Optional[Tuple[Path, 
     ref = (ref or "").strip().strip("`'\"")
     if not ref:
         return None
+    m = re.match(r"^(.+?\.py)\s*(?:::|:|#|,)\s*([A-Za-z_][\w.]*?)(?:\(\))?$", ref)
+    if m:  # "agent_core.py:_should_use_tool_routing": that function, in that file
+        path = _resolve_path(m.group(1), repo_root)
+        name = m.group(2).split(".")[-1]
+        if path and re.search(rf"^\s*(?:async\s+)?(?:def|class)\s+{re.escape(name)}\b",
+                              path.read_text(encoding="utf-8", errors="ignore"), re.M):
+            return path, name
+        return None
     if ref.endswith(".py") or "/" in ref:
         path = _resolve_path(ref, repo_root)
         return (path, "") if path else None

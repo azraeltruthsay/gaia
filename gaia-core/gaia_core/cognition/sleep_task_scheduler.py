@@ -493,6 +493,21 @@ class SleepTaskScheduler:
                 min_interval_seconds=4 * 3600,
             ))
 
+        # a0aw.9: she looks into an open issue that names no place yet (her
+        # playbook's "Find it" steps, search and read over the candidate code)
+        # and notes where the bug is, for CodeMind. ISSUE_INVESTIGATION_ENABLED=0
+        # turns it off.
+        if os.environ.get("ISSUE_INVESTIGATION_ENABLED", "1") != "0":
+            self.register_task(SleepTask(
+                task_id="issue_investigation",
+                task_type="SELF_IMPROVE",
+                priority=4,
+                interruptible=True,
+                estimated_duration_seconds=240,
+                handler=self._run_issue_investigation,
+                min_interval_seconds=4 * 3600,
+            ))
+
     # ------------------------------------------------------------------
     # Scheduling
     # ------------------------------------------------------------------
@@ -1562,6 +1577,21 @@ class SleepTaskScheduler:
         )
         logger.info("self_review: %s", {k: v for k, v in result.items() if k != "refused"})
 
+    def _run_issue_investigation(self, **kwargs) -> None:
+        """a0aw.9: look into one open issue and note where the bug is."""
+        from pathlib import Path
+        from gaia_core.cognition import issue_investigation
+        from gaia_core.cognition.self_review import chat_generator
+        if self.model_pool is None:
+            logger.info("issue_investigation skipped: no model pool")
+            return
+        done = issue_investigation.run(
+            chat_generator(self.model_pool, max_tokens=400, temperature=0.2),
+            skills_dir=Path(os.environ.get("GAIA_SKILLS_DIR", "/knowledge/skills")),
+            check_interrupted=self.check_interrupted,
+        )
+        logger.info("issue_investigation: %s", done or "no open issue without a place")
+
     def _run_codemind_cycle(self, **kwargs) -> None:
         """Run a CodeMind autonomous improvement cycle during sleep.
 
@@ -1924,8 +1954,8 @@ class SleepTaskScheduler:
                 tests = ((mine[-1].get("validation_result") or {}).get("tests") or {}) if mine else {}
                 if kept:
                     why = f"candidate tests: {tests.get('summary') or 'not run'}"
-                    if is_vital_organ(fp):
-                        why += f"; {os.path.basename(fp)} is a vital organ, so Azrael approves the promotion"
+                    why += "; waiting for Azrael to review and promote" + (
+                        f" ({os.path.basename(fp)} is a vital organ)" if is_vital_organ(fp) else "")
                 elif mine:
                     why = mine[-1].get("error") or "no change was kept"
                 else:
@@ -1945,7 +1975,11 @@ class SleepTaskScheduler:
             # A vital organ (main.py, agent_core.py, ...) is never self-deployed:
             # its manifest goes to the architect queue for Azrael (a0aw.7; the
             # gate existed as is_vital_organ but nothing called it).
+            # Nor is a fix for one of her issues, until a replay step shows the
+            # symptom gone: her lead can be wrong and still pass the tests.
+            _from_issues = {d.get("file_path") for d in detections if (d.get("metadata") or {}).get("issue_id")}
             _vital = [f for f in _cycle_applied_files if is_vital_organ(f)]
+            _review = _vital or [f for f in _cycle_applied_files if f in _from_issues]
             if _cycle_applied_files and bool(codemind_cfg.get("self_deploy", True)):
                 try:
                     from gaia_common.utils.codemind_manifest import build_manifest_for_files
@@ -1961,17 +1995,18 @@ class SleepTaskScheduler:
                     else:
                         req_dir = os.path.join(
                             os.environ.get("SHARED_DIR", "/shared"),
-                            "doctor", "architect_queue" if _vital else "restart_requests")
-                        if _vital:
+                            "doctor", "architect_queue" if _review else "restart_requests")
+                        if _review:
                             manifest["status"] = "awaiting_architect"
                             manifest["vital_organs"] = [os.path.basename(f) for f in _vital]
+                            manifest["from_issues"] = sorted(f for f in _cycle_applied_files if f in _from_issues)
                         os.makedirs(req_dir, exist_ok=True)
                         mpath = os.path.join(req_dir, f"{manifest['id']}.json")
                         with open(mpath, "w", encoding="utf-8") as f:
                             _json.dump(manifest, f, indent=2)
                         logger.info(
                             "CodeMind: %s manifest written: %s (services=%s, %d file(s))",
-                            "architect-queue (vital organ)" if _vital else "self-deploy",
+                            "architect-queue" if _review else "self-deploy",
                             manifest["id"], manifest["services"], len(_cycle_applied_files))
                 except Exception:
                     logger.warning("CodeMind: manifest write failed (fixes remain in candidates)",

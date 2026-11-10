@@ -220,22 +220,31 @@ def run_self_review(generate: Callable[[str, str], str], *, log_file: Path, hist
     return totals
 
 
-def model_generator(model_pool, roles=("prime", "core")) -> Callable[[str, str], str]:
-    """Ask whichever of her minds answers: Prime first (her resting voice), then Core."""
-    def _generate(system: str, user: str) -> str:
+def chat_generator(model_pool, roles=("prime", "core"), max_tokens: int = 700,
+                   temperature: float = 0.3) -> Callable[[List[dict]], str]:
+    """Like model_generator, for a whole conversation: messages in, her reply out."""
+    def _generate(messages: List[dict]) -> str:
         for role in roles:
             try:
                 llm = model_pool.get_model_for_role(role)
                 if llm is None:
                     continue
-                result = llm.create_chat_completion(
-                    messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-                    temperature=0.3, max_tokens=700, stream=False)
+                result = llm.create_chat_completion(messages=messages, temperature=temperature,
+                                                    max_tokens=max_tokens, stream=False)
                 text = _THINK.sub("", result["choices"][0]["message"]["content"] or "").strip()
                 if text:
-                    logger.info("self_review: answered by %s", role)
                     return text
             except Exception as e:
-                logger.info("self_review: %s unavailable (%s)", role, str(e)[:160])
+                logger.info("self-repair: %s unavailable (%s)", role, str(e)[:160])
         return ""
+    return _generate
+
+
+def model_generator(model_pool, roles=("prime", "core"), max_tokens: int = 700,
+                    temperature: float = 0.3) -> Callable[[str, str], str]:
+    """Ask whichever of her minds answers: Prime first (her resting voice), then Core."""
+    chat = chat_generator(model_pool, roles, max_tokens, temperature)
+
+    def _generate(system: str, user: str) -> str:
+        return chat([{"role": "system", "content": system}, {"role": "user", "content": user}])
     return _generate
