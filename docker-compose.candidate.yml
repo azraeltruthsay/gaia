@@ -97,7 +97,11 @@ services:
       # that never arrives, since the candidate has no orchestrator to send
       # one (unlike production, which relies on gaia-orchestrator's
       # /gpu/wake during normal gear-shift operation).
-      - GAIA_AUTOLOAD_MODEL=1
+      # ptpl (2026-11-10, Azrael): off. Since Core became the 12B, autoload
+      # failed every start (NF4 safetensors can't load on CPU), and a second
+      # 12B would cost ~13 GB RAM or the GPU. The candidate takes Core's model
+      # only while testing: scripts/core_swap.sh candidate | production.
+      - GAIA_AUTOLOAD_MODEL=${CANDIDATE_AUTOLOAD_MODEL:-0}
       # Parity with production gaia-core: operator timezone + Locality organ
       # (place + live open-meteo weather in the [Here & Now] block). Without
       # these the HA mirror renders UTC and no place. Values come from .env.
