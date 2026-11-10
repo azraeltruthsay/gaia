@@ -229,6 +229,14 @@ managed_http_api:
     # (prefix reuse + in-memory snapshots). Env: GAIA_CPP_PREFIX_REUSE (1),
     # GAIA_CPP_KV_SNAPSHOTS (2), GAIA_CPP_KV_BASELINE (state loaded at
     # start), GAIA_CPP_KV_DIR (/shared/kv_states).
+    # gaia_cpp is built on llama.cpp b11804 (GAIA_Project-ojwf). Threads:
+    # GGUF_THREADS (generation, 16) and GGUF_THREADS_BATCH (prompt reading,
+    # -1 = same). MTP speculative decoding: GAIA_CPP_MTP_DRAFT (draft
+    # "assistant" GGUF made for the loaded model, e.g. Gemma 4 12B ->
+    # google/gemma-4-12B-it-assistant; unset = off), GAIA_CPP_MTP_N (draft
+    # length, 3). Output follows the same distribution as without it (greedy:
+    # byte-identical on CPU); counters in /health -> mtp {enabled, draft_model,
+    # n_max, drafted_total, accepted_total, acceptance}.
     - endpoint: /kv/stats
       method: GET
       description: "gaia_cpp: cached tokens, snapshots, reuse counters (also in /health → kv)"

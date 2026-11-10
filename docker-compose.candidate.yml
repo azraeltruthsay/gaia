@@ -70,6 +70,14 @@ services:
       - CORE_DEVICE=${CANDIDATE_CORE_DEVICE:-cpu}
       - CORE_CPU_CTX=16384
       - CORE_CPU_THREADS=8
+      # gaia_cpp (ojwf, llama.cpp b11804): generation threads stop scaling at
+      # ~12 on the 16-core host (memory-bandwidth bound); prompt reading keeps
+      # scaling to 24. MTP: the 12B's draft assistant, paired with core.gguf
+      # like the other model links (repoint both together). Lossless; ~1.7x.
+      - GGUF_THREADS=12
+      - GGUF_THREADS_BATCH=24
+      - GAIA_CPP_MTP_DRAFT=/models/core-assistant.gguf
+      - GAIA_CPP_MTP_N=3
       - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
       - SHARED_DIR=/shared
       - N_GPU_LAYERS=${CANDIDATE_CORE_GPU_LAYERS:-0}
