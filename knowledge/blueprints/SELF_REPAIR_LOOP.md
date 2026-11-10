@@ -112,3 +112,14 @@ not do her steps for her.
   (`context` 500, new), `iv01` (routing on two chat turns, new). `bz6f` fixed the same day:
   inline tool turns now finish in the stream path and failed calls reach her next turn.
   Still open on the chat path: she claims actions she never took (`9nxd`).
+- **2026-11-09, second live self_review** (4 turns): filed 2. `2d3j` was the haiku turn,
+  the first time she noticed the `mjcg` bug herself (closed as its duplicate; `mjcg` stays
+  hers to fix). `jcio` was a false positive she couldn't have avoided: the lines were a
+  test's fake selector output, written into the production log by a test run (`ba6o`:
+  no log files under pytest, candidates log as `<service>-candidate`).
+- **`9nxd` fixed**: a reply that claims a finished action ("Noted in the issue ledger",
+  "the note was added successfully") is checked against the writes the session actually
+  made (outcome ledger, plus every MCP call made by code during the turn). With none
+  behind it, a correction is shown and kept in her history. Live: both 9nxd turns
+  corrected; a real told-fact save and a greeting were not; asked again, she made a call
+  and reported its failure instead of claiming success.

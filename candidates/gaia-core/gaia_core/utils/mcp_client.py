@@ -52,6 +52,32 @@ def _rpc_outcome(body: Any) -> Dict:
 
 
 def call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int = None) -> Dict:
+    result = _call_jsonrpc(method, params, endpoint, timeout)
+    _note_for_turn(method, params, result)
+    return result
+
+
+def _note_for_turn(method: str, params: Dict, result: Dict) -> None:
+    """9nxd: tell the outcome ledger what this turn's code called, so a reply's
+    claim of an action can be checked against it. Calls made by code (a told
+    fact kept in the palace) never pass through a tool_execution record."""
+    try:
+        from gaia_core.models.turn_context import turn_ids
+        session_id = turn_ids().get("session_id")
+        if not session_id:
+            return
+        inner = result.get("response") if isinstance(result, dict) else None
+        if isinstance(inner, dict) and isinstance(inner.get("result"), dict):
+            inner = inner["result"]
+        ok = bool(isinstance(result, dict) and result.get("ok")) and not (
+            isinstance(inner, dict) and inner.get("ok") is False)
+        from gaia_core.cognition import outcome_ledger
+        outcome_ledger.note_call(session_id, method, str((params or {}).get("action") or ""), ok)
+    except Exception:
+        logger.debug("call_jsonrpc: turn note failed (non-fatal)", exc_info=True)
+
+
+def _call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int = None) -> Dict:
     timeout = timeout or int(config.get_timeout("MCP_DEFAULT", 20))
     ep_raw = endpoint or os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp")
     ep = _normalize_endpoint(ep_raw)

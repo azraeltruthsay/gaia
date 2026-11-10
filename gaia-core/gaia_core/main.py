@@ -2378,6 +2378,35 @@ async def process_packet(packet_data: Dict[str, Any]):
                 except Exception:
                     logger.warning("Terminal packet synthesis failed", exc_info=True)
 
+            # 9nxd: a reply that says she added, filed or saved something must
+            # have a tool behind it that did. She answered "Noted: gi-000000"
+            # with no call at all, then "The note was added successfully" after
+            # a memory lookup. The correction is shown and kept in her history,
+            # so the next turn doesn't build on a thing that never happened.
+            if full_response.strip() and source in ("web", "discord"):
+                try:
+                    from gaia_core.cognition import action_claims as _ac
+                    from gaia_core.cognition import outcome_ledger as _ol
+                    _claim = _ac.check(full_response, _ol.session_tools(session_id))
+                    if _claim:
+                        _fix = _ac.correction(_claim)
+                        logger.info("session=%s: reply claims %s with no write behind it; corrected",
+                                    session_id, _claim["claims"][:3])
+                        _ol.record("unbacked_claim", session_id,
+                                   _ol.current_packet(session_id) or getattr(packet.header, "packet_id", ""),
+                                   claims=_claim["claims"][:5], failed=_claim["failed"],
+                                   request=_ol.clip(user_input or ""))
+                        _fix_text = f"\n\n*[{_fix}]*"
+                        yield json.dumps({"type": "token", "value": _fix_text}) + "\n"
+                        yield json.dumps({"type": "flush"}) + "\n"
+                        full_response += _fix_text
+                        try:
+                            _agent_core.session_manager.add_message(session_id, "assistant", _fix)
+                        except Exception:
+                            logger.debug("Claim correction not kept in history", exc_info=True)
+                except Exception:
+                    logger.debug("Action-claim check failed (non-fatal)", exc_info=True)
+
             if final_packet_dict:
                 # Ensure the final response in the packet is clean (no think tags)
                 if "response" in final_packet_dict and "candidate" in final_packet_dict["response"]:

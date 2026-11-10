@@ -27,6 +27,7 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from typing import Any, Dict, Iterable, Optional
 
 logger = logging.getLogger("GAIA.OutcomeLedger")
@@ -73,8 +74,44 @@ def _rotate_if_needed(path: str) -> None:
         pass
 
 
+# 9nxd: each session's recent tool calls, kept in memory whether or not the
+# ledger file is on, so a reply's claim of an action can be checked against
+# what actually ran. [(ts, tool, action, ok)], newest last.
+_session_tools: Dict[str, deque] = {}
+_SESSION_TOOLS_KEPT = 50
+
+
+def _note_tool(session_id: str, fields: Dict[str, Any]) -> None:
+    if not session_id or fields.get("gate") == "rejected":
+        return  # a call the gate turned away never ran
+    with _lock:
+        calls = _session_tools.pop(session_id, None) or deque(maxlen=_SESSION_TOOLS_KEPT)
+        calls.append((time.time(), str(fields.get("tool") or ""), str(fields.get("action") or ""),
+                      bool(fields.get("ok"))))
+        _session_tools[session_id] = calls
+        while len(_session_tools) > _MAX_SESSIONS:
+            _session_tools.pop(next(iter(_session_tools)))
+
+
+def note_call(session_id: str, tool: str, action: str, ok: bool) -> None:
+    """A call made by code this turn (not a tool_execution record): memory only."""
+    _note_tool(session_id, {"tool": tool, "action": action, "ok": ok})
+
+
+def session_tools(session_id: str, within_s: float = 7200) -> list:
+    """This session's tool calls in the last `within_s` seconds: [(ts, tool, action, ok)]."""
+    cutoff = time.time() - within_s
+    with _lock:
+        return [c for c in _session_tools.get(session_id, ()) if c[0] >= cutoff]
+
+
 def record(kind: str, session_id: str = "", packet_id: str = "", **fields: Any) -> None:
     """Append one record. Never raises."""
+    if kind == "tool_execution":
+        try:
+            _note_tool(session_id, fields)
+        except Exception:
+            logger.debug("OutcomeLedger: session tool note failed (non-fatal)", exc_info=True)
     if not enabled():
         return
     try:
