@@ -1624,8 +1624,20 @@ class SleepTaskScheduler:
 
             self.check_interrupted()
 
-            # DETECT: consume pending detections
-            detections = consume_detections(limit=engine.config["max_changes_per_cycle"])
+            # DETECT: her issues that name where the bug is (a0aw.7), then the queue
+            _limit = engine.config["max_changes_per_cycle"]
+            try:
+                from gaia_common.utils import codemind_issues
+                detections = codemind_issues.detections(limit=_limit)
+            except Exception:
+                logger.warning("CodeMind: her issues could not be read", exc_info=True)
+                detections = []
+            if detections:
+                logger.info("CodeMind: %d of her issues name a place to fix: %s", len(detections),
+                            [d["metadata"]["issue_id"] for d in detections])
+            if len(detections) < _limit:
+                detections += consume_detections(limit=_limit - len(detections))
+            _issue_skips: Dict[str, str] = {}  # file -> why an issue's fix wasn't tried
             if not detections:
                 logger.info("CodeMind cycle: no pending detections")
                 engine.end_cycle("no_detections")
@@ -1639,7 +1651,7 @@ class SleepTaskScheduler:
                 len(detections), cycle.dry_run,
             )
 
-            from gaia_common.utils.codemind_engine import CodeMindChange
+            from gaia_common.utils.codemind_engine import CodeMindChange, is_vital_organ
             from gaia_common.utils.codemind_validator import validate_full, validate_diff_safety
             from gaia_common.utils.codemind_analyzer import (
                 classify_complexity,
@@ -1712,7 +1724,11 @@ class SleepTaskScheduler:
                     continue
 
                 # ── Complexity classification ──
-                complexity = classify_complexity(detection)
+                # a0aw.7: she named the file (or function) of an issue she
+                # filed: a direct fix there, whatever kind of bug it is. A
+                # behavioral bug otherwise only ever got a blueprint.
+                _from_issue = bool((detection.get("metadata") or {}).get("issue_id"))
+                complexity = FixComplexity.SIMPLE if _from_issue else classify_complexity(detection)
 
                 if complexity in (FixComplexity.MODERATE, FixComplexity.COMPLEX):
                     if has_blueprint_for(detection):
@@ -1774,10 +1790,21 @@ class SleepTaskScheduler:
                     engine.transition(CodeMindState.IDLE)
                     continue
 
+                # A file too large to show whole is shown as the function she
+                # named; the patch still applies to the whole file (a0aw.7).
+                prompt_content = original_content
                 if len(original_content) > 30000:
-                    logger.info("CodeMind: file too large, skipping: %s", file_path)
-                    engine.transition(CodeMindState.IDLE)
-                    continue
+                    from gaia_common.utils.codemind_issues import excerpt
+                    prompt_content = excerpt(original_content,
+                                             (detection.get("metadata") or {}).get("symbol", "")) or ""
+                    if not prompt_content:
+                        logger.info("CodeMind: file too large, skipping: %s", file_path)
+                        _issue_skips[file_path] = ("the file is too large to read whole; "
+                                                   "name the function where the bug is")
+                        engine.transition(CodeMindState.IDLE)
+                        continue
+                    logger.info("CodeMind: %s is large; showing %s (%d chars)", file_path,
+                                detection["metadata"]["symbol"], len(prompt_content))
 
                 # a0aw.2: PROPOSE → VALIDATE → APPLY → VERIFY (the touched
                 # module's tests in the candidate). Failed tests restore the
@@ -1790,7 +1817,8 @@ class SleepTaskScheduler:
                         engine.transition(CodeMindState.PROPOSE)
                     self.check_interrupted()
                     proposed_content = self._codemind_propose_fix(
-                        engine, file_path, issue + feedback, original_content, codemind_cfg)
+                        engine, file_path, issue + feedback, original_content, codemind_cfg,
+                        prompt_content=prompt_content)
                     if proposed_content is None:
                         engine.transition(CodeMindState.IDLE)
                         break
@@ -1885,17 +1913,45 @@ class SleepTaskScheduler:
                     engine.transition(CodeMindState.IDLE)
                     break
 
+            # a0aw.7: tell her issues how it went
+            _changes = list(engine._current_cycle.changes) if engine._current_cycle else []
+            for detection in detections:
+                if not (detection.get("metadata") or {}).get("issue_id") or cycle.dry_run:
+                    continue
+                fp = detection.get("file_path", "")
+                mine = [c for c in _changes if c.get("file_path") == fp]
+                kept = fp in _cycle_applied_files
+                tests = ((mine[-1].get("validation_result") or {}).get("tests") or {}) if mine else {}
+                if kept:
+                    why = f"candidate tests: {tests.get('summary') or 'not run'}"
+                    if is_vital_organ(fp):
+                        why += f"; {os.path.basename(fp)} is a vital organ, so Azrael approves the promotion"
+                elif mine:
+                    why = mine[-1].get("error") or "no change was kept"
+                else:
+                    why = _issue_skips.get(fp, "no fix was proposed (the model declined or gave no answer)")
+                try:
+                    codemind_issues.record_attempt(detection, kept, why)
+                except Exception:
+                    logger.warning("CodeMind: could not record the attempt on %s",
+                                   detection["metadata"]["issue_id"], exc_info=True)
+
             result = engine.end_cycle("complete")
             logger.info("CodeMind cycle complete: %s", result)
 
             # ── nfi3: close the loop — validated candidate fixes become a
             # restart manifest (promote + deadman-supervised deploy). The
             # doctor still gates everything (kill switch, gear, rollback).
+            # A vital organ (main.py, agent_core.py, ...) is never self-deployed:
+            # its manifest goes to the architect queue for Azrael (a0aw.7; the
+            # gate existed as is_vital_organ but nothing called it).
+            _vital = [f for f in _cycle_applied_files if is_vital_organ(f)]
             if _cycle_applied_files and bool(codemind_cfg.get("self_deploy", True)):
                 try:
                     from gaia_common.utils.codemind_manifest import build_manifest_for_files
+                    _repo = os.environ.get("GAIA_REPO_ROOT", "/gaia/GAIA_Project")
                     manifest, merr = build_manifest_for_files(
-                        _cycle_applied_files,
+                        [os.path.relpath(f, _repo) if os.path.isabs(f) else f for f in _cycle_applied_files],
                         requested_by="codemind",
                         evidence=[f"validate_full + diff_safety passed on {len(_cycle_applied_files)} file(s)"]
                         + [f"candidate tests: {t}" for t in _cycle_tested],
@@ -1905,13 +1961,17 @@ class SleepTaskScheduler:
                     else:
                         req_dir = os.path.join(
                             os.environ.get("SHARED_DIR", "/shared"),
-                            "doctor", "restart_requests")
+                            "doctor", "architect_queue" if _vital else "restart_requests")
+                        if _vital:
+                            manifest["status"] = "awaiting_architect"
+                            manifest["vital_organs"] = [os.path.basename(f) for f in _vital]
                         os.makedirs(req_dir, exist_ok=True)
                         mpath = os.path.join(req_dir, f"{manifest['id']}.json")
                         with open(mpath, "w", encoding="utf-8") as f:
                             _json.dump(manifest, f, indent=2)
                         logger.info(
-                            "CodeMind: self-deploy manifest written: %s (services=%s, %d file(s))",
+                            "CodeMind: %s manifest written: %s (services=%s, %d file(s))",
+                            "architect-queue (vital organ)" if _vital else "self-deploy",
                             manifest["id"], manifest["services"], len(_cycle_applied_files))
                 except Exception:
                     logger.warning("CodeMind: manifest write failed (fixes remain in candidates)",
@@ -1922,17 +1982,21 @@ class SleepTaskScheduler:
 
     # ------------------------------------------------------------------
     def _codemind_propose_fix(self, engine, file_path: str, issue: str, original_content: str,
-                              codemind_cfg: dict) -> Optional[str]:
+                              codemind_cfg: dict, prompt_content: Optional[str] = None) -> Optional[str]:
         """The proposed new content of file_path, or None (declined or nothing).
         s4r2 patch-mode first: surgical SEARCH/REPLACE, so output shrinks from
         O(file) to O(change) and untouched code can't be mangled; any parse or
-        apply failure falls back to the whole-file prompt."""
-        if bool(codemind_cfg.get("patch_mode", True)):
+        apply failure falls back to the whole-file prompt. `prompt_content` is
+        what the model is shown when that isn't the whole file (an excerpt of
+        a large one, a0aw.7); then there is no whole-file fallback."""
+        shown = original_content if prompt_content is None else prompt_content
+        partial = shown != original_content
+        if bool(codemind_cfg.get("patch_mode", True)) or partial:
             from gaia_common.utils.codemind_patch import parse_patch_blocks, apply_patch
             patch_response = self._codemind_propose(engine.build_fix_prompt(
                 file_path=file_path,
                 issue_description=issue,
-                file_content=original_content,
+                file_content=shown,
                 patch_mode=True,
             ))
             if patch_response and patch_response.strip().startswith("CANNOT_FIX"):
@@ -1950,6 +2014,9 @@ class SleepTaskScheduler:
                         logger.info("CodeMind: patch-mode fix applied (%d block(s))", len(blocks))
                         return patched
 
+        if partial:
+            logger.info("CodeMind: no usable patch for an excerpt of %s; no whole-file fallback", file_path)
+            return None
         proposed = self._codemind_propose(engine.build_fix_prompt(
             file_path=file_path,
             issue_description=issue,

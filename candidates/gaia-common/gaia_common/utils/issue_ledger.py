@@ -48,7 +48,9 @@ _STOP = frozenset("a an the and or of to in on for is was it she her i my me tha
 
 
 def _dir(base: Optional[Path] = None) -> Path:
-    return Path(base) if base else ISSUES_DIR
+    # read at call time: a test (or a caller) that sets GAIA_ISSUES_DIR after
+    # import must not write into the live ledger
+    return Path(base) if base else Path(os.environ.get("GAIA_ISSUES_DIR", str(ISSUES_DIR)))
 
 
 def _clip(text, limit: int = _MAX_FIELD) -> str:
@@ -186,10 +188,15 @@ def issues(base: Optional[Path] = None) -> Dict[str, dict]:
                 "status": "open",
                 "filed": ev.get("ts"),
                 "notes": [],
+                "file": "",
             }
         elif iid in state and kind == "note":
             state[iid]["notes"].append({"ts": ev.get("ts"), "text": ev.get("text", "")})
+            if ev.get("file"):
+                state[iid]["file"] = ev["file"]
         elif iid in state and kind == "status":
+            if ev.get("file"):
+                state[iid]["file"] = ev["file"]
             state[iid]["status"] = ev.get("status", state[iid]["status"])
             if ev.get("note"):
                 state[iid]["notes"].append({"ts": ev.get("ts"), "text": f"[{ev['status']}] {ev['note']}"})
@@ -254,17 +261,23 @@ def file_issue(title: str, symptom: str, evidence, suspected_cause: str = "",
                                               "when the bridge next runs; `issues` shows its bead id."}
 
 
-def note_issue(issue_id: str, text: str, base: Optional[Path] = None) -> dict:
+def note_issue(issue_id: str, text: str, base: Optional[Path] = None, file: str = "") -> dict:
+    """Add what she learned. `file` names the file or function where she thinks
+    the bug is (a0aw.7): an open issue that names one goes to CodeMind."""
     text = _clip(text)
     if not text:
         return {"ok": False, "error": "text is required"}
     if issue_id not in issues(base):
         return {"ok": False, "error": f"no issue {issue_id}"}
-    _append({"event": "note", "id": issue_id, "ts": time.time(), "text": text}, base)
+    event = {"event": "note", "id": issue_id, "ts": time.time(), "text": text}
+    if file:
+        event["file"] = _clip(file, 300)
+    _append(event, base)
     return {"ok": True, "id": issue_id}
 
 
-def set_status(issue_id: str, status: str, note: str = "", base: Optional[Path] = None) -> dict:
+def set_status(issue_id: str, status: str, note: str = "", base: Optional[Path] = None,
+               file: str = "", source: str = "") -> dict:
     """Move an issue along: investigating → proposed → fixed (or wontfix).
     'fixed' is her report; the bead stays open until the fix is promoted and
     someone who can promote closes it."""
@@ -273,8 +286,12 @@ def set_status(issue_id: str, status: str, note: str = "", base: Optional[Path] 
         return {"ok": False, "error": f"status must be one of {', '.join(STATUSES)}"}
     if issue_id not in issues(base):
         return {"ok": False, "error": f"no issue {issue_id}"}
-    _append({"event": "status", "id": issue_id, "ts": time.time(), "status": status,
-             "note": _clip(note)}, base)
+    event = {"event": "status", "id": issue_id, "ts": time.time(), "status": status, "note": _clip(note)}
+    if file:
+        event["file"] = _clip(file, 300)
+    if source:
+        event["source"] = _clip(source, 40)
+    _append(event, base)
     return {"ok": True, "id": issue_id, "status": status}
 
 

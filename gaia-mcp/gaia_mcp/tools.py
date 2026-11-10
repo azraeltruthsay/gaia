@@ -346,9 +346,10 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
             p.get("evidence") or p.get("quote") or p.get("lines") or [],
             suspected_cause=p.get("suspected_cause") or p.get("cause", ""), playbook=p.get("playbook", ""),
             source=p.get("source", "self")),
-        "issue_note": lambda p: _issue_ledger().note_issue(str(p.get("id", "")), p.get("text") or p.get("note", "")),
+        "issue_note": lambda p: _issue_ledger().note_issue(str(p.get("id", "")), p.get("text") or p.get("note", ""),
+                                                          file=str(p.get("file") or "")),
         "issue_status": lambda p: _issue_ledger().set_status(
-            str(p.get("id", "")), p.get("status", ""), note=p.get("note", "")),
+            str(p.get("id", "")), p.get("status", ""), note=p.get("note", ""), file=str(p.get("file") or "")),
         "issue_list": lambda p: (_issue_ledger().get_issue(str(p["id"])) if p.get("id")
                                  else _issue_ledger().list_issues(
                                      status=p.get("status", ""),

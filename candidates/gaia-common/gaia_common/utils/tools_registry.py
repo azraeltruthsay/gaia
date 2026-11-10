@@ -762,12 +762,13 @@ TOOLS = {
         }
     },
     "issue_note": {
-        "description": "Add what you learned to an issue you filed.",
+        "description": "Add what you learned to an issue you filed. Name the file or function where the bug is and CodeMind tries a fix in your candidate code while you sleep.",
         "params": {
             "type": "object",
             "properties": {
                 "id": {"type": "string", "description": "Issue id (gi-xxxxxx)."},
                 "text": {"type": "string"},
+                "file": {"type": "string", "description": "Where the bug is: a path (gaia_core/cognition/agent_core.py) or a function (AgentCore._should_use_tool_routing)."},
             },
             "required": ["id"]
         }
@@ -780,6 +781,7 @@ TOOLS = {
                 "id": {"type": "string"},
                 "status": {"type": "string", "enum": ["open", "investigating", "proposed", "fixed", "wontfix"]},
                 "note": {"type": "string"},
+                "file": {"type": "string", "description": "Where the bug is, if you found it: a path or a function."},
             },
             "required": ["id", "status"]
         }

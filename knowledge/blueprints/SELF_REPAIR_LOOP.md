@@ -20,10 +20,10 @@ logs, and the fix and its lesson both stay with her, is the point.
 | **Notice** | `introspect(action=turns)` (a0aw.6): her turns over a window (default 24 h), one block each — asked, intent, routing fired / selector choice, tools run (routed and mid-reply), which mind answered, reply head; her current turn and earlier self-reviews left out; warnings that recur across turns dropped. `logs` honours since/until. Also: the other mind's per-reply check (b9ts), samvega, thought seeds | yes |
 | **Match** | troubleshooting playbooks (`/knowledge/skills/ts-*/SKILL.md`, Unified Skills format, palace-indexed). Playbooks with `seen_in: [turns, …]` have their Symptoms listed under the turn view (ycx7): criteria read from her own files, no verdicts in code | **yes** (ycx7) |
 | **Record** | the `self_review` sleep task (a0aw.4, `gaia_core/cognition/self_review.py`) does Notice → Match → Record in one pass: turn view (oldest first from a cursor) + playbook symptoms in, her `ISSUE/PLAYBOOK/EVIDENCE/SYMPTOM/CAUSE` blocks out, filed by code; every review kept with her full answer in `reviews.jsonl`. Also her issue ledger: `issue(action=file / note / status / list)` → `/shared/issues/ledger.jsonl` (`gaia_common/utils/issue_ledger.py`); evidence required, duplicates of open issues refused, 10/day cap. Host bridge `scripts/gaia_issue_bridge.py` makes each a bead (`gaia-found`) and writes bead id + status back (`beads.json`) | **yes** (a0aw.1); bridge timer in `scripts/systemd/`, installed by hand |
-| **Propose** | CodeMind ANALYZE → PROPOSE (`build_fix_prompt`, `codemind_patch` search/replace blocks), candidate files only | yes, never closed on code |
+| **Propose** | CodeMind ANALYZE → PROPOSE (`build_fix_prompt`, `codemind_patch` search/replace blocks), candidate files only. Her open issues reach it once she names where (`issue(note/status, file=…)`, or a file/function in her cause or notes): `gaia_common/utils/codemind_issues.py` (a0aw.7) turns them into direct-fix detections, a large file is shown as the function she named, and the outcome goes back to her issue ('proposed' with the test result, or a note why not; 2 tries, a retry only after she adds something) | **yes** (a0aw.7); she can't yet find the place herself in sleep (a0aw.9) |
 | **Test** | candidate pytest for the touched module, plus a new regression test she writes | **yes** (a0aw.2): CodeMind's VERIFY runs the tests named after or importing the touched module in `gaia-core-candidate` (orchestrator `POST /candidate/test`, `gaia_common/utils/codemind_tests.py`); failure restores the file and goes back to PROPOSE once with the report. No covering test = not validated. She can't write the regression test yet |
 | **Validate** | the live symptom gone on `gaia-core-candidate` (replay the turn that showed it) | **gap**: no replay step |
-| **Promote** | `promote_pipeline.sh`; vital organs (`agent_core.py`, `main.py`, …) need Azrael's approval — CodeMind's `VITAL_ORGANS` gate | yes (gated) |
+| **Promote** | `promote_pipeline.sh`; vital organs (`agent_core.py`, `main.py`, …) need Azrael's approval: a CodeMind fix touching one is written to `/shared/doctor/architect_queue/`, never `restart_requests/` (the `is_vital_organ` gate existed but nothing called it until a0aw.7) | yes (gated) |
 | **Learn** | write or update the playbook that would have found this faster; record the outcome in the palace (`record_skill_outcome`); close the issue | partial (SkillCreator drafts from failure patterns) |
 
 The **Learn** step is the recursion: every fix leaves a playbook, and the playbooks are
@@ -57,8 +57,9 @@ not do her steps for her.
 
 1. ~~Issue ledger she can write that lands in beads.~~ Done (a0aw.1).
 2. ~~Test step in CodeMind VALIDATE (run the touched module's tests in the candidate).~~ Done (a0aw.2).
-5. Her issue becomes a CodeMind detection; a direct-fix path for a one-file behavioral bug.
-6. CodeMind writes a regression test with the fix.
+5. ~~Her issue becomes a CodeMind detection; a direct-fix path for a one-file behavioral bug.~~ Done (a0aw.7).
+6. CodeMind writes a regression test with the fix (a0aw.8).
+7. She investigates an open issue in sleep and names where the bug is (a0aw.9).
 3. Replay step: re-send the offending turn to `gaia-core-candidate` and compare.
 4. A sleep task that runs the Notice step over the day's logs with the playbooks. **Done** (`a0aw.4`): `self_review`.
 
@@ -132,3 +133,10 @@ not do her steps for her.
   to /shared, the knowledge graph and chat history, which there are production's), so they
   run in the candidate container. Two gaps found for `mjcg`: no path from her issue to a
   CodeMind detection, and behavioral issues only ever get a blueprint, not a fix.
+- **2026-11-10, Propose** (`a0aw.7`): her issues reach CodeMind once she names a file or
+  function. Checked with the real `agent_core.py`: `AgentCore._should_use_tool_routing`
+  resolves, and the prompt shows that function (3.8k of 589k chars). On the way: CodeMind's
+  vital-organ gate was never called (a passing fix to `agent_core.py` would have written a
+  self-deploy request; only an absolute-path mismatch stopped it), and the issue ledger
+  read `GAIA_ISSUES_DIR` once at import, so a test wrote into the candidate's real ledger
+  (cleaned). Her two open issues name no place yet: nothing is attempted until she does.

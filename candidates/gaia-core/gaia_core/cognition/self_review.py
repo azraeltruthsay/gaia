@@ -53,7 +53,7 @@ ISSUE: a short title
 PLAYBOOK: the playbook it matches, or none
 EVIDENCE: the line from the turns above that shows what went wrong, copied exactly
 SYMPTOM: what went wrong, in one sentence
-CAUSE: your guess at the cause, or unknown
+CAUSE: your guess at the cause, naming the file or function if you know it, or unknown
 
 Put a blank line between blocks. If every turn went fine, write only: NONE"""
 
