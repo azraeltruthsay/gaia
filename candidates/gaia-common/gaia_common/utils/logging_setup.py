@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import logging.handlers
 import os
+import sys
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -166,6 +167,23 @@ def install_health_check_filter(endpoints: Optional[List[str]] = None) -> None:
     logging.getLogger().addFilter(health_filter)
 
 
+def _under_pytest() -> bool:
+    return "pytest" in sys.modules and os.getenv("GAIA_LOG_FILES_UNDER_PYTEST") != "1"
+
+
+def log_service_name(service_name: Optional[str]) -> Optional[str]:
+    """The name a service logs under. A candidate container shares /logs with
+    production, so it logs as '<service>-candidate' (ba6o): its turns are not hers.
+    GAIA_LOG_SERVICE_NAME overrides; otherwise a HOSTNAME of '<service>-candidate'
+    (how docker-compose.candidate.yml names them) adds the suffix."""
+    override = os.getenv("GAIA_LOG_SERVICE_NAME")
+    if override:
+        return override
+    if service_name and os.getenv("HOSTNAME", "") == f"{service_name}-candidate":
+        return f"{service_name}-candidate"
+    return service_name
+
+
 def setup_logging(
     log_dir: Optional[str] = None,
     level: int = logging.INFO,
@@ -191,6 +209,12 @@ def setup_logging(
     """
     root = logging.getLogger()
     root.setLevel(level)
+
+    service_name = log_service_name(service_name)
+    if log_dir and _under_pytest():
+        # ba6o: a test that imports a service's main.py would append its fixture
+        # output to the live service log, which self_review reads as her own turns.
+        log_dir = None
 
     # Build format string with optional service name
     if service_name:

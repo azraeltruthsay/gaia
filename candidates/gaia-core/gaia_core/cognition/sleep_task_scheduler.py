@@ -1547,13 +1547,15 @@ class SleepTaskScheduler:
     def _run_self_review(self, **kwargs) -> None:
         """a0aw.4: review her turns since the last review and file what went wrong."""
         from pathlib import Path
+        from gaia_common.utils.logging_setup import log_service_name
         from gaia_core.cognition.self_review import model_generator, run_self_review
         if self.model_pool is None:
             logger.info("self_review skipped: no model pool")
             return
         result = run_self_review(
             model_generator(self.model_pool),
-            log_file=Path(os.environ.get("GAIA_CORE_LOG", "/logs/gaia-core.log")),
+            # ba6o: a candidate logs as gaia-core-candidate; it reviews its own turns.
+            log_file=Path(os.environ.get("GAIA_CORE_LOG") or f"/logs/{log_service_name('gaia-core')}.log"),
             history_dir=Path(os.environ.get("GAIA_CHAT_HISTORY_DIR", "/logs/chat_history")),
             skills_dir=Path(os.environ.get("GAIA_SKILLS_DIR", "/knowledge/skills")),
             check_interrupted=self.check_interrupted,
