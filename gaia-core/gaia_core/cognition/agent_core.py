@@ -2386,7 +2386,6 @@ class AgentCore:
 
                     # Map TargetEngine -> model key, with availability checks
                     if _route.target == NeuralTargetEngine.PRIME:
-                        yield {"type": "token", "value": "[(i) NeuralRouter: Deep reasoning required. Routing to Prime...]\n\n"}
                         _escalated = False
                         for cand in ["prime", "cpu_prime"]:
                             if cand == "prime" and _gpu_sleeping:
@@ -2411,6 +2410,11 @@ class AgentCore:
                                 selected_model_name = cand
                                 _escalated = True
                                 break
+                        if _escalated:
+                            # Said once Prime is actually chosen: it used to be
+                            # sent first, then Core answered anyway when Prime
+                            # wasn't reachable ("Routing to Prime..." / [Core]).
+                            yield {"type": "token", "value": "[(i) NeuralRouter: Deep reasoning required. Routing to Prime...]\n\n"}
                         if not _escalated:
                             selected_model_name = "core"
                             logger.info("[CASCADE] No Prime-tier reachable; falling back to Core")
@@ -6505,7 +6509,18 @@ class AgentCore:
                 break
 
 
-        for candidate in self._SLIM_ESCALATION_CHAIN:
+        # Gear-follow (2026-11-10): the mind on the GPU first. The fixed order
+        # (prime, core, ...) sent every question the reflex prompt punts on
+        # ("capital of France" -> ESCALATE) to Prime on the CPU in gear 1:
+        # slow, and on Discord it padded an Iliad answer with wrong names.
+        # In gear 2 Prime has the GPU and still comes first.
+        _chain = list(self._SLIM_ESCALATION_CHAIN)
+        try:
+            _gpu_mind = "prime" if self._is_prime_available else "core"
+            _chain = [_gpu_mind] + [c for c in _chain if c != _gpu_mind]
+        except Exception:
+            self.logger.debug("Slim escalation: gear lookup failed, fixed order", exc_info=True)
+        for candidate in _chain:
             if candidate == failed_model:
                 continue
             if candidate not in self.model_pool.models:
