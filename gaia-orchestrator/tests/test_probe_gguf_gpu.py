@@ -64,3 +64,19 @@ async def test_probe_classifies_by_device(matrix, monkeypatch, payload, expected
     _fake_httpx(monkeypatch, payload)
     await matrix._probe_tier("core")
     assert matrix._tiers["core"].actual == expected
+
+
+def test_core_gpu_model_path_overrides(monkeypatch):
+    monkeypatch.setattr(
+        ConsciousnessMatrix, "_load_config",
+        staticmethod(lambda: {
+            "inference_endpoints": {"nano": "http://n:0", "core": "http://c:0", "prime": "http://p:0"},
+            "gpu_models": {"nano": "/m/n", "core": "/m/c", "prime": "/m/p"},
+            "cpu_models": {"nano": "/m/n.gguf", "core": "/m/c.gguf", "prime": "/m/p.gguf"},
+        }),
+    )
+    monkeypatch.setenv("CORE_SAFETENSORS_PATH", "/models/core")
+    monkeypatch.setenv("CORE_GPU_MODEL_PATH", "/models/core-gpu.gguf")
+    assert ConsciousnessMatrix(lifecycle_machine=None)._gpu_models["core"] == "/models/core-gpu.gguf"
+    monkeypatch.delenv("CORE_GPU_MODEL_PATH")
+    assert ConsciousnessMatrix(lifecycle_machine=None)._gpu_models["core"] == "/models/core"

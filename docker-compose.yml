@@ -72,6 +72,11 @@ services:
       - MODELS_DIR=/models
       # NF4 saved from /models/prime, bit-identical; training keeps the full weights
       - PRIME_MODEL_PATH=${PRIME_MODEL_PATH:-/models/prime-nf4}
+      # Gear 1 (and the listening gear) loads Core onto the GPU from this (frlp):
+      # the 12B as Q6_K GGUF on gaia_cpp, with projector + MTP draft (gaia-core
+      # env). Rollback: CORE_GPU_MODEL_PATH=/models/core (torch, NF4).
+      - CORE_GPU_MODEL_PATH=${CORE_GPU_MODEL_PATH:-/models/core-gpu.gguf}
+      - CORE_VOICE_GPU_PATH=${CORE_VOICE_GPU_PATH:-/models/core-gpu.gguf}
       - WARM_POOL_DIR=/warm_pool
       - ORCHESTRATOR_COMPOSE_FILE_LIVE=/gaia/GAIA_Project/docker-compose.yml
       - ORCHESTRATOR_COMPOSE_FILE_CANDIDATE=/gaia/GAIA_Project/docker-compose.candidate.yml
@@ -243,10 +248,12 @@ services:
       - HEARTBEAT_ENABLED=${HEARTBEAT_ENABLED:-1}
       - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/nccl/lib:/usr/local/cuda/lib64
       - VLLM_GPU_MEMORY_UTILIZATION=0.3
-      # Voice gear (heo): when the consciousness matrix loads Core as the GGUF on
-      # GPU (listening config), offload all-but-last layer. Gemma 4 crashes the
-      # llama.cpp CUDA graph at full offload (999); 33 = E4B layers - 1 is stable.
-      - GGUF_GPU_LAYERS=${GGUF_GPU_LAYERS:-33}
+      # Core's GGUF on the GPU (gear 1 and the listening gear, frlp): all layers.
+      # The old 33 (E4B layers - 1) worked around a Gemma 4 CUDA-graph crash at
+      # full offload on llama.cpp b8770; on b11804 the 12B runs fully offloaded
+      # (staged battery + media + speed tests, 2026-11-10). 33 left 15 of the
+      # 12B's 48 layers on the CPU: 10-17 tok/s instead of 75-90.
+      - GGUF_GPU_LAYERS=${GGUF_GPU_LAYERS:-999}
       - PYTHONPATH=/app:/gaia-common
       - GAIA_SERVICE=core
       - GAIA_ENGINE_TIER=core
@@ -358,6 +365,14 @@ services:
       - GGUF_THREADS_BATCH=24
       - GAIA_CPP_MTP_DRAFT=/models/core-assistant.gguf
       - GAIA_CPP_MTP_N=3
+      # GPU gear on gaia_cpp (frlp): images/audio through the 12B's projector
+      # (exported from the same weights; re-export per bake), 280 tokens per
+      # image as the HF processor; q8_0 KV cache and 8k context on the GPU
+      # (~1.4 GB KV; f16 matched bf16 media replies no better than q8_0).
+      - GAIA_CPP_MMPROJ=/models/core-mmproj.gguf
+      - GAIA_CPP_IMAGE_TOKENS=280
+      - GAIA_CPP_KV_TYPE_GPU=q8_0
+      - GGUF_CTX_SIZE_GPU=8192
       # KV cache persistence for embedded llama-server
       - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
       # HA failover — candidate MCP as fallback

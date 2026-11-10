@@ -100,7 +100,11 @@ class ConsciousnessMatrix:
         # Safetensors model paths (for state 3 = Conscious/GPU)
         self._gpu_models = {
             "nano": os.environ.get("NANO_SAFETENSORS_PATH", cfg["gpu_models"].get("nano", "/models/nano")),
-            "core": os.environ.get("CORE_SAFETENSORS_PATH", cfg["gpu_models"].get("core", "/models/core")),
+            # CORE_GPU_MODEL_PATH (frlp): what gear 1 loads onto the GPU. A
+            # .gguf runs on gaia_cpp (llama.cpp CUDA; Q6_K + mmproj + MTP);
+            # unset keeps the torch path (CORE_SAFETENSORS_PATH, NF4).
+            "core": (os.environ.get("CORE_GPU_MODEL_PATH")
+                     or os.environ.get("CORE_SAFETENSORS_PATH", cfg["gpu_models"].get("core", "/models/core"))),
             "prime": os.environ.get("PRIME_MODEL_PATH", cfg["gpu_models"].get("prime", "/models/prime")),
         }
 

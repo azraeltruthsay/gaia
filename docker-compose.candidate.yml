@@ -78,6 +78,14 @@ services:
       - GGUF_THREADS_BATCH=24
       - GAIA_CPP_MTP_DRAFT=/models/core-assistant.gguf
       - GAIA_CPP_MTP_N=3
+      # GPU gear on gaia_cpp (frlp): images/audio through the 12B's projector
+      # (exported from the same weights; re-export per bake), 280 tokens per
+      # image as the HF processor; q8_0 KV cache and 8k context on the GPU
+      # (~1.4 GB KV; f16 matched bf16 media replies no better than q8_0).
+      - GAIA_CPP_MMPROJ=/models/core-mmproj.gguf
+      - GAIA_CPP_IMAGE_TOKENS=280
+      - GAIA_CPP_KV_TYPE_GPU=q8_0
+      - GGUF_CTX_SIZE_GPU=8192
       - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
       - SHARED_DIR=/shared
       - N_GPU_LAYERS=${CANDIDATE_CORE_GPU_LAYERS:-0}
