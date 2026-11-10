@@ -239,7 +239,8 @@ class DiscordInterface:
             # command framework here instead.
             # Inner voice switches (!thoughts / !thinking) are hers to set: they
             # go to gaia-core like any message (inner_voice.py).
-            _iv_switch = re.match(r"^\s*!(thoughts|thinking)\b", message.content or "", re.IGNORECASE)
+            # So are !gear1 / !gear2 / !gear (gear_switch.py): gaia-core handles them.
+            _iv_switch = re.match(r"^\s*!(thoughts|thinking|gear\s*[12]?\s*$)", message.content or "", re.IGNORECASE)
             if is_dm and message.content.strip().startswith(bot.command_prefix) and not _iv_switch:
                 await bot.process_commands(message)
                 return

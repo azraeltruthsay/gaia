@@ -1651,6 +1651,45 @@ async def consciousness_focusing():
     return {"ok": True, "message": "FOCUSING transition started (via lifecycle clutch)"}
 
 
+class RestingGearRequest(BaseModel):
+    gear: str                 # "1" / "awake" or "2" / "focusing"
+    shift_now: bool = True    # also shift there now, from awake / focusing / parked
+    set_by: str = ""
+
+
+@app.get("/lifecycle/resting_gear")
+async def get_resting_gear():
+    """The gear she rests in: where she wakes, and returns after voice,
+    sleep or training (Azrael, 2026-11-10: a toggle and !gear1 / !gear2)."""
+    from gaia_common.lifecycle.states import resting_state, RESTING_STATE, LifecycleState
+    state = resting_state()
+    return {"state": state.value, "gear": "1" if state == LifecycleState.AWAKE else "2",
+            "default": RESTING_STATE.value}
+
+
+@app.post("/lifecycle/resting_gear")
+async def set_resting_gear(req: RestingGearRequest):
+    from gaia_common.lifecycle.states import set_resting_state, LifecycleState
+    choice = {"1": LifecycleState.AWAKE, "awake": LifecycleState.AWAKE,
+              "2": LifecycleState.FOCUSING, "focusing": LifecycleState.FOCUSING}.get(req.gear.strip().lower())
+    if choice is None:
+        raise HTTPException(status_code=400, detail="gear must be 1 (awake) or 2 (focusing)")
+    set_resting_state(choice, set_by=req.set_by or "api")
+    shifted = None
+    if req.shift_now and _consciousness_matrix is not None and _lifecycle_machine is not None:
+        # Only from the everyday gears: never interrupt training, a voice
+        # session or sleep; those come back to the new resting gear anyway.
+        current = LifecycleState(_lifecycle_machine._snapshot.state)
+        if current != choice and current in (LifecycleState.AWAKE, LifecycleState.FOCUSING,
+                                             LifecycleState.PARKED):
+            shift = _consciousness_matrix.awake if choice == LifecycleState.AWAKE else _consciousness_matrix.focusing
+            asyncio.create_task(shift())
+            shifted = choice.value
+    logger.info("Resting gear set to %s by %s (shift now: %s)", choice.value, req.set_by or "api", shifted)
+    return {"ok": True, "state": choice.value, "gear": "1" if choice == LifecycleState.AWAKE else "2",
+            "shifting_to": shifted}
+
+
 @app.post("/consciousness/sleep")
 async def consciousness_sleep():
     """Set SLEEP configuration via lifecycle clutch protocol."""

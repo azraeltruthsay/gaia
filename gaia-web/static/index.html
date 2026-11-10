@@ -242,6 +242,18 @@
             </template>
           </select>
         </div>
+        <!-- Resting gear: where she wakes and returns (also !gear1 / !gear2 in chat) -->
+        <div class="sidebar-context sidebar-gear" x-init="$store.gear.load()">
+          <div class="context-mode-label">Resting gear</div>
+          <div class="context-mode-toggle">
+            <button :class="{ active: $store.gear.resting === '1' }" :disabled="$store.gear.busy"
+                    title="Core on the GPU is her voice; Prime thinks from the CPU"
+                    @click="$store.gear.set('1')">Gear 1</button>
+            <button :class="{ active: $store.gear.resting === '2' }" :disabled="$store.gear.busy"
+                    title="Prime on the GPU is her voice; Core listens from the CPU"
+                    @click="$store.gear.set('2')">Gear 2</button>
+          </div>
+        </div>
       </aside>
 
       <!-- Chat area -->

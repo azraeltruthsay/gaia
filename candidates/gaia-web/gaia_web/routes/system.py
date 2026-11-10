@@ -665,6 +665,33 @@ async def lifecycle_release_gpu(request: Request):
         return {"ok": False, "error": str(e)}
 
 
+@router.get("/lifecycle/resting_gear")
+async def lifecycle_resting_gear():
+    """The gear she rests in (1 = Core on the GPU, 2 = Prime on the GPU)."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{ORCHESTRATOR_URL}/lifecycle/resting_gear")
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@router.post("/lifecycle/resting_gear")
+async def lifecycle_set_resting_gear(request: Request):
+    """Set the resting gear from the chat toggle: {"gear": "1"|"2", "shift_now": true}."""
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{ORCHESTRATOR_URL}/lifecycle/resting_gear",
+                content=body or b"{}",
+                headers={"Content-Type": "application/json"},
+            )
+            return resp.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @router.post("/lifecycle/restore_tenant")
 async def lifecycle_restore_tenant(request: Request):
     """Lift the user hold and restart a VRAM tenant container."""

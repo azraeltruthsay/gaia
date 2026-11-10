@@ -29,8 +29,11 @@ VRAM budget (measured on RTX 5080 16GB):
   Both on GPU simultaneously:   NOT FEASIBLE on 16 GB (13.4 GB + KV cache = OOM)
 """
 
+import json
 import os
+import time
 from enum import Enum
+from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 
@@ -98,6 +101,36 @@ class TierExpectation:
 # (Azrael, 2026-11-04; 2qus). Gear 1 stays one explicit request away.
 RESTING_STATE = LifecycleState(os.getenv("GAIA_RESTING_GEAR", LifecycleState.FOCUSING.value))
 
+# The resting gear is a setting she can be told to change (Azrael, 2026-11-10:
+# "!gear1" / "!gear2" in chat, a toggle in the web chat). RESTING_STATE above
+# is the default; set_resting_state() persists a choice, which every
+# transition back to rest (below) reads at the time it happens.
+RESTING_CHOICES = (LifecycleState.AWAKE, LifecycleState.FOCUSING)  # gear 1, gear 2
+RESTING_GEAR_FILE = Path(os.getenv("GAIA_RESTING_GEAR_FILE", "/shared/orchestrator/resting_gear.json"))
+
+
+def resting_state() -> LifecycleState:
+    """The gear she rests in now: the persisted choice, else the default."""
+    try:
+        state = LifecycleState(json.loads(RESTING_GEAR_FILE.read_text())["state"])
+        if state in RESTING_CHOICES:
+            return state
+    except Exception:
+        pass
+    return RESTING_STATE
+
+
+def set_resting_state(state: LifecycleState, set_by: str = "") -> LifecycleState:
+    """Persist the resting gear (gear 1 = AWAKE, gear 2 = FOCUSING)."""
+    state = LifecycleState(state)
+    if state not in RESTING_CHOICES:
+        raise ValueError(f"resting gear must be awake (1) or focusing (2), not {state.value}")
+    RESTING_GEAR_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = RESTING_GEAR_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"state": state.value, "set_by": set_by, "set_at": time.time()}))
+    tmp.replace(RESTING_GEAR_FILE)
+    return state
+
 TRANSITIONS: Dict[LifecycleState, Dict[TransitionTrigger, LifecycleState]] = {
     LifecycleState.AWAKE: {
         TransitionTrigger.VOICE_JOIN: LifecycleState.LISTENING,
@@ -143,6 +176,18 @@ TRANSITIONS: Dict[LifecycleState, Dict[TransitionTrigger, LifecycleState]] = {
     LifecycleState.TRANSITIONING: {
         # No triggers — transitions out are handled by the machine itself
     },
+}
+
+# Transitions that go back to rest: resolved to resting_state() when they
+# happen, so a changed setting applies without a restart. (The table above
+# holds the default for readers of the static table.)
+RESTING_TRANSITIONS: Set[tuple] = {
+    (LifecycleState.LISTENING, TransitionTrigger.VOICE_LEAVE),
+    (LifecycleState.MEDITATION, TransitionTrigger.TRAINING_COMPLETE),
+    (LifecycleState.SLEEP, TransitionTrigger.WAKE_SIGNAL),
+    (LifecycleState.DEEP_SLEEP, TransitionTrigger.WAKE_SIGNAL),
+    (LifecycleState.PARKED, TransitionTrigger.WAKE_SIGNAL),
+    (LifecycleState.PARKED, TransitionTrigger.ENGAGE_CLUTCH),
 }
 
 # States reachable via USER_REQUEST from each state
@@ -306,6 +351,8 @@ def validate_transition(
         valid_targets = USER_REQUEST_TARGETS.get(current, set())
         return target if target in valid_targets else None
 
+    if (current, trigger) in RESTING_TRANSITIONS:
+        return resting_state()
     table = TRANSITIONS.get(current, {})
     return table.get(trigger)
 
@@ -322,6 +369,8 @@ def available_transitions(current: LifecycleState) -> List[dict]:
     result = []
     table = TRANSITIONS.get(current, {})
     for trigger, target in table.items():
+        if (current, trigger) in RESTING_TRANSITIONS:
+            target = resting_state()
         result.append({
             "trigger": trigger.value,
             "target": target.value,

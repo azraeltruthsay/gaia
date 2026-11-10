@@ -1495,6 +1495,16 @@ class AgentCore:
         except Exception:
             logger.warning("Inner voice switch failed, continuing", exc_info=True)
 
+        # Gear switch ("!gear1" / "!gear2" / "!gear"): a setting, not a message to her.
+        try:
+            from gaia_core.cognition import gear_switch
+            _gear_reply = gear_switch.handle_command(user_input, set_by=f"chat:{source}")
+            if _gear_reply:
+                yield {"type": "token", "value": _gear_reply}
+                return
+        except Exception:
+            logger.warning("Gear switch failed, continuing", exc_info=True)
+
         # Facts she was told, kept and recalled. Ahead of research and the
         # old save-to-file route, which get these turns otherwise (1zbx).
         try:

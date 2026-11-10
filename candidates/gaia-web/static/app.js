@@ -440,6 +440,42 @@ document.addEventListener('alpine:init', () => {
   chatStore.connectAutoStream();
 
   Alpine.store('chat', chatStore);
+
+  // Resting gear toggle (Azrael, 2026-11-10): the gear she wakes into and
+  // returns to. Same setting as !gear1 / !gear2 in chat; shifts now when she's
+  // in an everyday gear.
+  Alpine.store('gear', {
+    resting: null,
+    busy: false,
+    async load() {
+      try {
+        const r = await (await fetch('/api/system/lifecycle/resting_gear')).json();
+        if (r.gear) this.resting = r.gear;
+      } catch (e) { /* gearbox unreachable: leave the toggle unset */ }
+    },
+    async set(gear) {
+      if (this.busy || gear === this.resting) return;
+      this.busy = true;
+      try {
+        const r = await (await fetch('/api/system/lifecycle/resting_gear', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gear, shift_now: true, set_by: 'web toggle' }),
+        })).json();
+        if (r.ok) {
+          this.resting = r.gear;
+          const who = r.gear === '1' ? 'Core on the GPU is her voice' : 'Prime on the GPU is her voice';
+          Alpine.store('chat').addMessage(
+            `Resting gear ${r.gear}: ${who}.${r.shifting_to ? ' Shifting now.' : ''}`, 'system');
+        } else {
+          Alpine.store('chat').addMessage(`Couldn't change gear: ${r.error || r.detail || 'unknown error'}`, 'system');
+        }
+      } catch (e) {
+        Alpine.store('chat').addMessage(`Couldn't change gear: ${e.message}`, 'system');
+      } finally {
+        this.busy = false;
+      }
+    },
+  });
 });
 
 // ── Orchestrator Panel Component ──────────────────────────────────────────────
