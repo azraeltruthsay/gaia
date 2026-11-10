@@ -20,7 +20,13 @@ logger = logging.getLogger("GAIA.HostFacts")
 
 _CACHE_SECONDS = 30.0
 _cache: Dict[str, tuple] = {}
-ENGINES = {"Core": "http://localhost:8092", "Prime": "http://gaia-prime:7777"}
+# Engines by network name, so any container can read them (2026-11-10: from
+# gaia-mcp, where introspect runs, "localhost:8092" was the wrong container and
+# Core always read as unreachable). gaia-core resolves its own name too.
+ENGINES = {
+    "Core": os.environ.get("GAIA_CORE_ENGINE_URL", "http://gaia-core:8092"),
+    "Prime": os.environ.get("GAIA_PRIME_ENGINE_URL", "http://gaia-prime:7777"),
+}
 
 
 def _cached(key: str, read):

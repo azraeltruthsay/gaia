@@ -1495,6 +1495,19 @@ class AgentCore:
         except Exception:
             logger.warning("Inner voice switch failed, continuing", exc_info=True)
 
+        # The answer to an approval challenge (the reversed code, or "cancel"):
+        # not a message to her either; it approves the parked action.
+        try:
+            from gaia_core.cognition import approval_reply
+            _appr_reply = approval_reply.handle(self.session_manager, session_id, user_input)
+            if _appr_reply:
+                self.session_manager.add_message(session_id, "user", user_input)
+                self.session_manager.add_message(session_id, "assistant", _appr_reply)
+                yield {"type": "token", "value": _appr_reply}
+                return
+        except Exception:
+            logger.warning("Approval reply failed, continuing", exc_info=True)
+
         # Gear switch ("!gear1" / "!gear2" / "!gear"): a setting, not a message to her.
         try:
             from gaia_core.cognition import gear_switch
@@ -3380,6 +3393,16 @@ class AgentCore:
                         "kb_name": _exec_output.get("kb_name"),
                         "path": _exec_output.get("path"),
                     }, session_id, source=source, destination_context=_metadata)
+                    # The packet carries the parked action (action_id,
+                    # challenge): gaia-web's Discord bridge reads it to show
+                    # the approval card and take the reversed code.
+                    try:
+                        from gaia_common.protocols.cognition_packet import PacketState as _PState
+                        packet.status.state = _PState.COMPLETED
+                        packet.response.candidate = _msg
+                        yield {"type": "packet", "value": packet.to_serializable_dict()}
+                    except Exception:
+                        logger.warning("Could not emit the approval packet", exc_info=True)
                     return
 
                 # If tool was executed successfully, we may have results to include
@@ -10673,6 +10696,38 @@ Start your response with the first line of the file."""
                             output=actual_result,
                             error=actual_result.get("error") if isinstance(actual_result, dict) else None,
                             execution_time_ms=elapsed_ms
+                        )
+                    elif rpc_result.get("pending_approval"):
+                        try:
+                            from gaia_core.cognition import approval_reply
+                            approval_reply.remember(
+                                self.session_manager, session_id, rpc_result.get("action_id"),
+                                rpc_result.get("challenge"),
+                                f"{canonical_name}({(tool.params or {}).get('action', '')})")
+                        except Exception:
+                            logger.warning("Could not remember the pending approval", exc_info=True)
+                        # Parked behind the human gate. Keep the action and its
+                        # challenge (they were dropped here, 2026-11-10): the
+                        # pipeline stops on pending_approval instead of letting
+                        # her narrate the code, and gaia-web's Discord bridge
+                        # shows the approval card and takes the reversed code.
+                        # Without it the reply went in as chat and she
+                        # improvised a command.
+                        return ToolExecutionResult(
+                            success=True,
+                            output={
+                                "pending_approval": True,
+                                "action_id": rpc_result.get("action_id"),
+                                "challenge": rpc_result.get("challenge"),
+                                "proposal": rpc_result.get("proposal", ""),
+                                "tool_name": f"{canonical_name}({(tool.params or {}).get('action', '')})",
+                                "message": (f"That needs your approval first: `{canonical_name}` "
+                                            f"{json.dumps({k: v for k, v in (tool.params or {}).items() if not k.startswith('_')})}. "
+                                            f"Challenge `{rpc_result.get('challenge')}`; reply with it reversed to approve, "
+                                            f"or say cancel."),
+                            },
+                            error=None,
+                            execution_time_ms=elapsed_ms,
                         )
                     else:
                         return ToolExecutionResult(

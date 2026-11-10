@@ -104,6 +104,15 @@ def _somatic_state() -> str:
         return ""
 
 
+def _minds_live() -> str:
+    try:
+        from gaia_common.utils.self_model import self_model_text
+        return self_model_text() or "unknown (engines not answering)"
+    except Exception:
+        logger.debug("world_state_detail: self_model_text failed", exc_info=True)
+        return "unknown (engines not answering)"
+
+
 def _model_paths() -> Dict[str, str]:
     """Capture the model paths we surface via environment variables."""
     return {
@@ -150,7 +159,11 @@ def world_state_detail() -> Dict:
         "uptime_s": int(_uptime_seconds()),
         "load": _load_avg(),
         "mem": _mem_summary(),
-        "models": _model_paths(),
+        # What's loaded where, read live from the engines (same as the snapshot's
+        # "Minds:" line). The old "models" block reported env-var paths nothing
+        # sets any more, all empty, and she read that as "no models loaded"
+        # (Discord, 2026-11-10).
+        "minds": _minds_live(),
         "mcp_tools": _mcp_tools_full(),
         "env": {
             "GAIA_BACKEND": os.getenv("GAIA_BACKEND") or "",

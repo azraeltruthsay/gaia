@@ -93,9 +93,15 @@ def _call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int 
                 method=method,
                 params={**(params or {}), "_allow_pending": True}
             )
-            if approval_result.get("ok"):
+            # /request_approval answers ok:true with an action_id and challenge
+            # when it PARKS the call: nothing ran. That used to be read as
+            # "auto-approved", so every gated call (shell, writes) looked like
+            # it had run, its approval ticket became the "result", and the
+            # model narrated the challenge code (Discord, 2026-11-10). Only a
+            # real result means it ran.
+            if approval_result.get("ok") and "result" in approval_result:
                 # Auto-approved (MCP_BYPASS=true) — result is in the response
-                return {"ok": True, "response": approval_result.get("result", approval_result)}
+                return {"ok": True, "response": approval_result.get("result")}
             elif approval_result.get("action_id"):
                 # Pending approval — return info so caller can handle it
                 return {
