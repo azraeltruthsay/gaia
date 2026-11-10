@@ -251,13 +251,16 @@ GEAR_INFO: Dict[LifecycleState, dict] = {
     },
     LifecycleState.AWAKE: {
         "gear": "1", "name": "Operator",
-        "description": "Core E4B on GPU (NF4). Rapid chat, vision, audio, tools.",
-        "vram_estimate_mb": 8800,
+        "description": "Core 12B on GPU (gaia_cpp: Q6_K + projector + MTP, q8_0 KV). Rapid chat, vision, audio, tools.",
+        # Core's own allocation, measured 2026-11-10 (frlp): ~12.5 GB.
+        "vram_estimate_mb": 12800,
     },
     LifecycleState.LISTENING: {
         "gear": "1+", "name": "Operator + Audio",
         "description": "AWAKE with active audio STT pipeline.",
-        "vram_estimate_mb": 8800,
+        # Same Core; gaia-audio's ASR (~1.8 GB) is outside the tier tally and
+        # counts as external. Whole card measured 15.4 of 16.3 GB (h6mo).
+        "vram_estimate_mb": 12800,
     },
     LifecycleState.FOCUSING: {
         "gear": "2", "name": "Sovereign",

@@ -64,13 +64,13 @@ GAIA's GPU lifecycle is a transmission system. States map to "gears":
 |------|-------|------|-------|----------|
 | **P** | PARKED | CPU (GGUF) | Unloaded | ~2.5 GB |
 | **1** | AWAKE | GPU (Q6_K GGUF) | CPU (GGUF) | ~13 GB |
-| **1+** | LISTENING | GPU (NF4) + Audio | CPU (GGUF) | ~11–12 GB |
+| **1+** | LISTENING | GPU (Q6_K GGUF) + ASR | CPU (GGUF) | ~15.3 GB |
 | **2** | FOCUSING | CPU (GGUF) | GPU (Buffered) | ~4.6 GB |
 | **S** | SLEEP | CPU (GGUF) | Unloaded | ~2.5 GB |
 | **0** | DEEP_SLEEP | Unloaded | Unloaded | ~2.5 GB |
 | **T** | MEDITATION | Unloaded | Unloaded | Study owns GPU |
 
-Gear 1 measured 2026-11-10 on WSL: 12.95 GB of 16.3 (whole GPU, nvidia-smi) with Core on gaia_cpp: 49/49 layers, 70–85 tok/s (was 21 on the torch NF4 path). Core's media replies match the bf16 model 30/36 greedy (NF4 path: 15/36); `scripts/media_gate.py` checks it. Rollback to the torch path: orchestrator `CORE_GPU_MODEL_PATH=/models/core` (bead `frlp`).
+Gear 1 measured 2026-11-10 on WSL: 12.95 GB of 16.3 (whole GPU, nvidia-smi) with Core on gaia_cpp: 49/49 layers, 70–85 tok/s (was 21 on the torch NF4 path). Core's media replies match the bf16 model 30/36 greedy (NF4 path: 15/36); `scripts/media_gate.py` checks it. Rollback to the torch path: orchestrator `CORE_GPU_MODEL_PATH=/models/core` (bead `frlp`). Listening adds gaia-audio's ASR (1.8 GB; TTS stays on CPU, the 1.7B voice only via a GPU lease): 15.3 of 16.3 GB measured (`h6mo`). gaia_cpp reports its VRAM (measured at load) so the gearbox budgets it as Core, not as an outside tenant.
 
 VRAM figures for P/S/0 corrected 2026-07-02 — measured via `nvidia-smi`, not the
 theoretical "fully offloaded" value. Even with Core/Prime "unloaded" per the
