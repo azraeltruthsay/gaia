@@ -56,6 +56,8 @@ GAIA uses a **two-tier** architecture: a **Gemma 4 Core** and a **Qwen3-8B Prime
 
 **LoRA adapters**: Loaded dynamically via GAIA Engine `POST /adapter/load`. Active adapter set via `POST /adapter/set`.
 
+**Core's speculative draft** (`/models/core-assistant.gguf`): a 4-layer MTP assistant that proposes the next tokens; Core checks every one, so it changes speed, never output. It is distilled onto *this* Core (`scripts/train_mtp_assistant.py`, ~20 min in MEDITATION; v2: acceptance 30% → 41% at temperature 0.7). After a new Core bake, re-distil it, then re-export the projector (`convert_hf_to_gguf.py --mmproj`) and rebuild `core-gpu.gguf` (Q6_K from bf16).
+
 ## The Gearbox (Lifecycle States)
 
 GAIA's GPU lifecycle is a transmission system. States map to "gears":
