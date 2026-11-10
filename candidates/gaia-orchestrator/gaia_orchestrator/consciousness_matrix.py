@@ -475,9 +475,16 @@ class ConsciousnessMatrix:
                     if managed:
                         # Managed engine — check if worker is active
                         if model_loaded:
-                            if backend in ("gguf", "cpp") or device == "cpu" or data.get("has_gpu") is False:
+                            # The device decides, not the backend: a GGUF
+                            # (gaia_cpp) model offloaded to the GPU reports
+                            # device "cuda" and is conscious (frlp; also the
+                            # listening gear's Core-GGUF-on-GPU, which read as
+                            # subconscious and was "reconciled" every poll).
+                            if device in ("cuda", "gpu"):
+                                state.actual = ConsciousnessLevel.CONSCIOUS
+                            elif backend in ("gguf", "cpp") or device == "cpu" or data.get("has_gpu") is False:
                                 state.actual = ConsciousnessLevel.SUBCONSCIOUS
-                            elif device in ("cuda", "gpu") or data.get("has_gpu") is True:
+                            elif data.get("has_gpu") is True:
                                 state.actual = ConsciousnessLevel.CONSCIOUS
                             elif mode == "active":
                                 state.actual = ConsciousnessLevel.CONSCIOUS
