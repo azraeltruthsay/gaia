@@ -1529,10 +1529,12 @@ class AgentCore:
                     self.session_manager.add_message(session_id, "user", user_input)
                     self._emit_timeline_message(session_id, "user", source)
                     _user_msg_persisted = True
+                # Kept before it is sent: a stream that ends early never
+                # resumes this generator, and the reply was lost (2026-11-11).
+                self.session_manager.add_message(session_id, "assistant", _palace_reply)
                 yield {"type": "token", "value": self._build_response_header(
                     self.__dict__.pop("_continuation_model", "core"), None, None, None, None) + _palace_reply}
                 yield {"type": "flush"}
-                self.session_manager.add_message(session_id, "assistant", _palace_reply)
                 return
         except Exception:
             logger.warning("Told-fact check failed, continuing", exc_info=True)
@@ -2852,8 +2854,8 @@ class AgentCore:
                                 f"{alt}"
                             )
                             _header = self._build_response_header(selected_model_name, packet, None, None, None)
-                            yield {"type": "token", "value": _header + honest_response}
                             self.session_manager.add_message(session_id, "assistant", honest_response)
+                            yield {"type": "token", "value": _header + honest_response}
                             return
                     except Exception:
                         self.logger.debug("Epistemic gate confidence check failed; proceeding with generation", exc_info=True)
@@ -3109,9 +3111,9 @@ class AgentCore:
             except Exception:
                 local_fact = ""
             if local_fact and not local_fact.strip().startswith("🧠 Memory store is empty"):
-                yield {"type": "token", "value": local_fact}
-                # Also record in history as assistant reply
+                # Recorded before it is sent (see the founding-documents reply).
                 self.session_manager.add_message(session_id, "assistant", local_fact)
+                yield {"type": "token", "value": local_fact}
                 return
     
             packet.intent.user_intent = plan.intent
@@ -3402,9 +3404,9 @@ class AgentCore:
                 _exec_output = (_exec_result.output if _exec_result else None) or {}
                 if isinstance(_exec_output, dict) and _exec_output.get("pending_approval"):
                     _msg = _exec_output.get("message", "Pending approval.")
+                    self.session_manager.add_message(session_id, "assistant", _msg)
                     yield {"type": "token", "value": _msg}
                     yield {"type": "flush"}
-                    self.session_manager.add_message(session_id, "assistant", _msg)
                     ts_write({
                         "type": "kb_approval", "action": "prompted",
                         "kb_name": _exec_output.get("kb_name"),
@@ -3458,9 +3460,9 @@ class AgentCore:
                     # plain confirmation directly and skip downstream narration.
                     _det_msg = self._deterministic_tool_narration(packet.tool_routing)
                     if _det_msg is not None:
+                        self.session_manager.add_message(session_id, "assistant", _det_msg)
                         yield {"type": "token", "value": _det_msg}
                         yield {"type": "flush"}
-                        self.session_manager.add_message(session_id, "assistant", _det_msg)
                         ts_write({
                             "type": "tool_routing",
                             "stage": "deterministic_narration",
@@ -3979,8 +3981,8 @@ class AgentCore:
                     text = self._guard_against_echo(text, history, user_input, selected_model_name)
                     _responding = getattr(self, '_last_responding_model', None) or selected_model_name
                     _header = self._build_response_header(_responding, packet, None, None, None)
-                    yield {"type": "token", "value": _header + text}
                     self.session_manager.add_message(session_id, "assistant", text)
+                    yield {"type": "token", "value": _header + text}
 
                     # Consistency-violation detection on slim-path responses too.
                     # Most confabulations we've caught (Howeidi-in-AGI, fabricated
@@ -4049,8 +4051,8 @@ class AgentCore:
                         _fb_text = _fb_re.sub(r'\s*\b(?:user|assistant)\s*$', '', _fb_text, flags=_fb_re.IGNORECASE).strip()
                         if _fb_text and len(_fb_text) > 5:
                             _header = self._build_response_header(selected_model_name, packet, None, None, None)
-                            yield {"type": "token", "value": _header + _fb_text}
                             self.session_manager.add_message(session_id, "assistant", _fb_text)
+                            yield {"type": "token", "value": _header + _fb_text}
                             return
                     except Exception:
                         logger.debug("OPERATOR direct fallback failed", exc_info=True)
@@ -4425,8 +4427,8 @@ class AgentCore:
                     # Apply dedup before streaming
                     _plan_clean = self._suppress_repetition(_plan_clean)
                     _header = self._build_response_header(selected_model_name, packet, None, None, None)
-                    yield {"type": "token", "value": _header + _plan_clean}
                     self.session_manager.add_message(session_id, "assistant", _plan_clean)
+                    yield {"type": "token", "value": _header + _plan_clean}
                     try:
                         packet.response.candidate = _plan_clean
                         packet.response.confidence = 0.9
@@ -5565,8 +5567,8 @@ class AgentCore:
                 voice = ExternalVoice(model=selected_model, model_pool=self.model_pool, config=self.config, messages=messages, source="agent_core", observer=active_stream_observer, context={"packet": packet}, session_id=session_id)
                 stream_generator = voice.stream_response()
                 concluding_response = "".join([str(token) for token in stream_generator if isinstance(token, str)])
-                yield {"type": "token", "value": concluding_response}
                 self.session_manager.add_message(session_id, "assistant", concluding_response)
+                yield {"type": "token", "value": concluding_response}
 
             # KV prefix save handled by engine manager during model unload/shutdown.
             # No background threads — controlled save at controlled time.

@@ -65,19 +65,19 @@ def _drain_research_turn(core, user_input, session_id, calls):
          patch('gaia_core.cognition.agent_core.research_router') as mock_rr, \
          patch.object(core, '_handle_research_request', side_effect=fake_handler):
         mock_kb.get_pending_write.return_value = None
-        mock_rr.detect_research_intent.return_value = "samvega"
+        mock_rr.detect_research_intent.return_value = "tidal locking"
         return list(core.run_turn(user_input, session_id))
 
 
 def test_research_router_persists_user_message_before_assistant(mock_agent_core):
     session_id = "test_research_history"
-    user_input = "What do you know about your Samvega system?"
+    user_input = "What do you know about tidal locking?"
     calls = []
 
     events = _drain_research_turn(mock_agent_core, user_input, session_id, calls)
 
     # The handler ran (early-return path was taken, not the normal pipeline)
-    assert ("handler", "samvega") in calls
+    assert ("handler", "tidal locking") in calls
     assert any(e.get("type") == "token" for e in events)
 
     # The user message was persisted, and BEFORE the handler / assistant append
@@ -85,7 +85,7 @@ def test_research_router_persists_user_message_before_assistant(mock_agent_core)
     assert user_writes == [("user", user_input)], (
         "user message must be persisted exactly once on the research path"
     )
-    assert calls.index(("user", user_input)) < calls.index(("handler", "samvega"))
+    assert calls.index(("user", user_input)) < calls.index(("handler", "tidal locking"))
     assert calls.index(("user", user_input)) < calls.index(("assistant", "brief"))
 
 

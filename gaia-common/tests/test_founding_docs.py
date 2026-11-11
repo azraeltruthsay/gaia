@@ -87,3 +87,17 @@ def test_she_wakes_into_the_resting_gear_and_gear_one_stays_on_request():
     # 6fez: nothing interrupts training — a wake signal leaves MEDITATION alone
     assert validate_transition(S.MEDITATION, T.WAKE_SIGNAL) is None
     assert validate_transition(S.PARKED, T.USER_REQUEST, target=S.AWAKE) == S.AWAKE
+
+
+def test_saying_who_wrote_it_is_not_asking_about_it():
+    # 2026-11-11: her answer to Azrael was set aside for a constitution excerpt.
+    assert named_document("Does that apply to me as well though? I'm Azrael, and I've been the sole "
+                          "human architect. I wrote the constitution, the pillars, the tiers, the layered "
+                          "identity, etc. Would you share your ideas and plans with me?") is None
+    assert named_document("I wrote your constitution. What do you think of it?")[1] == "the GAIA Constitution"
+    assert named_document("I wrote your constitution — what do you think of it?")[1] == "the GAIA Constitution"
+
+
+def test_her_samvega_system_is_its_spec():
+    assert named_document("What do you think of your Samvega system? Have you reviewed that at all?")[1] \
+        == "the Samvega Spec"

@@ -18,7 +18,10 @@ _NAMED = (
      r"|\bdo\s+you\s+(?:really\s+|actually\s+)?(?:have|feel)\s+(?:any\s+)?(?:feelings|emotions)\b",
      "how_your_mind_works.md", "How Your Mind Works"),
     (r"\bcoalition\s+of\s+minds\b", "coalition_of_minds.md", "the Coalition of Minds"),
-    (r"\bsamvega\s+spec\b", "samvega_spec.md", "the Samvega Spec"),
+    # "What do you think of your Samvega system?": with only "samvega spec"
+    # named, it read as "that" = the constitution she'd just quoted, and she
+    # described a Samvega from nowhere (2026-11-11).
+    (r"\bsa[mṃ]vega\b", "samvega_spec.md", "the Samvega Spec"),
     (r"\btiers\s+of\s+(?:cognition)\b", "tiers_of_cognition.md", "the Tiers of Cognition"),
     (r"\btiers\s+of\s+(?:knowledge)\b", "tiers_of_knowledge.md", "the Tiers of Knowledge"),
 )
@@ -39,9 +42,29 @@ _OPINION_RE = re.compile(
 _BACK_RE = re.compile(r"\b(?:it|its|that|this)\b", re.IGNORECASE)
 
 
+# "I wrote the constitution, the pillars, the tiers": who made them, said in
+# passing, not a question about them. Read as one, her answer to the person was
+# set aside and an excerpt of the constitution went out instead (2026-11-11).
+_AUTHORED_RE = re.compile(
+    r"\bI(?:'ve|\s+have|\s+had)?\s+(?:also\s+|personally\s+|originally\s+)?"
+    r"(?:wrote|written|authored|created|built|drafted|designed|made|crafted)\b[^.?!;–—]*",
+    re.IGNORECASE)
+
+
 def named_document(text: str) -> Optional[Tuple[str, str]]:
     """(path, title) of the founding document a message is asking about."""
     text = text or ""
+    rest = _AUTHORED_RE.sub(" ", text)
+    if rest != text:
+        found = _named_in(rest)
+        if found or not refers_back(rest):
+            return found
+        # "I wrote your constitution. What do you think of it?": "it" is the
+        # work named in the clause.
+    return _named_in(text)
+
+
+def _named_in(text: str) -> Optional[Tuple[str, str]]:
     if _SOMEONE_ELSES_RE.search(text):
         return None
     for pattern, filename, title in _NAMED:
