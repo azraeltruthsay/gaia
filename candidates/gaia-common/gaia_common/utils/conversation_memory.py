@@ -62,8 +62,14 @@ ELSEWHERE_PREFIX = "In a separate"   # opens an exchange from another conversati
 # she made it up about was credited with saying it.
 _CORRECTED_RE = re.compile(
     r"^\W*no\b|\b(not|isn't|wasn't)\s+(accurate|right|true|correct)\b|\bthat'?s\s+wrong\b"
-    r"|\bincorrect\b|\byou\s+made\s+that\s+up\b", re.I)
+    r"|\bincorrect\b|\byou\s+made\s+that\s+up\b"
+    # "Andy isn't building you, I am" (2026-11-11): the reply had him as her maker.
+    r"|\b(?:isn'?t|wasn'?t|aren'?t|doesn'?t|didn'?t)\b[^.?!]{0,40},\s*I\s+(?:am|was|do|did)\b", re.I)
 CORRECTED_REPLY = "(they corrected this reply, so it isn't worth repeating)"
+# A reply marked by hand or by a check: it said something nothing backed, so it
+# is held back like a corrected one ("I do recall that conversation now", said
+# after the palace refused the lookup; recalled the next day as her memory).
+HELD_BACK_REPLY = "(this reply said something nothing backed, so it isn't worth repeating)"
 _CHANNELS = (("discord_dm_", "Discord DM"), ("discord_channel_", "Discord channel"),
              ("web_", "web chat"), ("voice_", "voice chat"))
 
@@ -160,7 +166,30 @@ class ConversationMemory:
         for rec, after in zip(records, records[1:]):
             if _CORRECTED_RE.search(after.get("user") or ""):
                 rec["reply"] = CORRECTED_REPLY
+        for rec in records:
+            if rec.get("held_back"):
+                rec["reply"] = HELD_BACK_REPLY
         return records
+
+    def hold_back(self, session_id: str, exchange_id: str, why: str) -> bool:
+        """Mark one exchange's reply as not worth repeating, with the reason.
+        The words stay on file; recall shows the mark instead."""
+        path = self._path(session_id)
+        with _lock:
+            records = list(self._read(path))
+            hit = False
+            for rec in records:
+                if rec.get("id") == exchange_id:
+                    rec["held_back"] = why or "unbacked"
+                    hit = True
+            if not hit:
+                return False
+            tmp = path.with_suffix(".jsonl.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                for rec in records:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            os.replace(tmp, path)
+        return True
 
     def said_in(self, session_id: str, n: int = 4, max_chars: int = 120) -> List[str]:
         """The first things said to her in a session: their words, not hers."""
