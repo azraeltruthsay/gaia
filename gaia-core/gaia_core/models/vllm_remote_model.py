@@ -313,6 +313,28 @@ class VLLMRemoteModel:
         where = f"{self.endpoint} {self.model_name}".lower()
         return "prime" if "prime" in where else "core"
 
+    _label_cache: Dict[str, Any] = {}
+    _LABEL_TTL_S = 60.0
+
+    def _gen_label(self) -> str:
+        """The weights the engine is running ("Gemma4-12B-GAIA-Core-v2-Q6_K"),
+        read from the engines by self_model, not the request's model field: that
+        still said Gemma4-E4B-GAIA-Core-v1 (config) with the 12B running."""
+        role = self._gen_role()
+        hit = self._label_cache.get(role)
+        if hit and time.time() - hit[1] < self._LABEL_TTL_S:
+            return hit[0]
+        label = str(self.model_name)
+        try:
+            from gaia_common.utils.self_model import minds
+            weights = (minds().get(role.capitalize()) or {}).get("weights") or ""
+            if weights:
+                label = re.sub(r"\.gguf$", "", weights.rsplit("/", 1)[-1])
+        except Exception:
+            logger.debug("generation label: engines unreadable, using %s", label, exc_info=True)
+        self._label_cache[role] = (label, time.time())
+        return label
+
     @staticmethod
     def _gen_logger():
         try:
@@ -326,7 +348,7 @@ class VLLMRemoteModel:
         if log is None:
             return
         try:
-            gen_id = log.start_generation(str(self.model_name), self._gen_role(), "reply")
+            gen_id = log.start_generation(self._gen_label(), self._gen_role(), "reply")
             if reasoning:
                 log.log_token(gen_id, f"<think>{reasoning}</think>")
             log.log_token(gen_id, content or "")
@@ -341,7 +363,7 @@ class VLLMRemoteModel:
             return
         gen_id = None
         try:
-            gen_id = log.start_generation(str(self.model_name), self._gen_role(), "stream")
+            gen_id = log.start_generation(self._gen_label(), self._gen_role(), "stream")
         except Exception:
             log = None
         try:
