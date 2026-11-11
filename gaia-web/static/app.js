@@ -800,9 +800,10 @@ function chatPanel() {
         let responseText = '';
 
         const messages = store.getMessages();
-        const streamId = store._nextMsgId++;
+        let streamId = store._nextMsgId++;
         messages.push({ text: '', type: 'gaia streaming', id: streamId, ts: new Date().toISOString() });
         store._save();
+        let replyDone = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -815,6 +816,23 @@ function chatPanel() {
             if (!line.trim()) continue;
             try {
               const chunk = JSON.parse(line);
+              if (chunk.type === 'reply_done') {
+                // Her reply is whole; the stream stays open while her other mind
+                // reads it. Finish this message and free the input now; a
+                // follow-up, if one comes, is a message of its own.
+                const msg = messages.find(m => m.id === streamId);
+                if (msg) { msg.type = 'gaia'; msg.text = responseText.trim() || '(no response)'; }
+                store._save();
+                store.sending = false;
+                window._synthPrimePulse = false;
+                replyDone = true;
+                responseText = '';
+                continue;
+              }
+              if (chunk.type === 'token' && replyDone && !messages.find(m => m.id === streamId && m.type === 'gaia streaming')) {
+                streamId = store._nextMsgId++;
+                messages.push({ text: '', type: 'gaia streaming', id: streamId, ts: new Date().toISOString() });
+              }
               if (chunk.type === 'token') {
                 responseText += chunk.value || '';
                 const msg = messages.find(m => m.id === streamId);
@@ -847,7 +865,7 @@ function chatPanel() {
         }
 
         const finalMsg = messages.find(m => m.id === streamId);
-        if (finalMsg) {
+        if (finalMsg && finalMsg.type === 'gaia streaming') {
           finalMsg.type = 'gaia';
           finalMsg.text = responseText.trim() || '(no response)';
         }

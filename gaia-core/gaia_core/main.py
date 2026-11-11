@@ -1237,6 +1237,11 @@ async def process_packet(packet_data: Dict[str, Any]):
         # waits on this. The other mind adds a follow-up if it seems necessary.
         args = _after_turn.get("second_mind")
         if args:
+            # Her reply is complete. The stream stays open while the other mind
+            # reads it (up to _SECOND_MIND_SECONDS), and the web chat held its
+            # input locked until then: 5 s to her answer, 26 s to the next
+            # message (2026-11-11). Clients may stop waiting here.
+            yield json.dumps({"type": "reply_done"}) + "\n"
             try:
                 said = await asyncio.wait_for(
                     asyncio.get_running_loop().run_in_executor(None, _second_mind_followup, *args),
