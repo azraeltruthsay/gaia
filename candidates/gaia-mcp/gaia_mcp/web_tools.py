@@ -284,7 +284,7 @@ def web_search(params: dict) -> dict:
         if trust.is_blocked(domain):
             filtered_count += 1
             continue
-        snippet = r.get("body") or r.get("snippet", "")
+        snippet = mark_upcoming(r.get("body") or r.get("snippet", ""))
         if r.get("date"):   # news: when, and who said it, read with the words
             snippet = f"{str(r['date'])[:10]}, {r.get('source') or domain}: {snippet}"
         results.append({
@@ -352,6 +352,39 @@ def _absolute_results(results) -> List[dict]:
 
 
 _TIMELIMITS = ("d", "w", "m", "y")
+
+_MONTHS = {m: i for i, names in enumerate((
+    ("jan", "january"), ("feb", "february"), ("mar", "march"), ("apr", "april"), ("may",), ("jun", "june"),
+    ("jul", "july"), ("aug", "august"), ("sep", "sept", "september"), ("oct", "october"),
+    ("nov", "november"), ("dec", "december")), 1) for m in names}
+_MON = "|".join(sorted(_MONTHS, key=len, reverse=True))
+# "November 13", "Nov. 13, 2026", "13 November 2026", "2026-11-13"
+_DATE_RE = re.compile(
+    rf"\b(?:(?P<m1>{_MON})\.?\s+(?P<d1>\d{{1,2}})(?:st|nd|rd|th)?(?:,?\s+(?P<y1>\d{{4}}))?"
+    rf"|(?P<d2>\d{{1,2}})(?:st|nd|rd|th)?\s+(?P<m2>{_MON})\.?(?:,?\s+(?P<y2>\d{{4}}))?"
+    rf"|(?P<y3>\d{{4}})-(?P<m3>\d{{2}})-(?P<d3>\d{{2}}))\b", re.IGNORECASE)
+
+
+def mark_upcoming(text: str, today=None) -> str:
+    """Dates after today marked "(upcoming)". Read "SpaceX will attempt a
+    double catch on November 13", she said on the 11th that it "attempted"
+    one (sn26). A date with no year is taken as this year."""
+    import datetime as _dt
+    today = today or _dt.date.today()
+
+    def _mark(m):
+        try:
+            if m.group("y3"):
+                when = _dt.date(int(m.group("y3")), int(m.group("m3")), int(m.group("d3")))
+            else:
+                month = _MONTHS[(m.group("m1") or m.group("m2")).lower()]
+                day = int(m.group("d1") or m.group("d2"))
+                when = _dt.date(int(m.group("y1") or m.group("y2") or today.year), month, day)
+        except (ValueError, KeyError):
+            return m.group(0)
+        return f"{m.group(0)} (upcoming)" if when > today else m.group(0)
+
+    return _DATE_RE.sub(_mark, text or "")
 
 
 def _ddg_news(query: str, max_results: int, timelimit: str) -> List[dict]:

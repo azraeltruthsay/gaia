@@ -31,3 +31,18 @@ def test_without_recent_it_is_a_plain_search(monkeypatch):
     calls = _patch(monkeypatch, [], [])
     web_tools.web_search({"query": "fusion energy", "recent": "soon"})
     assert calls == [("text", None)]
+
+
+def test_dates_after_today_are_marked_upcoming():
+    """sn26: on 2026-11-11 she said SpaceX "attempted" a catch set for November 13."""
+    import datetime as dt
+    today = dt.date(2026, 11, 11)
+    mark = web_tools.mark_upcoming
+    assert mark("SpaceX will attempt it on Friday, November 13, the company says", today) == \
+        "SpaceX will attempt it on Friday, November 13 (upcoming), the company says"
+    assert mark("targeting Nov. 13, 2026, ...", today) == "targeting Nov. 13, 2026 (upcoming), ..."
+    assert mark("launched on 13 November 2025", today) == "launched on 13 November 2025"
+    assert mark("set for 2026-12-01; flew 2026-11-10", today) == "set for 2026-12-01 (upcoming); flew 2026-11-10"
+    assert mark("It happened on November 11.", today) == "It happened on November 11."
+    assert mark("February 30 isn't a day", today) == "February 30 isn't a day"
+    assert mark("", today) == ""
