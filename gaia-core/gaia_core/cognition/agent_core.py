@@ -3068,10 +3068,22 @@ class AgentCore:
             except Exception as _emb_exc:
                 logger.debug("AgentCore: embed model lazy load failed (non-fatal): %s", _emb_exc)
     
+            # "Recite that poem": name the work it points back at, so the
+            # recitation pipeline fetches it instead of Core writing one.
+            _recite_text = None
+            try:
+                from gaia_core.cognition import recite_referent
+                _recite_text = recite_referent.resolve(
+                    user_input, self.session_manager.get_history(session_id))
+                if _recite_text:
+                    self.logger.info("Recite request points back: '%s' -> '%s'", user_input[:60], _recite_text)
+            except Exception:
+                self.logger.debug("recite referent lookup failed (non-fatal)", exc_info=True)
+
             plan = None
             try:
                 plan = detect_intent(
-                    user_input,
+                    _recite_text or user_input,
                     self.config,
                     lite_llm=lite_llm,
                     full_llm=prime_llm,
@@ -3144,19 +3156,20 @@ class AgentCore:
             # (GAIA_Project-9n8z — the old _fetch_recitation_source streamed
             # the first hit verbatim with no validation at all, which is how
             # a poets.org lesson plan got recited as if it were a poem).
-            if plan.intent == "recitation" and not asks_for_the_words(user_input):
+            if plan.intent == "recitation" and not asks_for_the_words(_recite_text or user_input):
                 # A question about a work, not a request for its words: she
                 # answers it, with the work in hand if she knows it.
                 self.logger.info("Recitation intent on a question about a work — treating as comprehension")
                 plan.intent = "comprehension"
             if plan.intent == "recitation":
-                self.logger.info("Recitation pipeline: fetching source material for '%s'", user_input[:80])
+                _recite_q = _recite_text or user_input
+                self.logger.info("Recitation pipeline: fetching source material for '%s'", _recite_q[:80])
                 try:
-                    _recitation_doc = self._web_retrieve_for_recitation(user_input, session_id)
+                    _recitation_doc = self._web_retrieve_for_recitation(_recite_q, session_id)
                 except Exception:
                     self.logger.warning("Recitation pipeline failed", exc_info=True)
                     _recitation_doc = None
-                _reply = self._recitation_reply(user_input, _recitation_doc)
+                _reply = self._recitation_reply(_recite_q, _recitation_doc)
                 if _recitation_doc:
                     _reply = self._after_reading(user_input, _reply, _recitation_doc, session_id)
                 self.logger.info("Recitation pipeline: direct streaming %d chars (source found: %s)",

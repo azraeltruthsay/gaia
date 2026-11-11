@@ -246,6 +246,11 @@ managed_http_api:
     # Sampling: the request's repetition penalty (repetition_penalty, else
     # 1 + 0.1 x frequency_penalty, else 1.1) now applies on gaia_cpp as on the
     # torch worker, over the whole context.
+    # A CPU load (gpu_layers 0) uses no GPU memory: no offloaded KQV or ops
+    # (GAIA_CPP_CPU_OP_OFFLOAD=1 brings back the GPU-assisted prompt pass, ~1.9
+    # GB). CUDA is never masked in the manager's own process (it initialises
+    # once, so masking blinded later GPU loads); a GPU load that sees no GPU
+    # fails. In the house format a reply also ends at a new <|turn>.
     - endpoint: /kv/stats
       method: GET
       description: "gaia_cpp: cached tokens, snapshots, reuse counters (also in /health → kv)"

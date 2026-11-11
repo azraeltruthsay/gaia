@@ -154,8 +154,11 @@ class LifecycleMachine:
             return None, None
         if mem is None:
             return None, None
-        gaia = sum(t.vram_mb for t in self._snapshot.tiers.values()
-                   if t.device == "gpu")
+        # Every tier's measured VRAM is GAIA's, whatever its device: a CPU-gear
+        # gaia_cpp Core still reserves ~1.9 GB of CUDA compute buffers, and
+        # counting that as an outside tenant refused every wake from park
+        # (2026-11-11). A gear shift unloads it along with the tier.
+        gaia = sum(t.vram_mb for t in self._snapshot.tiers.values())
         return max(0, mem.used_mb - gaia), mem.total_mb
 
     def _write_tenant_guard(self, reason: str, hold: bool = False,
@@ -521,8 +524,7 @@ class LifecycleMachine:
         except Exception:
             mem = None
         if mem is not None:
-            gaia_gpu = sum(t.vram_mb for t in self._snapshot.tiers.values()
-                           if t.device == "gpu")
+            gaia_gpu = sum(t.vram_mb for t in self._snapshot.tiers.values())
             self._snapshot.vram_actual_used_mb = mem.used_mb
             self._snapshot.vram_actual_free_mb = mem.total_mb - mem.used_mb
             self._snapshot.vram_external_mb = max(0, mem.used_mb - gaia_gpu)
