@@ -4,7 +4,6 @@ import textwrap
 
 import pytest
 
-
 _MINIMAL_BLUEPRINT_YAML = textwrap.dedent("""\
     id: test-service
     version: "0.1"
