@@ -81,3 +81,15 @@ def test_parked_call_is_pending_not_success(monkeypatch):
     r = mc.call_jsonrpc(method="shell", params={"action": "run", "command": "nvidia-smi"})
     assert r["ok"] is False and r["pending_approval"] is True
     assert r["action_id"] == "a-9" and r["challenge"] == "NXEDO"
+
+
+def test_a_parked_file_from_another_process_is_answered(tmp_path, monkeypatch):
+    """The penpal sleep task parks its letter for Azrael's DM from a file."""
+    monkeypatch.setattr(ar, "APPROVALS_DIR", tmp_path)
+    ar.park_for("discord_dm_1", "a-9", "EOKYC", "send my letter")
+    s, seen = Sessions(), []
+    reply = ar.handle(s, "discord_dm_1", "CYKOE",
+                      approve=lambda a, c: seen.append((a, c)) or {"ok": True, "result": {"ok": True}})
+    assert seen == [("a-9", "CYKOE")] and reply.startswith("Approved.")
+    assert not list(tmp_path.iterdir())                       # used up
+    assert ar.handle(s, "discord_dm_2", "CYKOE") is None       # only for its session

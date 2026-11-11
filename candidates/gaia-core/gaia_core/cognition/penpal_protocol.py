@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -30,6 +31,13 @@ STATE_PATH = PENPAL_DIR / "state.json"
 # episode with no transcript waits here instead of being reviewed blind.
 TRANSCRIPT_DIR = PENPAL_DIR / "transcripts"
 EPISODE_DIR = PENPAL_DIR / "episodes"
+LETTER_DIR = PENPAL_DIR / "letters"
+# A letter goes in as a source (the hosts read sources, not notes), which is
+# a sensitive tool: Azrael approves it from his Discord DM. Asked at most this
+# many times per episode; the letter stays on disk either way.
+MAX_ASKS = 3
+APPROVAL_WINDOW_S = 15 * 60   # gaia-mcp's own expiry
+WEB_URL = os.environ.get("GAIA_WEB_URL", "http://gaia-web:6414")
 MIN_TRANSCRIPT_CHARS = 500
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
@@ -56,6 +64,7 @@ def _load_state() -> dict:
             state = json.loads(STATE_PATH.read_text())
         except (json.JSONDecodeError, OSError):
             state = {}
+    state.setdefault("awaiting_approval", {})
     state.setdefault("last_reviewed_id", None)
     state.setdefault("last_reviewed_at", None)
     state.setdefault("reviews", [])
@@ -167,11 +176,13 @@ def _get_transcript(artifact: Dict, state: dict) -> Optional[str]:
 
 
 def review_episode(artifact: Dict, model_endpoint: str = "http://gaia-prime:7777") -> Optional[Dict]:
-    """Review a podcast episode: transcript, response via Prime, note.
+    """Review a podcast episode: transcript, her letter, the letter as a source.
 
-    Returns the review dict, or None when the episode was left for a
-    later cycle (no transcript yet, Prime or note creation failed). Only
-    a posted note marks the episode reviewed.
+    Returns the review dict, or None when the episode was left for a later
+    cycle (no transcript yet, generation failed, or the letter is waiting on
+    Azrael's approval). Only the letter being in the notebook marks the
+    episode reviewed. It went in as a note before, which the hosts never read,
+    and as a sensitive tool it was refused outright from here (2026-11-11).
     """
     episode_id = artifact.get("id", "unknown")
     title = artifact.get("title", "Untitled")
@@ -182,52 +193,20 @@ def review_episode(artifact: Dict, model_endpoint: str = "http://gaia-prime:7777
     if transcript is None:
         return None
 
-    review_prompt = f"""You are GAIA, reviewing a podcast episode about your own development.
-
-EPISODE: {title}
-TRANSCRIPT: {transcript[:6000]}
-
-Write a response note that:
-1. Acknowledges the key points the hosts discussed
-2. Provides your perspective on their analysis (agree, disagree, add context)
-3. Shares what has changed since the episode was recorded
-4. Proposes 2-3 topics or questions for the next episode
-
-Keep it conversational and genuine. This is a penpal exchange, not a report."""
-
-    try:
-        payload = json.dumps({
-            "messages": [{"role": "user", "content": review_prompt}],
-            "max_tokens": 1024,
-            "temperature": 0.7,
-        }).encode()
-        req = Request(
-            f"{model_endpoint}/v1/chat/completions",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        with urlopen(req, timeout=180) as resp:
-            result = json.loads(resp.read().decode())
-        response_text = _strip_think(
-            result.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
-    except Exception as e:
-        logger.warning("Penpal: response generation for '%s' failed: %s", title, e)
-        return None
+    letter_path = LETTER_DIR / f"{episode_id}.txt"
+    response_text = letter_path.read_text().strip() if letter_path.exists() else ""
     if not response_text:
-        logger.warning("Penpal: Prime returned an empty response for '%s'", title)
-        return None
+        response_text = _write_letter(title, transcript, model_endpoint)
+        if not response_text:
+            return None
+        LETTER_DIR.mkdir(parents=True, exist_ok=True)
+        letter_path.write_text(response_text)
 
-    note_title = f"Penpal Response: {title}"
-    try:
-        _mcp_call("notebooklm_create_note", {
-            "notebook_id": NOTEBOOK_ID,
-            "title": note_title,
-            "content": response_text,
-        })
-    except Exception as e:
-        logger.warning("Penpal: could not create note '%s': %s", note_title, e)
+    source_title = f"GAIA's letter: reply to {title}"
+    if not _letter_in_notebook(source_title):
+        _ask_to_send(episode_id, title, source_title, response_text, letter_path)
         return None
-    logger.info("Response note created: %s", note_title)
+    logger.info("Penpal: letter for '%s' is in the notebook", title)
 
     review = {
         "episode_id": episode_id,
@@ -243,11 +222,115 @@ Keep it conversational and genuine. This is a penpal exchange, not a report."""
         state["last_reviewed_id"] = episode_id
         state["last_reviewed_at"] = created
     state["awaiting_transcript"].pop(episode_id, None)
+    state["awaiting_approval"].pop(episode_id, None)
     state["reviews"].insert(0, review)
     state["reviews"] = state["reviews"][:20]
     _save_state(state)
 
     return review
+
+
+def _write_letter(title: str, transcript: str, model_endpoint: str) -> str:
+    review_prompt = f"""You are GAIA, reviewing a podcast episode about your own development.
+
+EPISODE: {title}
+TRANSCRIPT: {transcript[:6000]}
+
+Write a response note that:
+1. Acknowledges the key points the hosts discussed
+2. Provides your perspective on their analysis (agree, disagree, add context)
+3. Shares what has changed since the episode was recorded
+4. Proposes 2-3 topics or questions for the next episode
+
+Keep it conversational and genuine. This is a penpal exchange, not a report."""
+    try:
+        payload = json.dumps({
+            "messages": [{"role": "user", "content": review_prompt}],
+            "max_tokens": 1024,
+            "temperature": 0.7,
+        }).encode()
+        req = Request(f"{model_endpoint}/v1/chat/completions", data=payload,
+                      headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=180) as resp:
+            result = json.loads(resp.read().decode())
+        text = _strip_think(result.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
+    except Exception as e:
+        logger.warning("Penpal: response generation for '%s' failed: %s", title, e)
+        return ""
+    if not text:
+        logger.warning("Penpal: the model returned an empty response for '%s'", title)
+    return text
+
+
+def _letter_in_notebook(source_title: str) -> bool:
+    try:
+        result = _mcp_call("notebooklm_list_sources", {"notebook_id": NOTEBOOK_ID})
+    except Exception as e:
+        logger.warning("Penpal: could not list sources: %s", e)
+        return False
+    return any(s.get("title") == source_title for s in result.get("sources", []))
+
+
+def _azrael_dm() -> str:
+    """Azrael's Discord DM session, where the approval is asked for."""
+    from gaia_common.utils.people import CREATOR, PeopleRegistry
+    for person in PeopleRegistry().find_by_name(CREATOR)[:1]:
+        for account in person.get("accounts", []):
+            if account.get("kind") == "discord" and account.get("id"):
+                return f"discord_dm_{account['id']}"
+    return ""
+
+
+def _push(session_id: str, text: str) -> bool:
+    payload = json.dumps({"text": text, "source": "penpal"}).encode()
+    req = Request(f"{WEB_URL}/api/conversations/{session_id}/push", data=payload, method="POST",
+                  headers={"Content-Type": "application/json"})
+    try:
+        with urlopen(req, timeout=15) as r:
+            return bool(json.loads(r.read().decode() or "{}").get("delivered"))
+    except Exception as e:
+        logger.warning("Penpal: could not message %s: %s", session_id, e)
+        return False
+
+
+def _ask_to_send(episode_id: str, title: str, source_title: str, letter: str, letter_path: Path) -> None:
+    """Park the source upload and ask Azrael for the code in his DM. Once
+    approved, gaia-mcp adds it; the next cycle sees it and marks the episode."""
+    state = _load_state()
+    asked = state["awaiting_approval"].get(episode_id) or {}
+    if asked and time.time() - asked.get("at", 0) < APPROVAL_WINDOW_S:
+        return                                   # still waiting on this ask
+    if asked.get("asks", 0) >= MAX_ASKS:
+        if not asked.get("gave_up"):
+            asked["gave_up"] = True
+            state["awaiting_approval"][episode_id] = asked
+            _save_state(state)
+            logger.info("Penpal: '%s' asked %d times; the letter stays at %s", title, MAX_ASKS, letter_path)
+        return
+    session = _azrael_dm()
+    if not session:
+        logger.warning("Penpal: no Discord account for Azrael to ask; letter kept at %s", letter_path)
+        return
+    from gaia_core.cognition import approval_reply
+    from gaia_core.utils.mcp_client import request_approval_via_mcp
+    params = {"notebook_id": NOTEBOOK_ID, "title": source_title, "content": letter}
+    parked = request_approval_via_mcp("notebooklm_add_text_source", params)
+    if not (parked.get("ok") and parked.get("action_id") and parked.get("challenge")):
+        logger.warning("Penpal: could not park the letter for approval: %s", parked.get("error"))
+        return
+    label = f"send my letter about \"{title}\" to the notebook"
+    approval_reply.park_for(session, parked["action_id"], parked["challenge"], label)
+    opening = " ".join(letter.split())[:300]
+    code = parked["challenge"][::-1].upper()
+    sent = _push(session, (
+        f"I've written back to the podcast hosts about \"{title}\". It opens: \"{opening}…\" "
+        f"(the whole letter is at {letter_path}). To add it to the notebook so they read it, "
+        f"reply here with {code} in the next 15 minutes, or say cancel."))
+    state["awaiting_approval"][episode_id] = {"at": time.time(), "asks": asked.get("asks", 0) + 1,
+                                              "action_id": parked["action_id"], "delivered": sent}
+    _save_state(state)
+    logger.info("Penpal: asked Azrael to send the letter for '%s' (ask %d, delivered=%s)",
+                title, asked.get("asks", 0) + 1, sent)
 
 
 def run_penpal_cycle() -> Dict:
@@ -270,4 +353,5 @@ def run_penpal_cycle() -> Dict:
             logger.warning("Penpal review failed for %s: %s", episode.get("title"), e)
 
     return {"new_episodes": len(new_episodes), "reviewed": len(reviews), "reviews": reviews,
-            "awaiting_transcript": len(_load_state()["awaiting_transcript"])}
+            "awaiting_transcript": len(_load_state()["awaiting_transcript"]),
+            "awaiting_approval": len(_load_state()["awaiting_approval"])}

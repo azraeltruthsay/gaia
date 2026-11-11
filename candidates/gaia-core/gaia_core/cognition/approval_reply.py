@@ -9,13 +9,41 @@ the session; the next message that is the reversed code approves it through
 MCP, "cancel" drops it, anything else is an ordinary message.
 """
 import json
+import os
 import re
 import time
+from pathlib import Path
 from typing import Optional
 
 KEY = "pending_mcp_approval"
 TTL_S = 15 * 60  # gaia-mcp's own expiry
 _CANCEL = {"cancel", "deny", "no", "abort", "stop"}
+# Parked by something other than her turn in this process (a sleep task),
+# for a session: a file any process can write. Session meta lives in each
+# SessionManager's own copy and the live one would save over it.
+APPROVALS_DIR = Path(os.environ.get("SHARED_DIR", "/shared")) / "approvals"
+
+
+def _file(session_id: str) -> Path:
+    return APPROVALS_DIR / (re.sub(r"[^A-Za-z0-9_-]", "_", session_id) + ".json")
+
+
+def park_for(session_id: str, action_id: str, challenge: str, label: str) -> None:
+    """Hold a parked action for `session_id`'s next reply, from any process."""
+    if not (session_id and action_id and challenge):
+        return
+    APPROVALS_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = _file(session_id).with_suffix(".tmp")
+    tmp.write_text(json.dumps({"action_id": action_id, "challenge": challenge, "label": label,
+                               "at": time.time()}))
+    os.replace(tmp, _file(session_id))
+
+
+def _parked(session_id: str) -> Optional[dict]:
+    try:
+        return json.loads(_file(session_id).read_text())
+    except (OSError, ValueError):
+        return None
 
 
 def remember(session_manager, session_id: str, action_id: str, challenge: str, label: str) -> None:
@@ -26,7 +54,12 @@ def remember(session_manager, session_id: str, action_id: str, challenge: str, l
 
 
 def _forget(session_manager, session_id: str) -> None:
-    session_manager.set_session_meta(session_id, KEY, None)
+    if session_manager.get_session_meta(session_id, KEY):
+        session_manager.set_session_meta(session_id, KEY, None)
+    try:
+        _file(session_id).unlink()
+    except OSError:
+        pass
 
 
 def _show(result) -> str:
@@ -47,7 +80,7 @@ def _show(result) -> str:
 def handle(session_manager, session_id: str, text: str, approve=None) -> Optional[str]:
     """A reply if `text` answers this session's pending approval, else None."""
     try:
-        pending = session_manager.get_session_meta(session_id, KEY)
+        pending = session_manager.get_session_meta(session_id, KEY) or _parked(session_id)
     except Exception:
         return None
     if not pending:
