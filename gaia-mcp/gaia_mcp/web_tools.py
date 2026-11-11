@@ -213,6 +213,9 @@ def web_search(params: dict) -> dict:
             Automatically adds site: clauses for relevant domains.
         domain_filter (str, optional): Explicit domain to restrict results to.
         max_results (int, optional): Number of results (default 5, max 10).
+        recent (str, optional): 'd', 'w', 'm' or 'y': news from the last day,
+            week, month or year, dated. "Latest news on fusion energy" searched
+            plain "fusion energy" and she answered from Wikipedia's "As of 2025".
 
     Returns dict with keys: ok, results (list of dicts), query, filtered_count.
     """
@@ -266,8 +269,11 @@ def web_search(params: dict) -> dict:
             site_clause = " OR ".join(f"site:{d}" for d in domains[:4])
             effective_query = f"({site_clause}) {query}"
 
-    # Try duckduckgo_search library first, then fallback to Instant Answer API
-    raw_results = _ddg_search(effective_query, max_results)
+    recent = str(params.get("recent") or "").strip().lower()[:1]
+    raw_results = _ddg_news(effective_query, max_results, recent) if recent in _TIMELIMITS else []
+    if not raw_results:
+        # Try duckduckgo_search library first, then fallback to Instant Answer API
+        raw_results = _ddg_search(effective_query, max_results)
 
     # Filter out blocked domains and annotate with trust tier
     results = []
@@ -278,10 +284,13 @@ def web_search(params: dict) -> dict:
         if trust.is_blocked(domain):
             filtered_count += 1
             continue
+        snippet = r.get("body") or r.get("snippet", "")
+        if r.get("date"):   # news: when, and who said it, read with the words
+            snippet = f"{str(r['date'])[:10]}, {r.get('source') or domain}: {snippet}"
         results.append({
             "title": r.get("title", ""),
             "url": url,
-            "snippet": r.get("body") or r.get("snippet", ""),
+            "snippet": snippet,
             "domain": domain,
             "trust_tier": trust.tier_for_domain(domain),
         })
@@ -340,6 +349,21 @@ def _patch_ddgs_text_joining() -> None:
 def _absolute_results(results) -> List[dict]:
     """Only results whose link can actually be fetched."""
     return [r for r in results if (r.get("href") or r.get("url") or "").startswith(("http://", "https://"))]
+
+
+_TIMELIMITS = ("d", "w", "m", "y")
+
+
+def _ddg_news(query: str, max_results: int, timelimit: str) -> List[dict]:
+    """Dated news articles, newest first; empty if the news search fails."""
+    try:
+        from ddgs import DDGS
+        with DDGS() as ddgs:
+            found = _absolute_results(ddgs.news(query, max_results=max_results, timelimit=timelimit))
+        return sorted(found, key=lambda r: str(r.get("date") or ""), reverse=True)
+    except Exception as e:
+        logger.warning("ddgs news search failed (%s); plain search instead", e)
+        return []
 
 
 def _ddg_search(query: str, max_results: int) -> List[dict]:

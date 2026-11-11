@@ -246,9 +246,12 @@ def _deterministic_tool_match(lowered: str, user_input: str = "") -> Optional[Se
                     topic = topic[len(prefix):]
             topic = topic.strip(" .?!")
         query = topic if topic else "today's news headlines"
+        # Dated news, not encyclopedia pages: "latest news on fusion energy"
+        # searched "fusion energy" and got Wikipedia's "As of 2025".
+        recent = "d" if re.search(r"\btoday'?s?\b|\bbreaking\b", lowered) else "m"
         return SelectedTool(
             tool_name="web",
-            params={"action": "search", "query": query},
+            params={"action": "search", "query": query, "recent": recent},
             selection_reasoning="Deterministic match: current-info / news request",
             selection_confidence=0.92,
         )

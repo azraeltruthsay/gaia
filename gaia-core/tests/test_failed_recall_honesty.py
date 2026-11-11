@@ -119,3 +119,12 @@ def test_pronouns_and_a_handed_back_turn_z838():
     assert not hands_back("Which page do you mean?")
     assert not hands_back("What's on your mind? Let me check.")
     assert not hands_back("")
+
+
+def test_a_news_request_asks_for_recent_news():
+    from gaia_core.cognition.tool_selector import _deterministic_tool_match
+    def fn(text):
+        return _deterministic_tool_match(text.lower(), text)
+    sel = fn("Can you look up the latest news on fusion energy?")
+    assert sel.params == {"action": "search", "query": "fusion energy", "recent": "m"}
+    assert fn("What's today's news?").params["recent"] == "d"
