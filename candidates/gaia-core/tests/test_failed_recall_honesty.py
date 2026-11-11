@@ -65,3 +65,15 @@ def test_a_correction_shows_her_what_she_last_said():
     line = correction_line("Oh Andy isn't building you, I am.", msgs)
     assert 'Your last reply was: "He set out to build me."' in line
     assert correction_line("Tell me about Andy", msgs) == ""
+
+
+def test_messages_about_them_and_her_are_not_looked_up_on_the_web():
+    from gaia_core.cognition.agent_core import is_relational
+    for t in ["Does that apply to me as well though? I'm Azrael, and I've been the sole human architect. "
+              "Would you share your ideas and plans with me?",
+              "Do you have anything you'd like to change about yourself?",
+              "I am your creator, you know.", "Oh Andy isn't building you, I am. He's just my friend"]:
+        assert is_relational(t), t
+    for t in ["How many sides does a heptagon have?", "Who was the most well known Roman emperor?",
+              "What's the weather in Paris with the storm?"]:
+        assert not is_relational(t), t

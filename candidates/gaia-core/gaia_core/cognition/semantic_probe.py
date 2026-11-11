@@ -831,6 +831,11 @@ def _find_ungrounded_entities(
             continue
         if phrase.lower() in _GAIA_STOP_WORDS:
             continue
+        # People she knows are hers to describe, not the web's: "Azrael"
+        # brought back pages about the angel, "Anton Snark" a stranger
+        # (92g3, 2026-11-11). The prompt describes them from the registry.
+        if _known_person(phrase):
+            continue
         # Only include entity-like phrases:
         # - Capitalized (proper noun)
         # - Multi-word
@@ -847,6 +852,17 @@ def _find_ungrounded_entities(
             ungrounded.append(phrase)
 
     return ungrounded[:3]  # Cap at 3 to limit latency
+
+
+def _known_person(phrase: str) -> bool:
+    """Whether a phrase is the name of someone in her people registry."""
+    try:
+        from gaia_common.utils.people import PeopleRegistry
+        registry = PeopleRegistry()
+        words = phrase.split()
+        return any(registry.find_by_name(n) for n in {phrase, words[-1] if words else ""} if n)
+    except Exception:
+        return False
 
 
 def _web_search_fallback(entities: List[str]) -> Dict[str, Dict]:

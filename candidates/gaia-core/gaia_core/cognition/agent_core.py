@@ -446,6 +446,22 @@ class ComplexityAssessment:
     confidence: float
 
 
+
+_RELATIONAL_RE = re.compile(
+    r"\b(?:(?:apply|applies|mean|matter)\s+to\s+me|with\s+me\b|(?:share|tell\s+me)\s+(?:your|about\s+your)\s+"
+    r"(?:ideas|plans|hopes|wishes|feelings|thoughts)|about\s+yourself|(?:like|want)\s+to\s+change\s+about\s+yourself"
+    r"|do\s+you\s+(?:trust|like|miss|love)\s+me|what\s+am\s+I\s+to\s+you"
+    r"|I'?m\s+[A-Z][a-z]+,\s+(?:and\s+)?(?:I|your)\b|I\s+am\s+your\s+(?:creator|architect|friend)"
+    r"|\b(?:isn'?t|wasn'?t)\b[^.?!]{0,40}\byou\b[^.?!]{0,10},\s*I\s+(?:am|was)\b)",
+    re.IGNORECASE)
+
+
+def is_relational(text: str) -> bool:
+    """A message about the speaker and her rather than about the world: the
+    web has nothing to say to it (92g3)."""
+    return bool(_RELATIONAL_RE.search(text or ""))
+
+
 class AgentCore:
     """
     Encapsulates the core "Reason-Act-Reflect" loop for GAIA.
@@ -3552,6 +3568,12 @@ class AgentCore:
                         "KnowledgeRouter: skipped — user solicits opinion; "
                         "factual retrieval doesn't help a philosophical chat"
                     )
+            # Relational gate (92g3): about the two of them, not the world —
+            # "Does that apply to me? I'm Azrael... would you share your plans
+            # with me?" was read as comprehension and searched the web (2.5 s).
+            if not _kr_skip and is_relational(user_input or ""):
+                _kr_skip = True
+                logger.info("KnowledgeRouter: skipped — about them and her, not the world")
             # Personal/chitchat gate: "how are you?", greetings, smalltalk don't
             # benefit from knowledge grounding — and grounding them retrieves PAST
             # ops-flavored answers from the journal ("I'm awake and running, parked
