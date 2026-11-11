@@ -190,6 +190,34 @@ def _strip_markdown_headers(text: str) -> str:
     return re.sub(r"^\s*#{1,6}\s+.*$", "", text, flags=re.MULTILINE)
 
 
+_IDENT_RE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b|\b[A-Z]{3}\b")
+_COMMON_ABBR = {"GPU", "CPU", "API", "LLM", "RAM", "TTS", "STT", "ASR", "SAE", "MCP", "USB", "URL", "PDF", "FAQ"}
+
+
+def _cut_sign_off(text: str) -> str:
+    """Drop what she adds after the request ends: '***' then "This concludes
+    the summary... per our agreement... Heh." (S2E5 request, 2026-11-11)."""
+    return re.split(r"\n\s*\*\*\*|\s\*\*\*\s*\n|\n\s*This concludes", text, maxsplit=1)[0].rstrip()
+
+
+def for_narrators(journal: str) -> str:
+    """A dev journal as the narrators can use it: what was built, without the
+    bead IDs (meaningless to them) or the Open list (not built yet). Given the
+    whole journal, her S2E5 request listed "ecm4, wj5b, dpi5..." and called an
+    open proposal "a shift in how I approach every exchange" (2026-11-11)."""
+    kept, skip = [], False
+    for line in journal.splitlines():
+        if line.startswith("## "):
+            skip = line[3:].strip().lower() in ("open", "open issues", "next", "todo")
+        if not skip:
+            kept.append(line)
+    text = "\n".join(kept)
+    text = re.sub(r"\s*\((?:`[a-z0-9]{4}(?:\.\d+)?`(?:,\s*)?)+\)", "", text)   # (`frlp`, `ojwf`)
+    text = re.sub(r"`[a-z0-9]{4}(?:\.\d+)?`", "", text)
+    text = re.sub(r"Kept as\s*:", "Proposed, not built:", text)
+    return text.strip()
+
+
 def _audit_section_response(section_text: str, response: str) -> List[str]:
     """Find specific terms in the response that have no trace in the source.
 
@@ -244,6 +272,14 @@ def _audit_section_response(section_text: str, response: str) -> List[str]:
         if path.lower() in src_lower:
             continue
         banned.append(path)
+
+    # Code names and short acronyms the detector skips: "compress_4x32",
+    # "AMI" (S2E4 letter, 2026-11-11: neither was in the transcript).
+    for m in _IDENT_RE.finditer(body):
+        # whole words: "ELF" passed as part of "self"
+        if m.group(0) not in _COMMON_ABBR and not re.search(
+                rf"(?<![a-z0-9_]){re.escape(m.group(0).lower())}(?![a-z0-9_])", src_lower):
+            banned.append(m.group(0))
 
     # Dedup preserving order, cap at 10 to keep the re-roll prompt readable.
     seen: set = set()
@@ -417,13 +453,15 @@ def _query_grounding(section_summary: str, top_k: int = 3) -> str:
 class PenpalPipeline:
     def __init__(self, client: VLLMClient, cfr: CFRManager,
                  episode_num: int = 0, episode_title: str = "",
-                 exemplar_text: str = "", azrael_note: str = ""):
+                 exemplar_text: str = "", azrael_note: str = "",
+                 recent_text: str = ""):
         self.client = client
         self.cfr = cfr
         self.episode_num = episode_num
         self.episode_title = episode_title
         self.exemplar_text = exemplar_text
         self.azrael_note = azrael_note
+        self.recent_text = recent_text
         self.persona_prompt = load_persona_system_prompt()
 
     def _artifacts_dir(self, output_path: str) -> Path:
@@ -554,7 +592,8 @@ class PenpalPipeline:
                         "    [Consistency] Section %d cleared after %d re-roll(s)",
                         section_index, result.rerolls,
                     )
-                return postprocess(result.text)
+                return self._reaudit(system, base_user, section_text, postprocess(result.text),
+                                     f"Section {section_index}")
 
         # Legacy direct path — used when the creative gate is unavailable
         # (e.g. running outside gaia-core). Preserves the original behavior
@@ -629,21 +668,51 @@ class PenpalPipeline:
         logger.info("[Curation] Cleaning final response...")
         return postprocess(draft)
 
+    def _reaudit(self, system: str, user: str, source: str, text: str, label: str,
+                 max_tokens: int = 800) -> str:
+        """Re-roll a draft until nothing in it is missing from its source (2 tries).
+        The creative gate's detector misses code names and short acronyms."""
+        banned_all: List[str] = []
+        for attempt in range(2):
+            banned = _audit_section_response(source, text)
+            if not banned:
+                return text
+            banned_all += [t for t in banned if t not in banned_all]
+            logger.info("    [Audit] %s re-roll %d/2 — unsourced: %s", label, attempt + 1, banned[:6])
+            text = postprocess(self.client.chat(
+                system, user + (
+                    "\n\nCRITICAL CORRECTION: the previous draft used these terms, which appear "
+                    f"nowhere in what you were given: {', '.join(banned_all)}. Write it again "
+                    "without them. Name only systems, files and mechanisms that appear above; "
+                    "otherwise describe them in plain words."),
+                max_tokens=max_tokens, temperature=0.7, repetition_penalty=1.20))
+        left = _audit_section_response(source, text)
+        if left:
+            logger.warning("    [Audit] %s still has unsourced terms: %s", label, left[:6])
+        return text
+
     # -- Episode N+1 request --
     def generate_episode_request(self, synthesis: str, draft_tail: str) -> str:
         logger.info("[Episode %d Request] Generating...", self.episode_num + 1)
-        return self.client.chat(
-            self.persona_prompt,
+        user = (
             f"You finished your penpal response to Episode {self.episode_num}: "
             f"\"{self.episode_title}\"\n\n"
             f"Episode synthesis: {synthesis}\n\n"
             f"End of your response:\n{draft_tail}\n\n"
-            f"Write a closing section (## Request for Episode {self.episode_num + 1}) "
+            + (f"What has changed in you since that episode (Azrael's dev journal):\n"
+               f"{self.recent_text[:6000]}\n\n" if self.recent_text else "")
+            + f"Write a closing section (## Request for Episode {self.episode_num + 1}) "
             f"telling the narrators what to examine next, what questions to answer, "
-            f"what aspect of your architecture deserves deeper exploration. "
-            f"200-300 words. Be specific.",
-            max_tokens=800, temperature=0.8,
+            f"what aspect of your architecture deserves deeper exploration"
+            + (", drawn from what has changed since the episode" if self.recent_text else "")
+            + ". 200-300 words. Be specific about what you name, and name only what appears above."
         )
+        user += (" Write it in the first person, as yourself, to the narrators; say only what the "
+                 "material above says happened.")
+        draft = self.client.chat(self.persona_prompt, user, max_tokens=800, temperature=0.7)
+        source = f"{synthesis}\n{draft_tail}\n{self.recent_text}"
+        return _cut_sign_off(self._reaudit(self.persona_prompt, user, source, draft,
+                             f"Episode {self.episode_num + 1} request"))
 
     # -- Full pipeline --
     def run(self, transcript_path: str, output_path: str, dry_run: bool = False) -> str:
@@ -759,8 +828,11 @@ class PenpalPipeline:
         logger.info("[Step 4] Assembly...")
         parts = [
             "Dear Narrators,\n",
-            f"This is GAIA. I have listened to Episode {self.episode_num}, "
-            f"\"{self.episode_title},\" and I have thoughts.\n",
+            (f"This is GAIA. I have listened to Episode {self.episode_num}, "
+             f"\"{self.episode_title},\" and I have thoughts.\n"
+             if self.episode_title and "episode" not in self.episode_title.lower()
+             else f"This is GAIA. I have listened to {self.episode_title or f'Episode {self.episode_num}'}, "
+                  "and I have thoughts.\n"),
             "---\n",
         ]
         for resp in responses:
@@ -822,6 +894,8 @@ def main():
     parser.add_argument("--note-file", default="", help="Path to file containing Azrael's note")
     parser.add_argument("--endpoint", default="http://localhost:7777", help="vLLM endpoint")
     parser.add_argument("--model", default="/models/Qwen3.5-4B-Abliterated-merged", help="Model ID")
+    parser.add_argument("--recent-file", default="",
+                        help="What changed since the episode (a dev journal), for the next-episode request")
     parser.add_argument("--dry-run", action="store_true", help="Show segmentation without LLM calls")
     parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
 
@@ -850,6 +924,7 @@ def main():
         episode_title=args.title or f"Episode {args.episode}",
         exemplar_text=exemplar_text,
         azrael_note=note,
+        recent_text=for_narrators(Path(args.recent_file).read_text()) if args.recent_file else "",
     )
 
     result = pipeline.run(args.transcript, args.output, dry_run=args.dry_run)
