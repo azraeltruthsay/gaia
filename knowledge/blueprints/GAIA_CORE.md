@@ -118,3 +118,20 @@ constants, not live config knobs. Documenting that honestly here rather
 than presenting them as active behavior. Also added the Accuracy Notice
 above after finding this document describes a retired model architecture
 (see GAIA_Project-okhq).
+
+## Recent Implementation Updates
+
+### 2026-11-04T07:27:56Z
+
+Detected 2 item(s) not reflected in blueprint:
+- `constant:WHOLE_DOC_CHARS`
+- `constant:PLAIN_DOC_CHARS`
+
+*Auto-detected by blueprint_validation sleep task.*
+
+### 2026-11-06T06:47:34Z
+
+Detected 1 item(s) not reflected in blueprint:
+- `constant:WHOLE_FALLBACK_CHARS`
+
+*Auto-detected by blueprint_validation sleep task.*
