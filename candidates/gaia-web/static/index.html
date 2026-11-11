@@ -376,6 +376,42 @@
             </div>
           </template>
         </div>
+        <!-- Live generation, the lower three quarters of the column (2026-11-11):
+             the same feed as Logs → Generation, a tail of /logs/generation_stream.jsonl. -->
+        <div class="chat-gen" x-data="generationPanel()">
+          <div class="chat-gen-toolbar">
+            <span class="chat-gen-title">Generation</span>
+            <span class="gen-status" :class="connected ? 'gen-status-on' : ''" x-text="connected ? 'Live' : 'Off'"></span>
+            <div style="flex:1"></div>
+            <button class="gen-filter-btn" :class="roleFilter === '' ? 'active' : ''" @click="setFilter('')">All</button>
+            <button class="gen-filter-btn" :class="roleFilter === 'core' ? 'active' : ''" @click="setFilter('core')">Core</button>
+            <button class="gen-filter-btn" :class="roleFilter === 'prime' ? 'active' : ''" @click="setFilter('prime')">Prime</button>
+            <button class="gen-clear-btn" @click="clear()" title="Clear">&#10005;</button>
+          </div>
+          <div class="gen-output chat-gen-output" x-ref="genOutput" @scroll="handleScroll()">
+            <template x-for="(entry, idx) in entries" :key="idx">
+              <div>
+                <template x-if="entry.type === 'header'">
+                  <div class="gen-entry gen-header" :class="'gen-role-' + entry.role">
+                    <span class="gen-model-badge" x-text="entry.role"></span>
+                    <span class="gen-phase" x-text="entry.phase"></span>
+                    <span class="gen-ts" x-text="(entry.ts || '').slice(11, 19)"></span>
+                  </div>
+                </template>
+                <template x-if="entry.type === 'stream'">
+                  <pre class="gen-entry gen-stream" x-html="entry.html"></pre>
+                </template>
+                <template x-if="entry.type === 'summary'">
+                  <div class="gen-entry gen-summary">
+                    <span x-text="entry.tokens + ' tok'"></span>
+                    <span x-text="(entry.elapsed / 1000).toFixed(1) + 's'"></span>
+                  </div>
+                </template>
+              </div>
+            </template>
+            <div class="gen-empty" x-show="entries.length === 0">Waiting for her next words...</div>
+          </div>
+        </div>
       </aside>
     </div>
   </section>

@@ -276,7 +276,7 @@ class VLLMRemoteModel:
             payload["chat_template_kwargs"] = {"enable_thinking": True}
 
         if stream:
-            return self._stream_chat(payload)
+            return self._logged_stream(self._stream_chat(payload))
 
         start = time.time()
         resp = self._post("/v1/chat/completions", payload)
@@ -286,6 +286,8 @@ class VLLMRemoteModel:
         # Gemma 4's native thought channel, split off by the engine (h1ok).
         reasoning = resp["choices"][0]["message"].get("reasoning_content")
         self._log_usage(resp, duration)
+        self._log_whole(content, reasoning, duration,
+                        (resp.get("usage") or {}).get("completion_tokens"))
 
         return {
             "choices": [{
@@ -299,6 +301,65 @@ class VLLMRemoteModel:
             "model": self.model_name,
             "provider": "vllm_remote",
         }
+
+    # ── Mission Control's live generation view ──────────────────────────────
+    # Every call to Core or Prime passes here, streamed or not. The view read
+    # /logs/generation_stream.jsonl, written only by the model pool's forward
+    # path and ExternalVoice; turns stopped going through either and it fell
+    # silent on 2026-11-04. Those two skip a model that logs itself.
+    logs_generation = True
+
+    def _gen_role(self) -> str:
+        where = f"{self.endpoint} {self.model_name}".lower()
+        return "prime" if "prime" in where else "core"
+
+    @staticmethod
+    def _gen_logger():
+        try:
+            from gaia_core.utils.generation_stream_logger import get_logger
+            return get_logger()
+        except Exception:
+            return None
+
+    def _log_whole(self, content, reasoning, duration: float, tokens=None) -> None:
+        log = self._gen_logger()
+        if log is None:
+            return
+        try:
+            gen_id = log.start_generation(str(self.model_name), self._gen_role(), "reply")
+            if reasoning:
+                log.log_token(gen_id, f"<think>{reasoning}</think>")
+            log.log_token(gen_id, content or "")
+            log.end_generation(gen_id, tokens=tokens, elapsed_ms=int(duration * 1000))
+        except Exception:
+            logger.debug("generation log failed (non-fatal)", exc_info=True)
+
+    def _logged_stream(self, chunks):
+        log = self._gen_logger()
+        if log is None:
+            yield from chunks
+            return
+        gen_id = None
+        try:
+            gen_id = log.start_generation(str(self.model_name), self._gen_role(), "stream")
+        except Exception:
+            log = None
+        try:
+            for chunk in chunks:
+                if log is not None:
+                    try:
+                        text = chunk["choices"][0].get("delta", {}).get("content")
+                        if text:
+                            log.log_token(gen_id, text)
+                    except Exception:
+                        pass
+                yield chunk
+        finally:
+            if log is not None:
+                try:
+                    log.end_generation(gen_id)
+                except Exception:
+                    pass
 
     # ── LoRA adapter support ─────────────────────────────────────────────────
 

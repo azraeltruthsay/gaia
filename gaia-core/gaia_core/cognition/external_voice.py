@@ -166,7 +166,9 @@ class ExternalVoice:
         _gen_id = None
         try:
             from gaia_core.utils.generation_stream_logger import get_logger as _get_gen_logger
-            _gen_logger = _get_gen_logger()
+            _gen_logger = None if getattr(self.model, "logs_generation", False) else _get_gen_logger()
+            if _gen_logger is None:
+                raise RuntimeError("the model logs its own generation")
             _model_name = getattr(self.model, "model_name", None) or getattr(self.model, "_model_path", "unknown")
             _gen_id = _gen_logger.start_generation(str(_model_name), self.source, "response")
         except Exception:

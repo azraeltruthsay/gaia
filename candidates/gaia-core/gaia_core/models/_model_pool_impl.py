@@ -1249,6 +1249,8 @@ class ModelPool:
                 result = model(messages)
             else:
                 raise ValueError(f"Model '{name}' does not support chat completions")
+            if getattr(model, "logs_generation", False):
+                return result
             return self._tee_to_generation_log(result, name, role)
         except RuntimeError as primary_exc:
             # Primary model failed during inference — try fallback chain
@@ -1281,6 +1283,8 @@ class ModelPool:
                         continue
                     logger.info("Inference fallback to '%s' succeeded", fallback_name)
                     self._fallback_local.name = fallback_name
+                    if getattr(fallback_model, "logs_generation", False):
+                        return result
                     return self._tee_to_generation_log(result, fallback_name, role)
                 except Exception as fb_exc:
                     logger.warning("Fallback '%s' also failed: %s", fallback_name, fb_exc)

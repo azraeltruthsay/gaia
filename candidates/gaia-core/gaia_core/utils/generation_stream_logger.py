@@ -77,12 +77,16 @@ class GenerationStreamLogger:
             "t": text,
         })
 
-    def end_generation(self, gen_id: str) -> None:
-        """Finalise a generation with summary stats."""
+    def end_generation(self, gen_id: str, tokens: int | None = None,
+                       elapsed_ms: int | None = None) -> None:
+        """Finalise a generation with summary stats. A reply logged whole,
+        after the fact, passes its real token count and duration."""
         meta = self._generations.pop(gen_id, None)
         now = time.time()
-        elapsed_ms = int((now - meta["t0"]) * 1000) if meta else 0
-        tokens = meta["tokens"] if meta else 0
+        if elapsed_ms is None:
+            elapsed_ms = int((now - meta["t0"]) * 1000) if meta else 0
+        if tokens is None:
+            tokens = meta["tokens"] if meta else 0
         self._write({
             "ts": _iso(now),
             "event": "gen_end",
