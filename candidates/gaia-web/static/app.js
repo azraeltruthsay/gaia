@@ -4779,6 +4779,46 @@ function terminalPanel() {
 
 /* ── Generation Stream Panel ────────────────────────────────────── */
 
+// One generation stream per page, shared by every panel that shows it (the
+// Logs tab and the Chat page's column). A browser holds at most six open
+// connections per host over plain HTTP; each live stream keeps one, and with
+// a second Mission Control tab open over WireGuard the newest streams queued
+// and never arrived (2026-11-11). Panels filter Core / Prime themselves.
+const _genHub = {
+  es: null,
+  state: 'idle',            // 'connecting' | 'open' | 'retrying'
+  subs: new Set(),
+  subscribe(sub) {
+    this.subs.add(sub);
+    if (!this.es) this._open();
+    sub.onState(this.state);
+    return () => {
+      this.subs.delete(sub);
+      if (!this.subs.size && this.es) { _unregisterSSE(this.es); this.es.close(); this.es = null; this.state = 'idle'; }
+    };
+  },
+  _set(state) { this.state = state; for (const s of this.subs) s.onState(state); },
+  _open() {
+    this._set('connecting');
+    this.es = _registerSSE(new EventSource('/api/generation/stream'));
+    this.es.onopen = () => this._set('open');
+    this.es.onmessage = (ev) => {
+      let rec;
+      try { rec = JSON.parse(ev.data); } catch (_) { return; }
+      for (const s of this.subs) s.onRecord(rec);
+    };
+    this.es.onerror = () => {
+      if (this.es && this.es.readyState === EventSource.CLOSED) {
+        _unregisterSSE(this.es); this.es = null;
+        this._set('retrying');
+        setTimeout(() => { if (this.subs.size && !this.es) this._open(); }, 2000);
+      } else {
+        this._set('connecting');    // the browser is reconnecting on its own
+      }
+    };
+  },
+};
+
 function generationPanel() {
   return {
     entries: [],          // ring buffer of display entries
@@ -4787,39 +4827,37 @@ function generationPanel() {
     scrollLocked: true,   // auto-scroll to bottom
     roleFilter: '',       // '' = all, 'core', 'prime'
     connected: false,
-    _es: null,            // EventSource
+    streamState: 'connecting',
+    _unsub: null,
+    _skipped: new Set(),  // gen_ids of the role filtered out
     _currentBuf: '',      // accumulator for in-progress generation
     _inThink: false,      // inside <think> block
 
+    get statusText() {
+      return { open: 'Live', connecting: 'Connecting…', retrying: 'Reconnecting…' }[this.streamState] || 'Off';
+    },
+
     init() {
-      this._connect();
+      this._skipped = new Set();
+      this._unsub = _genHub.subscribe({
+        onState: (st) => { this.streamState = st; this.connected = st === 'open'; },
+        onRecord: (rec) => this._handleRecord(rec),
+      });
     },
 
     destroy() {
-      if (this._es) { _unregisterSSE(this._es); this._es.close(); this._es = null; }
-    },
-
-    _connect() {
-      const url = '/api/generation/stream' + (this.roleFilter ? `?role=${this.roleFilter}` : '');
-      if (this._es) { _unregisterSSE(this._es); this._es.close(); }
-      this._es = _registerSSE(new EventSource(url));
-      this.connected = true;
-
-      this._es.onmessage = (ev) => {
-        try {
-          const rec = JSON.parse(ev.data);
-          this._handleRecord(rec);
-        } catch (_) {}
-      };
-
-      this._es.onerror = () => {
-        this.connected = false;
-        // reconnect after 2s
-        setTimeout(() => this._connect(), 2000);
-      };
+      if (this._unsub) { this._unsub(); this._unsub = null; }
     },
 
     _handleRecord(rec) {
+      if (rec.event === 'gen_start' && this.roleFilter && rec.role !== this.roleFilter) {
+        this._skipped.add(rec.gen_id);
+        return;
+      }
+      if (this._skipped.has(rec.gen_id)) {
+        if (rec.event === 'gen_end') this._skipped.delete(rec.gen_id);
+        return;
+      }
       if (rec.event === 'gen_start') {
         // Flush any pending buffer
         this._flushBuffer();
@@ -4835,10 +4873,12 @@ function generationPanel() {
           ts: rec.ts,
         });
       } else if (rec.event === 'token') {
+        if (rec.gen_id !== this.currentGenId) return;
         this._currentBuf += (rec.t || '');
         // Re-render the current generation entry
         this._updateCurrentEntry();
       } else if (rec.event === 'gen_end') {
+        if (rec.gen_id !== this.currentGenId) return;
         this._flushBuffer();
         this._push({
           type: 'summary',
@@ -4898,7 +4938,8 @@ function generationPanel() {
     setFilter(role) {
       this.roleFilter = role;
       this.entries = [];
-      this._connect();
+      this._skipped = new Set();
+      this.currentGenId = null;
     },
 
     handleScroll() {
