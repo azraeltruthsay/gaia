@@ -1896,6 +1896,15 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 method=tc.tool_name,
                                 params=tool_params,
                             ))
+                        # The allowlist above only works when the packet carries
+                        # one (Discord's don't); MCP saying the tool doesn't exist
+                        # is the same finding, and her reply then goes out as she
+                        # wrote it, not as "converse(close) failed" (2026-11-11).
+                        import re as _re_nf
+                        if not rpc_result.get("ok") and _re_nf.search(
+                                r"not a valid, implemented tool|Tool '[^']*' not found",
+                                str(rpc_result.get("error") or "")):
+                            _is_invalid_tool = True
                         # Outcome ledger (gjuh.2): what the model's own call did.
                         from gaia_core.cognition import outcome_ledger as _ol
                         _ol.record(
@@ -2109,7 +2118,9 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 max_tokens=_CONT_MAX_TOKENS,
                                 temperature=_CONT_TEMPERATURE,
                             )
-                            if cont_gen and not rpc_result.get("ok"):
+                            if cont_gen and not rpc_result.get("ok") and not _is_invalid_tool:
+                                # An invented tool (converse(close), 2026-11-11) ran nothing;
+                                # her words go out as she wrote them, not as a failure notice.
                                 from gaia_core.cognition.reply_scrub import honest_about_failure
                                 cont_gen = honest_about_failure(cont_gen, _tool_label)
                             if cont_gen:
