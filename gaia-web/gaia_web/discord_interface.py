@@ -481,6 +481,38 @@ class DiscordInterface:
                     logger.warning("!translate error: %s", exc)
                 await ctx.send("An error occurred during translation.")
 
+        @bot.command(name="new", aliases=["fresh", "newsession"])
+        async def new_session(ctx):
+            """Start a new conversation, as the web chat's "new session" does.
+
+            A DM is one session for good, so everything said in it kept coming
+            back into her replies. This archives it (summary to long-term
+            memory), clears the active history and its vector index, and leaves
+            the messages on Discord. The palace's record stays: asked about
+            something from before, she can still look it up.
+            """
+            if ctx.guild is not None:
+                await ctx.send("This only works in a DM.")
+                return
+            session_id = f"discord_dm_{ctx.author.id}"
+            async with ctx.typing():
+                try:
+                    core_client = await get_core_client()
+                    resp = await core_client.delete(f"{self.core_endpoint}/api/sessions/{session_id}",
+                                                    timeout=300.0)
+                except Exception:
+                    logger.warning("!new: session reset call failed for %s", session_id, exc_info=True)
+                    await ctx.send("I couldn't reach my core to start a new conversation. Try again in a moment.")
+                    return
+            if resp.status_code == 404:
+                await ctx.send("We're already at the start of a new conversation.")
+            elif resp.status_code >= 400:
+                logger.warning("!new: reset of %s returned %s", session_id, resp.status_code)
+                await ctx.send("I couldn't start a new conversation just now; nothing was changed.")
+            else:
+                await ctx.send("New conversation. What we said before won't come into my replies by "
+                               "itself, but ask me about it and I can still look it up.")
+
         @bot.command(name="forget")
         async def forget_dm(ctx):
             """Delete all of GAIA's own messages in this DM and reset her memory of it.
