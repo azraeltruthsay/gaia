@@ -363,13 +363,15 @@ def build_from_packet(packet: CognitionPacket, *args, **kwargs) -> List[Dict]:
     """The prompt for a packet, told who she is speaking with (751u)."""
     messages = _assemble_from_packet(packet, *args, **kwargs)
     try:
-        from gaia_common.utils.people import mentioned_line, speaker_line
+        from gaia_common.utils.people import creator_line, mentioned_line, speaker_line
         _sid = getattr(getattr(packet, "header", None), "session_id", "") or ""
         line = speaker_line(_sid)
         _asked = getattr(getattr(packet, "content", None), "original_prompt", "") or ""
         _named = mentioned_line(_asked, _sid)
         if _named:
             line = f"{line} {_named}".strip()
+        if line:   # a person's session, not her own loops (i4vn)
+            line = f"{line} {creator_line(_sid, _asked)}".strip()
         _fix = correction_line(_asked, messages)
         if _fix:
             line = f"{line}\n\n{_fix}".strip()

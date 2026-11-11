@@ -1138,10 +1138,25 @@ def _get_palace():
     return _palace_instance
 
 
+# i4vn live: told "my pronouns are xe/xem", Core sent palace(store,
+# topic="Tamsin's pronouns", content="xe/xem") and got "text parameter
+# required". Accept the words she reaches for, with the topic kept.
+_TEXT_SYNONYMS = ("text", "content", "memory", "note", "fact", "value", "body")
+
+
+def _store_text(params: dict) -> str:
+    text = next((v.strip() for k in _TEXT_SYNONYMS
+                 if isinstance(v := (params or {}).get(k), str) and v.strip()), "")
+    topic = (params or {}).get("topic") or (params or {}).get("subject") or ""
+    if text and isinstance(topic, str) and topic.strip() and topic.strip().lower() not in text.lower():
+        text = f"{topic.strip()}: {text}"
+    return text
+
+
 def _palace_store_impl(params: dict) -> dict:
     """Store a memory in the palace."""
     palace = _get_palace()
-    text = params.get("text", "")
+    text = _store_text(params)
     if not text:
         return {"ok": False, "error": "text parameter required"}
     source = params.get("source", "conversation")

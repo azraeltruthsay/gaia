@@ -39,6 +39,16 @@ Thanks Tired Busy Well Home Going Trying Looking Working Curious Confused Excite
 GAIA Gaia
 """.split())
 
+# "My pronouns are she/her", "I use they/them pronouns", "I go by he/him".
+# 2026-11-11: with nothing on file she guessed ("the architect herself").
+_PRONOUNS_RE = re.compile(
+    r"\b(?:my\s+pronouns\s+(?:are|is)|pronouns\s*:|I\s+(?:use|go\s+by|prefer))\s+"
+    r"([a-z]{1,5}/[a-z]{1,6}(?:/[a-z]{1,6})?)\b", re.IGNORECASE)
+# What she's told when none are on file: no guess at anyone's gender.
+NO_PRONOUNS = "their pronouns aren't on record, so for them use their name or \"they\""
+
+CREATOR = "Azrael"     # named as her creator in every system prompt
+
 _lock = threading.Lock()
 
 
@@ -57,6 +67,23 @@ def claimed_name(text: str) -> Optional[str]:
         if match.group(1) not in _NOT_A_NAME:
             return match.group(1)
     return None
+
+
+def stated_pronouns(text: str) -> Optional[str]:
+    """"she/her" from "btw my pronouns are she/her", if someone says theirs."""
+    m = _PRONOUNS_RE.search(text or "")
+    return m.group(1).lower() if m else None
+
+
+def pronoun_words(person: Dict) -> str:
+    """How she is told to speak of someone: their stated pronouns, or no guess.
+    By name: "use their name or they" left Azrael "he" 2 in 3 (i4vn)."""
+    name = ((person or {}).get("names") or ["them"])[0]
+    pronouns = (person or {}).get("pronouns")
+    if pronouns:
+        return f"{name}'s pronouns are {pronouns}; use them when you speak of {name}"
+    return (f"{name} hasn't told you their pronouns, so when you speak of {name}, "
+            f"say \"{name}\" or \"they\"")
 
 
 class PeopleRegistry:
@@ -145,6 +172,29 @@ class PeopleRegistry:
             self._write(person)
         return True
 
+    def set_pronouns(self, person_id: str, pronouns: str, source: str = "") -> Optional[Dict]:
+        """Pronouns as the person gave them. Never inferred from a name."""
+        pronouns = (pronouns or "").strip().lower()
+        with _lock:
+            person = self.get(person_id)
+            if not person or not pronouns:
+                return None
+            if person.get("pronouns") != pronouns:
+                person.update(pronouns=pronouns, pronouns_source=source, pronouns_at=_now())
+                self._write(person)
+        return person
+
+    def note_pronouns(self, session_id: str, text: str) -> Optional[Dict]:
+        """The speaker saying their own pronouns, kept for whoever the session is."""
+        pronouns = stated_pronouns(text)
+        if not pronouns:
+            return None
+        person = self.for_session(session_id)
+        if not person:
+            return None
+        logger.info("People: %s gave their pronouns", person["id"])
+        return self.set_pronouns(person["id"], pronouns, source=f"said so in {session_id}")
+
     def note_claim(self, session_id: str, text: str) -> Optional[Dict]:
         """A web or voice session that says who it is, taken at its word. A
         name already on file is that person; a new name is a new person."""
@@ -174,11 +224,12 @@ def speaker_line(session_id: str, registry: Optional[PeopleRegistry] = None) -> 
     except OSError:
         return ""
     if not person:
-        return ("You don't know who you're speaking with yet. If they tell you, take their word for it.")
+        return ("You don't know who you're speaking with yet. If they tell you, take their word for it. "
+                "Until they say theirs, " + NO_PRONOUNS + ".")
     line = f"You are speaking with {person['names'][0]}"
     if person.get("relationship"):
         line += f", {person['relationship']}"
-    line += ". Speak to them as \"you\", never in the third person."
+    line += ". Speak to them as \"you\", never in the third person. " + pronoun_words(person) + "."
     facts = [f"{f['text']} (per {f.get('told_by') or 'someone'})"
              for f in person.get("facts", []) if f.get("status") != "wrong"][:5]
     if facts:
@@ -212,6 +263,7 @@ def mentioned_line(text: str, session_id: str = "", registry: Optional[PeopleReg
             line = f"{person['names'][0]}, whom they mention"
             if person.get("relationship"):
                 line += f", is {person['relationship']}"
+            line += f". {pronoun_words(person)}"
             met = [a for a in person.get("accounts", []) if a.get("kind") == "session"]
             if met:
                 line += (f"; you have spoken with them before, in a {channel_of(met[0].get('id', ''))}"
@@ -222,3 +274,18 @@ def mentioned_line(text: str, session_id: str = "", registry: Optional[PeopleReg
             lines.append(line + ".")
             break
     return " ".join(lines)
+
+
+def creator_line(session_id: str = "", text: str = "", registry: Optional[PeopleRegistry] = None) -> str:
+    """Azrael's pronouns, or that there are none on file, when Azrael is neither
+    the speaker nor named in the message: the system prompt names Azrael as
+    her creator every turn, and she guessed "He's also friends with Andy" (i4vn)."""
+    try:
+        registry = registry or PeopleRegistry()
+        found = registry.find_by_name(CREATOR)
+        speaker = registry.for_session(session_id) if session_id else None
+    except OSError:
+        return ""
+    if len(found) != 1 or (speaker or {}).get("id") == found[0].get("id") or re.search(rf"\b{CREATOR}\b", text or ""):
+        return ""
+    return pronoun_words(found[0]) + "."

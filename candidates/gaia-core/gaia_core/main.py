@@ -2506,6 +2506,17 @@ async def process_packet(packet_data: Dict[str, Any]):
         _last = next((m.get("content") or "" for m in reversed(_agent_core.session_manager.get_history(_sid) or [])
                       if isinstance(m, dict) and m.get("role") == "assistant"), "") if _sid else ""
         _drop_apology = unfounded_apology(_asked, _last)
+        # i4vn: who they are and their pronouns, kept as the message arrives so
+        # this turn is told them. Saved by code, so "I've noted your pronouns"
+        # is a write that happened, not one to correct.
+        from gaia_common.utils.conversation_memory import recorded as _recorded
+        if _sid and _recorded(_sid):
+            from gaia_common.utils.people import PeopleRegistry as _People
+            _people = _People()
+            _people.note_claim(_sid, _asked)
+            if _people.note_pronouns(_sid, _asked):
+                from gaia_core.cognition import outcome_ledger as _ol
+                _ol.note_call(_sid, "people", "set_pronouns", True)
         if _drop_apology:
             logger.info("session=%s: corrected about what her last reply never said; an opening apology is cut", _sid)
     except Exception:
