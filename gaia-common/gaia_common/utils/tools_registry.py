@@ -632,6 +632,18 @@ TOOLS = {
             "required": ["notebook_id", "title"]
         }
     },
+    "notebooklm_add_text_source": {
+        "description": "Add text to a NotebookLM notebook as a source, which the Audio Overview hosts read (a note they don't). Requires approval. Use for a penpal letter to the hosts.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "notebook_id": {"type": "string", "description": "The notebook ID."},
+                "title": {"type": "string", "description": "Title of the source."},
+                "content": {"type": "string", "description": "The text."}
+            },
+            "required": ["notebook_id", "title", "content"]
+        }
+    },
     # --- Audio Inbox Tools ---
     "audio_inbox_status": {
         "description": "Check the current state of the audio inbox daemon. Returns whether it's running, current file being processed, queue depth, and files completed.",

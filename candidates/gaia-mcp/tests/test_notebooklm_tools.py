@@ -14,10 +14,10 @@ import gaia_mcp.notebooklm_tools as nbt
 def reset_singleton():
     """Reset the module-level client singleton between tests."""
     nbt._client = None
-    nbt._client_entered = False
+    nbt._client_ctx = None
     yield
     nbt._client = None
-    nbt._client_entered = False
+    nbt._client_ctx = None
 
 
 def _mock_notebook(id="nb-1", title="Test Notebook", sources_count=5):
@@ -325,3 +325,51 @@ class TestNotebookLMErrors:
         result = await nbt.notebooklm_list_notebooks({})
         assert result["ok"] is False
         assert "Auth expired" in result["error"]
+
+
+class TestNotebookLMAddTextSource:
+    """uapc: the hosts read sources, not notes; her letters go in as one."""
+
+    @pytest.mark.asyncio
+    async def test_missing_content(self):
+        with pytest.raises(ValueError):
+            await nbt.notebooklm_add_text_source({"notebook_id": "nb-1", "title": "Letter", "content": " "})
+
+    @pytest.mark.asyncio
+    @patch.object(nbt, "_get_client")
+    async def test_adds_and_waits(self, mock_gc):
+        mock_client = AsyncMock()
+        src = MagicMock(); src.id = "s-1"
+        ready = MagicMock(); ready.is_ready = True
+        mock_client.sources.add_text = AsyncMock(return_value=src)
+        mock_client.sources.wait_until_ready = AsyncMock(return_value=ready)
+        mock_gc.return_value = mock_client
+        result = await nbt.notebooklm_add_text_source(
+            {"notebook_id": "nb-1", "title": "Letter", "content": "Dear Narrators"})
+        assert result == {"ok": True, "notebook_id": "nb-1",
+                          "source": {"id": "s-1", "title": "Letter", "ready": True}}
+        mock_client.sources.add_text.assert_awaited_once_with("nb-1", "Letter", "Dear Narrators")
+
+    def test_it_needs_approval(self):
+        from gaia_mcp.tools import SENSITIVE_TOOLS
+        assert "notebooklm_add_text_source" in SENSITIVE_TOOLS
+
+
+class TestNotebookLMClientSetup:
+    """notebooklm-py 0.8: from_storage() is a context to enter, not awaited."""
+
+    @pytest.mark.asyncio
+    async def test_enters_the_storage_context(self, monkeypatch):
+        client = MagicMock(); client.is_connected = True
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=client)
+        ctx.__aexit__ = AsyncMock(return_value=None)
+        cls = MagicMock(); cls.from_storage = MagicMock(return_value=ctx)
+        monkeypatch.setattr(nbt, "NotebookLMClient", cls, raising=False)
+        monkeypatch.setattr(nbt, "_notebooklm_available", True)
+        assert await nbt._get_client() is client
+        assert await nbt._get_client() is client       # reused while connected
+        cls.from_storage.assert_called_once()
+        await nbt._close_client()
+        ctx.__aexit__.assert_awaited_once()
+        assert nbt._client is None

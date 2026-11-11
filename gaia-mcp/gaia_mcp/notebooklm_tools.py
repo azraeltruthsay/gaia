@@ -11,6 +11,7 @@ Provides 9 tools:
   - notebooklm_download_audio   (read + transcription relay)
   - notebooklm_generate_audio   (write)
   - notebooklm_create_note      (write, sensitive — requires MCP approval)
+  - notebooklm_add_text_source  (write, sensitive — requires MCP approval)
 
 All calls go through the async NotebookLMClient (httpx-based).
 Auth via Playwright storage state at NOTEBOOKLM_HOME/storage_state.json.
@@ -64,49 +65,44 @@ _GAIA_AUDIO_URL = os.getenv("GAIA_AUDIO_URL", "http://gaia-audio:8080")
 # ---------------------------------------------------------------------------
 
 _client: Optional[Any] = None
-_client_entered = False
+_client_ctx: Optional[Any] = None
 
 
 async def _get_client() -> Any:
-    """Lazily initialise and return the NotebookLMClient singleton."""
-    global _client, _client_entered
+    """Lazily initialise and return the NotebookLMClient singleton.
+
+    notebooklm-py 0.8 (uapc): from_storage() returns a context to enter, not
+    a coroutine to await (that form is deprecated, gone in 1.0). 0.3.x could
+    not reach notebook.google.com at all ("CSRF token not found").
+    """
+    global _client, _client_ctx
 
     if not _notebooklm_available:
         raise RuntimeError(
             "notebooklm-py is not installed. Add it to requirements.txt and rebuild."
         )
 
-    if _client is not None and _client_entered:
-        if _client.is_connected:
-            return _client
-        # Connection dropped — re-enter
-        try:
-            await _client.__aenter__()
-            return _client
-        except Exception:
-            _client = None
-            _client_entered = False
+    if _client is not None and _client.is_connected:
+        return _client
+    await _close_client()
 
     storage_path = os.getenv("NOTEBOOKLM_STORAGE_STATE")
-    _client = await NotebookLMClient.from_storage(
-        path=storage_path, timeout=45
-    )
-    await _client.__aenter__()
-    _client_entered = True
+    _client_ctx = NotebookLMClient.from_storage(path=storage_path, timeout=45)
+    _client = await _client_ctx.__aenter__()
     logger.info("NotebookLM client initialised (storage=%s)", storage_path or "default")
     return _client
 
 
 async def _close_client():
     """Shut down the client (call on app shutdown)."""
-    global _client, _client_entered
-    if _client is not None and _client_entered:
+    global _client, _client_ctx
+    if _client_ctx is not None:
         try:
-            await _client.__aexit__(None, None, None)
+            await _client_ctx.__aexit__(None, None, None)
         except Exception:
             pass
     _client = None
-    _client_entered = False
+    _client_ctx = None
 
 
 def _err(msg: str) -> dict:
@@ -242,6 +238,12 @@ async def notebooklm_list_notes(params: dict) -> dict:
         return _err(str(e))
 
 
+def _kind(artifact: Any) -> str:
+    """'audio', not 'ArtifactType.AUDIO' (notebooklm-py 0.8 str enums)."""
+    kind = getattr(artifact, "kind", "")
+    return str(getattr(kind, "value", kind) or "").lower()
+
+
 async def notebooklm_list_artifacts(params: dict) -> dict:
     """List artifacts (audio overviews, reports, quizzes, etc.) in a notebook."""
     notebook_id = (params.get("notebook_id") or "").strip()
@@ -256,10 +258,7 @@ async def notebooklm_list_artifacts(params: dict) -> dict:
 
         # Optional type filter
         if artifact_type:
-            artifacts = [
-                a for a in artifacts
-                if str(getattr(a, "kind", "")).lower() == artifact_type
-            ]
+            artifacts = [a for a in artifacts if _kind(a) == artifact_type]
 
         return {
             "ok": True,
@@ -268,8 +267,8 @@ async def notebooklm_list_artifacts(params: dict) -> dict:
                 {
                     "id": a.id,
                     "title": a.title,
-                    "kind": str(a.kind) if hasattr(a, "kind") else None,
-                    "status": a.status.name if hasattr(a.status, "name") else str(a.status),
+                    "kind": _kind(a) or None,
+                    "status": getattr(a, "status_str", None) or str(a.status),
                     "is_completed": a.is_completed,
                     "created_at": str(a.created_at) if a.created_at else None,
                 }
@@ -447,7 +446,8 @@ async def notebooklm_generate_audio(params: dict) -> dict:
             "ok": True,
             "notebook_id": notebook_id,
             "task_id": getattr(status, "task_id", None),
-            "status": getattr(status, "state", "pending"),
+            "status": str(getattr(status, "status", "pending")),
+            "error": getattr(status, "error", None),
             "message": "Audio generation started successfully."
         }
     except NotebookLMError as e:
@@ -484,4 +484,33 @@ async def notebooklm_create_note(params: dict) -> dict:
         }
     except NotebookLMError as e:
         logger.error("notebooklm_create_note failed: %s", e)
+        return _err(str(e))
+
+
+async def notebooklm_add_text_source(params: dict) -> dict:
+    """Add text to a notebook as a source. Requires approval.
+
+    A source is what the Audio Overview hosts read; a note isn't. Her penpal
+    letters go in this way, so the hosts answer them (uapc, 2026-11-11)."""
+    notebook_id = (params.get("notebook_id") or "").strip()
+    title = (params.get("title") or "").strip()
+    content = params.get("content") or ""
+    if not notebook_id:
+        raise ValueError("notebook_id is required")
+    if not title:
+        raise ValueError("title is required")
+    if not content.strip():
+        raise ValueError("content is required")
+
+    try:
+        client = await _get_client()
+        source = await client.sources.add_text(notebook_id, title, content)
+        ready = await client.sources.wait_until_ready(notebook_id, source.id, timeout=300)
+        return {
+            "ok": True,
+            "notebook_id": notebook_id,
+            "source": {"id": source.id, "title": title, "ready": bool(getattr(ready, "is_ready", False))},
+        }
+    except NotebookLMError as e:
+        logger.error("notebooklm_add_text_source failed: %s", e)
         return _err(str(e))

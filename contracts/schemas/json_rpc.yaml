@@ -75,7 +75,7 @@ error_response:
 #
 # Sensitive tools: ai_write, write_file, run_shell, memory_rebuild_index,
 # promotion_create_request, kanka_create_entity, kanka_update_entity,
-# notebooklm_create_note, audio_listen_start
+# notebooklm_create_note, notebooklm_add_text_source, audio_listen_start
 #
 # If GAIA_MCP_BYPASS=true, approval is skipped.
 

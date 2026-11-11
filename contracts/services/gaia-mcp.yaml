@@ -63,7 +63,8 @@ json_rpc_methods:
   # Tools registered in gaia_common.utils.tools_registry
   # Sensitive tools (require approval): ai_write, write_file, run_shell,
   # memory_rebuild_index, promotion_create_request, kanka_create_entity,
-  # kanka_update_entity, notebooklm_create_note, audio_listen_start
+  # kanka_update_entity, notebooklm_create_note, notebooklm_add_text_source,
+  # audio_listen_start
   #
   # 2026-07-02 audit: the public-facing interface is now 14 DOMAIN tools
   # (file, shell, web, knowledge, palace, audio, study, introspect,
@@ -149,6 +150,10 @@ json_rpc_methods:
 
   - method: notebooklm_create_note
     description: "Create a note in NotebookLM"
+    sensitive: true
+
+  - method: notebooklm_add_text_source
+    description: "Add text to NotebookLM as a source (what the Audio Overview reads)"
     sensitive: true
 
   - method: audio_listen_start

@@ -344,6 +344,7 @@ DOMAIN_TOOLS: Dict[str, dict] = {
             "chat": {"params": {"notebook_id": "string", "question": "string"}, "maps_to": "notebooklm_chat"},
             "create_note": {"params": {"notebook_id": "string", "title": "string", "content": "string?"}, "maps_to": "notebooklm_create_note", "sensitive": True},
             "download_audio": {"params": {"notebook_id": "string", "artifact_id": "string?"}, "maps_to": "notebooklm_download_audio"},
+            "add_source": {"params": {"notebook_id": "string", "title": "string", "content": "string"}, "maps_to": "notebooklm_add_text_source", "sensitive": True},
         },
     },
 
