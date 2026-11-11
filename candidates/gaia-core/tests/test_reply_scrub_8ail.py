@@ -117,13 +117,16 @@ def test_other_events_pass_and_release_what_was_held():
     ]
 
 
-@pytest.mark.parametrize("prose", ["Paris.", "[nano]\n\nParis.", "Hi! Paris.", "It is Paris, of course."])
+@pytest.mark.parametrize("prose", ["Paris.", "[nano]\n\nParis.", "Hi! Paris.", "It is Paris, of course.",
+                                   "Nice to meet you, Tamsin. What's on your mind?",      # z838
+                                   "Hi Tamsin, I've noted that. What can I help you with?",
+                                   "Nice to meet you. Is there anything I can get started on?"])
 def test_an_answer_before_a_tool_call(prose):
     assert answered_already(prose)
 
 
 @pytest.mark.parametrize("prose", ["", "[nano]\n\n", "I'll fetch the page.", "Let me check.", "Hi there!",
-                                   "Sure!", "Here is what I found:", "Paris is the", "Is it Paris?",
+                                   "Sure!", "Here is what I found:", "Paris is the", "Is it Paris?", "Which page do you mean?", "Shall I look it up?",
                                    "Good question.", "[Core]\n\nI'll fetch the URL and read it. "])
 def test_not_an_answer_before_a_tool_call(prose):
     assert not answered_already(prose)

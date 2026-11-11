@@ -451,6 +451,8 @@ _RELATIONAL_RE = re.compile(
     r"\b(?:(?:apply|applies|mean|matter)\s+to\s+me|with\s+me\b|(?:share|tell\s+me)\s+(?:your|about\s+your)\s+"
     r"(?:ideas|plans|hopes|wishes|feelings|thoughts)|about\s+yourself|(?:like|want)\s+to\s+change\s+about\s+yourself"
     r"|do\s+you\s+(?:trust|like|miss|love)\s+me|what\s+am\s+I\s+to\s+you"
+    # "My pronouns are xe/xem" was sent to the web for grounding (z838).
+    r"|\bmy\s+pronouns\b|\bI\s+go\s+by\s+[a-z]+/"
     r"|I'?m\s+[A-Z][a-z]+,\s+(?:and\s+)?(?:I|your)\b|I\s+am\s+your\s+(?:creator|architect|friend)"
     r"|\b(?:isn'?t|wasn'?t)\b[^.?!]{0,40}\byou\b[^.?!]{0,10},\s*I\s+(?:am|was)\b)",
     re.IGNORECASE)

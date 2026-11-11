@@ -1585,7 +1585,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                 finally:
                     clear_turn()
 
-            from gaia_core.cognition.reply_scrub import answered_already
+            from gaia_core.cognition.reply_scrub import answered_already, hands_back
             _pending_tool_calls = []
             _seen_tool_calls = set()  # Dedup repeated tool calls
             _tool_texts_for_observer: list = []
@@ -1706,7 +1706,10 @@ async def process_packet(packet_data: Dict[str, Any]):
                                         _suppressed_tool_count += 1
                                         continue
                                     # Plain chat she has already answered needs no tool (8ail).
-                                    if _plain_chat and pe.tool_name != "expand_context" and answered_already("".join(response_pieces)):
+                                    # A reply that hands the turn back needs none, whatever the intent (z838).
+                                    _so_far = "".join(response_pieces)
+                                    if pe.tool_name != "expand_context" and (
+                                            (_plain_chat and answered_already(_so_far)) or hands_back(_so_far)):
                                         logger.info("Tool call '%s' dropped: already answered", pe.tool_name)
                                         _suppressed_tool_count += 1
                                         continue

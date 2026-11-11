@@ -106,3 +106,16 @@ def test_an_apology_for_what_she_never_said_is_cut():
     assert kinds[-1] == "reply_done"
     text, _ = asyncio.run(run(lines, False))
     assert "My mistake" in text
+
+
+
+def test_pronouns_and_a_handed_back_turn_z838():
+    from gaia_core.cognition.agent_core import is_relational
+    from gaia_core.cognition.reply_scrub import hands_back
+    assert is_relational("Hi GAIA, I'm Tamsin. My pronouns are xe/xem.")
+    assert is_relational("I go by they/them, by the way")
+    assert hands_back("Nice to meet you, Tamsin. What's on your mind?")
+    assert hands_back("[Core]\n\nI've noted that. Is there anything I can help you with?")
+    assert not hands_back("Which page do you mean?")
+    assert not hands_back("What's on your mind? Let me check.")
+    assert not hands_back("")

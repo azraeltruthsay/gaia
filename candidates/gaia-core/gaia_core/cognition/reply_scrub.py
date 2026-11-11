@@ -152,6 +152,24 @@ _NOT_AN_ANSWER_RE = re.compile(
 )
 
 
+# A reply that ends by handing the turn back: "What can I help with?". Told
+# someone's pronouns, she said "Nice to meet you, Tamsin. What's on your mind?",
+# then called a memory tool, and the continuation said it all again (z838).
+_HANDS_BACK_RE = re.compile(
+    r"^(?:so,?\s+|and\s+)?(?:what\s+(?:can|shall|should)\s+(?:I|we)\s+(?:help|do|get|start)|how\s+can\s+I\s+help"
+    r"|what'?s\s+on\s+your\s+mind|what\s+brings\s+you|is\s+there\s+anything|anything\s+(?:else\s+)?I\s+can"
+    r"|what\s+(?:are\s+you|would\s+you\s+like)\s+(?:up\s+to|working\s+on|to\s+(?:do|talk|work))"
+    r"|what\s+can\s+I\s+get\s+(?:started\s+on|into))", re.IGNORECASE)
+
+
+def hands_back(prose: str) -> bool:
+    """Whether a reply ends by giving the turn back to them. A tool call after
+    that is never wanted, whatever the intent: "Hi GAIA, I'm Tamsin. My
+    pronouns are xe/xem." read as identity, not chat, so 8ail's check didn't run."""
+    text = (prose or "").strip()
+    return bool(text) and text[-1] == "?" and bool(_HANDS_BACK_RE.search(re.split(r"(?<=[.!?])\s+", text)[-1]))
+
+
 def answered_already(prose: str) -> bool:
     """Whether what she wrote before a tool call already answers: 'Paris.' does,
     'I'll fetch the page.' and 'Hi there!' don't. The call after an answer
@@ -162,6 +180,8 @@ def answered_already(prose: str) -> bool:
         if not m:
             break
         text = text[m.end():].strip()
+    if hands_back(text):
+        return True
     if not text or text[-1] not in ".!":
         return False
     last = re.split(r"(?<=[.!?])\s+", text)[-1]
