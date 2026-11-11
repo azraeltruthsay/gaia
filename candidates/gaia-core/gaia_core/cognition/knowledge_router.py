@@ -874,7 +874,7 @@ def recall_conversation(session_id: str, question: str,
     At most top_k come back, up to two of them from elsewhere.
     """
     from gaia_common.utils.conversation_memory import (
-        ELSEWHERE_PREFIX, ConversationMemory, channel_of)
+        ELSEWHERE_PREFIX, ConversationMemory, channel_of, local_day)
     from gaia_core.cognition.nlu.intent_detection import conversation_topic, names_in_context
 
     t0 = time.time()
@@ -900,14 +900,14 @@ def recall_conversation(session_id: str, question: str,
             ctx.results.append(GroundingResult(
                 source="conversation", trust_tier="own_record",
                 content=(f"{ELSEWHERE_PREFIX} {channel_of(h.get('session_id', ''))} on "
-                         f"{(h.get('ts') or '')[:10]}, {_who(h.get('session_id', ''))} said: \"{h.get('user', '')}\""
+                         f"{local_day(h.get('ts') or '')}, {_who(h.get('session_id', ''))} said: \"{h.get('user', '')}\""
                          f" — and you replied: \"{(h.get('reply') or '')[:300]}\"{also}"),
                 title="another conversation", retrieved_at=h.get("ts", ""),
                 score=float(h.get("score", 0.0) or 0.0), query=topic))
         for h in hits[:top_k - len(elsewhere)]:
             ctx.results.append(GroundingResult(
                 source="conversation", trust_tier="own_record",
-                content=(f"On {(h.get('ts') or '')[:10]}, they said: \"{h.get('user', '')}\""
+                content=(f"On {local_day(h.get('ts') or '')}, they said: \"{h.get('user', '')}\""
                          f" — and you replied: \"{h.get('reply', '')}\""),
                 title="earlier conversation", retrieved_at=h.get("ts", ""),
                 score=float(h.get("score", 0.0) or 0.0), query=topic))

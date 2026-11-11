@@ -103,6 +103,23 @@ def _exchange_id(session_id: str, user: str, reply: str, ts: str) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
 
+def local_day(ts: str) -> str:
+    """The day a UTC timestamp fell on where Azrael is (GAIA_USER_TZ). Andy's
+    chat on the evening of 2026-11-04 was recorded 2026-11-05 UTC, and she gave
+    the 5th; he corrected her to the 4th (2026-11-11)."""
+    if not ts:
+        return ""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        when = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            return ts[:10]
+        return when.astimezone(ZoneInfo(os.environ.get("GAIA_USER_TZ", "America/Los_Angeles"))).date().isoformat()
+    except Exception:
+        return ts[:10]
+
+
 def channel_of(session_id: str) -> str:
     """Where a session happened, in words."""
     return next((name for prefix, name in _CHANNELS if (session_id or "").startswith(prefix)),

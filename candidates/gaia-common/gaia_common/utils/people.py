@@ -251,7 +251,7 @@ def mentioned_line(text: str, session_id: str = "", registry: Optional[PeopleReg
         speaker = registry.for_session(session_id) if session_id else None
     except OSError:
         return ""
-    from gaia_common.utils.conversation_memory import channel_of
+    from gaia_common.utils.conversation_memory import channel_of, local_day
     lines, seen = [], {(speaker or {}).get("id")}
     for m in _NAME_WORD_RE.finditer(text or ""):
         for name in (m.group(0), m.group(0).split()[0]):
@@ -260,17 +260,21 @@ def mentioned_line(text: str, session_id: str = "", registry: Optional[PeopleReg
                 continue
             person = found[0]
             seen.add(person.get("id"))
-            line = f"{person['names'][0]}, whom they mention"
+            name = person['names'][0]
+            line = f"{name}, whom they mention"
             if person.get("relationship"):
                 line += f", is {person['relationship']}"
-            line += f". {pronoun_words(person)}"
             met = [a for a in person.get("accounts", []) if a.get("kind") == "session"]
             if met:
-                line += (f"; you have spoken with them before, in a {channel_of(met[0].get('id', ''))}"
-                         f" on {(met[0].get('linked_at') or '')[:10]}")
+                # First, before anything else: with the pronoun clause between
+                # "is Azrael's friend" and "you have spoken with them", she
+                # said "I haven't met them yet" (2026-11-11).
+                line += (f". You have met {name}: you spoke with them in a "
+                         f"{channel_of(met[0].get('id', ''))} on {local_day(met[0].get('linked_at') or '')}")
             facts = [f["text"] for f in person.get("facts", []) if f.get("status") != "wrong"][:3]
             if facts:
                 line += ". What you've been told about them: " + "; ".join(facts)
+            line += f". {pronoun_words(person)}"
             lines.append(line + ".")
             break
     return " ".join(lines)

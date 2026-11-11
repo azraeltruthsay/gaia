@@ -23,7 +23,8 @@ def test_a_known_person_named_in_passing_is_described(tmp_path):
     reg.create("Andy", [{"kind": "session", "id": "web_3132edcd"}], relationship="Azrael's friend")
     reg.create("Azrael", [{"kind": "discord", "id": "596925786208993283"}], relationship="who created you")
     line = mentioned_line("Tomorrow I'm going to see Andy again", "discord_dm_596925786208993283", reg)
-    assert line.startswith("Andy, whom they mention, is Azrael's friend. Andy hasn't told you their pronouns, so when you speak of Andy, say \"Andy\" or \"they\"; you have spoken with them before, in a web chat")
+    assert line.startswith("Andy, whom they mention, is Azrael's friend. You have met Andy: you spoke with them in a web chat on ")
+    assert line.index("You have met Andy") < line.index("hasn't told you their pronouns")
     assert mentioned_line("I'm Azrael, as you know", "discord_dm_596925786208993283", reg) == ""
     assert mentioned_line("Nobody Known here", "", reg) == ""
 
@@ -63,3 +64,14 @@ def test_azrael_is_described_when_spoken_of_by_someone_else(tmp_path):
     assert creator_line("discord_dm_596925786208993283", "hi", reg) == ""     # Azrael speaking
     assert creator_line("web_7523de87", "Azrael says hi", reg) == ""          # the mention line has it
     assert creator_line("web_7523de87", "hi", PeopleRegistry(tmp_path / "empty")) == ""
+
+
+
+def test_days_are_azraels_days(monkeypatch):
+    """Andy's chat on the evening of 2026-11-04 (Pacific) was recorded on the 5th, UTC."""
+    from gaia_common.utils.conversation_memory import local_day
+    monkeypatch.setenv("GAIA_USER_TZ", "America/Los_Angeles")
+    assert local_day("2026-11-05T02:02:03.243971+00:00") == "2026-11-04"
+    assert local_day("2026-11-05T16:28:02+00:00") == "2026-11-05"
+    assert local_day("2026-11-05") == "2026-11-05"
+    assert local_day("") == ""
