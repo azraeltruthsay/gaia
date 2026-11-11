@@ -3,6 +3,10 @@ import re
 from typing import Optional, Tuple
 
 DOCS_DIR = "/knowledge/system_reference/core_documents"
+# Who wrote them, at the head of what she reads. Asked "Who came up with your
+# Samvega system?" she said "I did, it's my own piece of my own nervous
+# system", 3 in 3: nothing she read said otherwise (idf5, 2026-11-11).
+AUTHORSHIP = "(Written by Azrael, who designed and built you and the systems this describes.)"
 _NAMED = (
     (r"\bdeclaration\b(?:\s+of\s+artisanal)?", "declaration_of_artisanal_intelligence.md", "the Declaration of Artisanal Intelligence"),
     (r"\bconstitution\b", "gaia_constitution.md", "the GAIA Constitution"),
@@ -38,7 +42,9 @@ _ANY_ARTICLE_RE = re.compile(r"\barticle\b", re.IGNORECASE)
 _OPINION_RE = re.compile(
     r"\b(?:think|thoughts?|feel|opinion|make\s+of|agree|disagree|like|believe|reflect|judge?ment|judge|impression|conscious|consciousness|sentient|self-aware|feelings|emotions|"
     r"problematic|would\s+rather|should\s+change|wrong\s+with|flaw\w*|"
-    r"assess\w*|evaluate|critique)\b", re.IGNORECASE)
+    r"assess\w*|evaluate|critique|"
+    # "why does it exist?": the reason in her own words, as a view is (idf5).
+    r"why|purpose|point\s+of)\b", re.IGNORECASE)
 _BACK_RE = re.compile(r"\b(?:it|its|that|this)\b", re.IGNORECASE)
 
 

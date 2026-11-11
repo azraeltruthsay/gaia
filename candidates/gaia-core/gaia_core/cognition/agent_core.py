@@ -8013,6 +8013,8 @@ RESULT: COMPLEX (reason: <brief reason>)
         opinion = asks_opinion(user_input)
         whole = wants_whole(user_input) or (opinion and not asked_articles(user_input))
         part = content[:WHOLE_DOC_CHARS] if whole else excerpt_for(content, user_input, limit=7000)
+        from gaia_common.utils.founding_docs import AUTHORSHIP
+        part = f"{AUTHORSHIP}\n\n{part}"
         if not hasattr(self, "_docs_read"):
             self._docs_read = {}
         self._docs_read[session_id] = named

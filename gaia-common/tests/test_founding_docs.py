@@ -101,3 +101,9 @@ def test_saying_who_wrote_it_is_not_asking_about_it():
 def test_her_samvega_system_is_its_spec():
     assert named_document("What do you think of your Samvega system? Have you reviewed that at all?")[1] \
         == "the Samvega Spec"
+
+
+def test_why_it_exists_is_hers_to_put_in_her_own_words():
+    assert asks_opinion("Who came up with your Samvega system, and why does it exist?")
+    from gaia_common.utils.founding_docs import AUTHORSHIP
+    assert "Azrael" in AUTHORSHIP
