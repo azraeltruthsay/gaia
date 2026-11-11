@@ -76,6 +76,11 @@ _CHANNELS = (("discord_dm_", "Discord DM"), ("discord_channel_", "Discord channe
 _lock = threading.Lock()
 
 
+def is_correction(text: str) -> bool:
+    """Whether a message disputes what she last said."""
+    return bool(_CORRECTED_RE.search(text or ""))
+
+
 def default_root() -> Path:
     palace = os.environ.get("MEMPAL_PALACE_PATH", "/knowledge/mempalace")
     return Path(palace) / DIRNAME

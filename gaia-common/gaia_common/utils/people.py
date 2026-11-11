@@ -184,3 +184,41 @@ def speaker_line(session_id: str, registry: Optional[PeopleRegistry] = None) -> 
     if facts:
         line += " What you've been told about them: " + "; ".join(facts) + "."
     return line
+
+
+_NAME_WORD_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b")
+
+
+def mentioned_line(text: str, session_id: str = "", registry: Optional[PeopleRegistry] = None) -> str:
+    """What she knows of the people a message names, other than the speaker.
+
+    2026-11-11: "tomorrow I'm probably going to see Andy again" — she knew
+    Andy as Azrael's friend, but only the speaker was ever described to her,
+    so she guessed, 3 in 3, that Andy was her architect."""
+    try:
+        registry = registry or PeopleRegistry()
+        speaker = registry.for_session(session_id) if session_id else None
+    except OSError:
+        return ""
+    from gaia_common.utils.conversation_memory import channel_of
+    lines, seen = [], {(speaker or {}).get("id")}
+    for m in _NAME_WORD_RE.finditer(text or ""):
+        for name in (m.group(0), m.group(0).split()[0]):
+            found = registry.find_by_name(name)
+            if len(found) != 1 or found[0].get("id") in seen:
+                continue
+            person = found[0]
+            seen.add(person.get("id"))
+            line = f"{person['names'][0]}, whom they mention"
+            if person.get("relationship"):
+                line += f", is {person['relationship']}"
+            met = [a for a in person.get("accounts", []) if a.get("kind") == "session"]
+            if met:
+                line += (f"; you have spoken with them before, in a {channel_of(met[0].get('id', ''))}"
+                         f" on {(met[0].get('linked_at') or '')[:10]}")
+            facts = [f["text"] for f in person.get("facts", []) if f.get("status") != "wrong"][:3]
+            if facts:
+                line += ". What you've been told about them: " + "; ".join(facts)
+            lines.append(line + ".")
+            break
+    return " ".join(lines)

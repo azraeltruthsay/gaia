@@ -55,3 +55,13 @@ def test_his_own_conversation_comes_back_not_a_retelling(monkeypatch):
                         "Last week on Wednesday you spoke with Andy through the Web Chat interface on "
                         "Mission Control. Do you remember?")
     assert [h["session_id"] for h in got] == ["web_andy"]
+
+
+def test_a_correction_shows_her_what_she_last_said():
+    from gaia_core.utils.prompt_builder import correction_line
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "Do you know Andy?"},
+            {"role": "assistant", "content": "He set out to build me."},
+            {"role": "user", "content": "Oh Andy isn't building you, I am."}]
+    line = correction_line("Oh Andy isn't building you, I am.", msgs)
+    assert 'Your last reply was: "He set out to build me."' in line
+    assert correction_line("Tell me about Andy", msgs) == ""

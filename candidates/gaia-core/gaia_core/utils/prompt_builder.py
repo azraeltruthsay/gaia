@@ -339,12 +339,40 @@ def _slim_history(packet) -> List[Dict]:
     return msgs
 
 
+def correction_line(asked: str, messages: List[Dict]) -> str:
+    """When they are putting her right: what she actually said last, so she
+    answers to that. Corrected, she said "my mistake" for things her last
+    reply never said, 3 in 3, and once took on the very error ("glad to hear
+    yours is the architect"); where it had said it, she took the correction
+    and then made up what Andy had done for her (vjc6, 2026-11-11)."""
+    from gaia_common.utils.conversation_memory import is_correction
+    if not is_correction(asked):
+        return ""
+    last = next((m.get("content") or "" for m in reversed(messages[:-1] if messages else [])
+                 if m.get("role") == "assistant" and (m.get("content") or "").strip()
+                 and m.get("content") != "(no reply)"), "")
+    if not last:
+        return ""
+    last = " ".join(last.split())[:400]
+    return (f"They are putting something right. Your last reply was: \"{last}\" "
+            "Answer to what that reply actually says: where it got something wrong, own it in a few plain "
+            "words; where it already agrees with them, say so. Then carry on from what they said.")
+
+
 def build_from_packet(packet: CognitionPacket, *args, **kwargs) -> List[Dict]:
     """The prompt for a packet, told who she is speaking with (751u)."""
     messages = _assemble_from_packet(packet, *args, **kwargs)
     try:
-        from gaia_common.utils.people import speaker_line
-        line = speaker_line(getattr(getattr(packet, "header", None), "session_id", "") or "")
+        from gaia_common.utils.people import mentioned_line, speaker_line
+        _sid = getattr(getattr(packet, "header", None), "session_id", "") or ""
+        line = speaker_line(_sid)
+        _asked = getattr(getattr(packet, "content", None), "original_prompt", "") or ""
+        _named = mentioned_line(_asked, _sid)
+        if _named:
+            line = f"{line} {_named}".strip()
+        _fix = correction_line(_asked, messages)
+        if _fix:
+            line = f"{line}\n\n{_fix}".strip()
         if line and messages and messages[0].get("role") == "system":
             messages[0] = {**messages[0], "content": f"{messages[0]['content']}\n\n{line}"}
     except Exception:
