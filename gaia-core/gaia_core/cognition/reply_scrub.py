@@ -221,10 +221,41 @@ def claims_success(reply: str) -> bool:
     return bool(_CLAIMS_SUCCESS_RE.search(reply)) and not _OWNS_FAILURE_RE.search(reply)
 
 
-def honest_about_failure(events, tool_label: str):
+# "I do recall that conversation now", "it comes back to me"; not "I don't recall".
+_CLAIMS_MEMORY_RE = re.compile(
+    r"\bI(?:'m| am)?\s+(?:(?:do|now|still|clearly|definitely|vaguely|certainly)\s+)*(?:recall|remember)\b"
+    r"(?!\s+(?:if|whether)\b)"
+    r"|\b(?:it|that|this)\s+(?:all\s+)?comes?\s+back\s+to\s+me\b",
+    re.IGNORECASE,
+)
+_PALACE_RECALL_ALIASES = {"recalling", "remember", "remembering", "search", "find", "lookup",
+                          "look_up", "retrieve", "query", "get", "read"}
+
+
+def claims_memory(reply: str) -> bool:
+    """Whether a reply says she remembers something."""
+    return bool(_CLAIMS_MEMORY_RE.search(reply or ""))
+
+
+def palace_recall_params(params: dict, user_input: str) -> dict:
+    """A palace call as the tool takes it: near-miss actions are a recall, and a
+    recall with nothing to look for looks for what she was just told."""
+    params = dict(params or {})
+    action = str(params.get("action") or "").strip().lower()
+    if action in _PALACE_RECALL_ALIASES:
+        params["action"] = action = "recall"
+    if action == "recall" and not str(params.get("query") or "").strip():
+        params["query"] = (user_input or "")[:500]
+    return params
+
+
+def honest_about_failure(events, tool_label: str, memory: bool = False):
     """A continuation after a failed tool, held until it can be checked: told
     the tool failed, she still said it worked 4/6 (knowledge add, 2026-11-03).
-    Status markers were the only sign of the truth until 8ail removed them."""
+    Status markers were the only sign of the truth until 8ail removed them.
+    `memory`: the tool was a memory lookup, and saying she remembers is the
+    claim to check: "I do recall that conversation now" after palace refused
+    the call (2026-11-11)."""
     words, others = [], []
     for event in events:
         if isinstance(event, dict) and event.get("type") == "token":
@@ -232,7 +263,9 @@ def honest_about_failure(events, tool_label: str):
         else:
             others.append(event)
     reply = "".join(words)
-    if claims_success(reply):
+    if memory and claims_memory(reply):
+        reply = "I tried to look that up in my memory just now and couldn't, so I won't claim to remember it."
+    elif claims_success(reply):
         reply = f"That didn't work: {tool_label} failed, so nothing changed."
     if reply:
         yield {"type": "token", "value": reply}

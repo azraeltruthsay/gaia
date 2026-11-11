@@ -343,8 +343,10 @@ def extract_candidate_phrases(text: str) -> List[str]:
             phrases.append(p)
 
     # 1. Quoted strings: "foo bar" or 'foo bar'
-    for m in re.finditer(r'''["']([^"']{3,60})["']''', text):
-        _add(m.group(1))
+    # An apostrophe inside a word isn't a quote: "Andy isn't building you, I
+    # am. He's" gave the phrase "t building you, I am. He" (2026-11-11).
+    for m in re.finditer(r'''"([^"\n]{3,60})"|(?<!\w)'([^'\n]{3,60})'(?!\w)''', text):
+        _add(m.group(1) or m.group(2))
 
     # 2. Capitalized multi-word sequences (proper nouns / named entities)
     #    Matches: "Rogue's End", "Tower Faction", "Jade Phoenix Order",
@@ -354,7 +356,10 @@ def extract_candidate_phrases(text: str) -> List[str]:
         r"\b([A-Z][A-Za-z.]+(?:['']\w+)?(?:\s+(?:of|the|and|in|on|at|de|von|van)\s+)?(?:\s+[A-Z][A-Za-z.]+(?:['']\w+)?)+)\b",
         text
     ):
-        _add(m.group(1))
+        # Not across a sentence end: "Mission Control. It", "Discord. Andy".
+        for part in re.split(r"(?<=[a-z]{2})\.\s+", m.group(1)):
+            if " " in part.strip() or part.strip()[:1].isupper():
+                _add(part)
 
     # 3. Single capitalized words that aren't sentence-initial
     #    (sentence-initial words start after . or at position 0)

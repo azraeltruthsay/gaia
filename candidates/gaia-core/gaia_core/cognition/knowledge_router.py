@@ -803,6 +803,57 @@ def _belongs_to(session_id: str, topic: str) -> bool:
     return bool(person) and bool({n.lower() for n in person.get("names", [])} & set(topic.lower().split()))
 
 
+def _people_named(topic: str) -> List[Dict[str, Any]]:
+    """The people she knows whom a topic names ("Wednesday Andy Web Chat" → Andy)."""
+    try:
+        from gaia_common.utils.people import PeopleRegistry
+        registry = PeopleRegistry()
+    except Exception:
+        return []
+    words = (topic or "").split()
+    found, seen = [], set()
+    for n in (2, 1):
+        for i in range(len(words) - n + 1):
+            for person in registry.find_by_name(" ".join(words[i:i + n])):
+                if person.get("id") not in seen:
+                    seen.add(person.get("id"))
+                    found.append(person)
+    return found
+
+
+def _elsewhere(memory, session_id: str, topic: str, question: str, top_k: int = 2) -> List[Dict[str, Any]]:
+    """Exchanges from her other conversations about `topic`, best first.
+
+    2026-11-11: asked "you spoke with Andy through the Web Chat on Mission
+    Control — do you remember?", recall matched the five words of how the
+    question put it, not the conversation: what came back was the night
+    before's telling of the same thing, with her made-up "I do recall that
+    conversation now", and she said it again as her memory. So a known
+    person's own conversation with her comes first, and a past telling of
+    this same question (most of its words) is not the event it asks about."""
+    from gaia_common.utils.lookup_memory import content_terms
+    asked = content_terms(question)
+
+    def _echo(h: Dict[str, Any]) -> bool:
+        said = content_terms(h.get("user") or "")
+        return bool(asked) and len(asked & said) / len(asked) >= 0.5
+
+    picked: List[Dict[str, Any]] = []
+    for person in _people_named(topic):
+        theirs = {a.get("id") for a in person.get("accounts", []) if a.get("kind") == "session"}
+        for name in person.get("names", [])[:1]:
+            for h in memory.recall_elsewhere(session_id, name, top_k=8):
+                if h.get("session_id") in theirs and not _echo(h):
+                    picked.append(h)
+                    break
+    for h in memory.recall_elsewhere(session_id, topic, top_k=top_k + 4):
+        if len(picked) >= top_k:
+            break
+        if not _echo(h) and h not in picked:
+            picked.append(h)
+    return picked[:top_k]
+
+
 def recall_conversation(session_id: str, question: str,
                         history: Optional[List[Dict[str, Any]]] = None,
                         top_k: int = 3) -> GroundingContext:
@@ -836,7 +887,7 @@ def recall_conversation(session_id: str, question: str,
         n = top_k + len(visible)
         hits = memory.recall(session_id, topic, top_k=n) if topic else memory.latest(session_id, n)
         hits =[h for h in hits if (h.get("user") or "").strip() not in visible]
-        elsewhere = memory.recall_elsewhere(session_id, topic, top_k=min(2, top_k)) if topic else []
+        elsewhere = _elsewhere(memory, session_id, topic, question, top_k=min(2, top_k)) if topic else []
         for h in elsewhere:
             # The rest of what they said: asked about Andy, "recite Jabberwockey"
             # doesn't name him, and left out she guessed which poem it was.

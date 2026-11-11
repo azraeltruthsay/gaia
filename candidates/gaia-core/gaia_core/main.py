@@ -1885,6 +1885,12 @@ async def process_packet(packet_data: Dict[str, Any]):
                             tool_params = dict(tc.tool_params or {})
                             if not _is_meta and tc.tool_action:
                                 tool_params["action"] = tc.tool_action
+                            if tc.tool_name == "palace":
+                                # She wrote palace(recalling) with nothing to look
+                                # for, it was refused, and she said "I do recall that
+                                # conversation" of a chat the palace held (2026-11-11).
+                                from gaia_core.cognition.reply_scrub import palace_recall_params
+                                tool_params = palace_recall_params(tool_params, user_input or "")
                             # Who's talking comes from the transport, whatever she wrote.
                             if tc.tool_name in ("knowledge", "memory", "palace"):
                                 from gaia_core.cognition.told_facts import speaker
@@ -2122,7 +2128,9 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 # An invented tool (converse(close), 2026-11-11) ran nothing;
                                 # her words go out as she wrote them, not as a failure notice.
                                 from gaia_core.cognition.reply_scrub import honest_about_failure
-                                cont_gen = honest_about_failure(cont_gen, _tool_label)
+                                cont_gen = honest_about_failure(
+                                    cont_gen, _tool_label,
+                                    memory=tc.tool_name in ("palace", "knowledge", "memory", "context"))
                             if cont_gen:
                                 def _next_cont():
                                     try:
