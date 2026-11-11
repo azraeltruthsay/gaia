@@ -2497,8 +2497,21 @@ async def process_packet(packet_data: Dict[str, Any]):
             logger.exception(f"Error in streaming turn loop: {e}")
             yield json.dumps({"type": "error", "value": str(e)}) + "\n"
 
-    from gaia_core.cognition.reply_scrub import scrub_stream
-    return StreamingResponse(scrub_stream(_run_loop()), media_type="application/x-ndjson")
+    from gaia_core.cognition.reply_scrub import scrub_stream, unfounded_apology
+    _drop_apology = False
+    try:
+        # Read before the turn runs: her last reply is still the last one kept.
+        _sid = ((packet_data or {}).get("header") or {}).get("session_id") or ""
+        _asked = ((packet_data or {}).get("content") or {}).get("original_prompt") or ""
+        _last = next((m.get("content") or "" for m in reversed(_agent_core.session_manager.get_history(_sid) or [])
+                      if isinstance(m, dict) and m.get("role") == "assistant"), "") if _sid else ""
+        _drop_apology = unfounded_apology(_asked, _last)
+        if _drop_apology:
+            logger.info("session=%s: corrected about what her last reply never said; an opening apology is cut", _sid)
+    except Exception:
+        logger.debug("Apology check unavailable (non-fatal)", exc_info=True)
+    return StreamingResponse(scrub_stream(_run_loop(), drop_apology=_drop_apology),
+                             media_type="application/x-ndjson")
 
 
 # ── Audio Context Ingest ─────────────────────────────────────────────

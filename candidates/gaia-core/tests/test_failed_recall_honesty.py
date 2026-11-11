@@ -77,3 +77,32 @@ def test_messages_about_them_and_her_are_not_looked_up_on_the_web():
     for t in ["How many sides does a heptagon have?", "Who was the most well known Roman emperor?",
               "What's the weather in Paris with the storm?"]:
         assert not is_relational(t), t
+
+
+def test_an_apology_for_what_she_never_said_is_cut():
+    import asyncio, json
+    from gaia_core.cognition.reply_scrub import scrub_stream, trim_apology, unfounded_apology
+    assert unfounded_apology("Oh Andy isn't building you, I am.", "Absolutely, you're my architect.")
+    assert not unfounded_apology("Oh Andy isn't building you, I am.", "Andy set out to build me.")
+    assert not unfounded_apology("No, that's wrong.", "It was Tuesday.")      # no name to go by
+    assert not unfounded_apology("Tell me about Andy", "Hello.")              # not a correction
+    assert trim_apology("[Core]\n\nMy mistake — you're the one doing the building.") == \
+        "[Core]\n\nYou're the one doing the building."
+    assert trim_apology("My apologies — you're right, Azrael built me.") == "Azrael built me."
+    assert trim_apology("Right, Azrael built me.") == "Right, Azrael built me."
+    assert trim_apology("My mistake. Let me correct it. I meant you.") == "I meant you."
+
+    async def run(lines, drop):
+        async def gen():
+            for line in lines:
+                yield json.dumps(line) + "\n"
+        out = [json.loads(x) async for x in scrub_stream(gen(), drop_apology=drop)]
+        return "".join(e["value"] for e in out if e["type"] == "token"), [e["type"] for e in out]
+    lines = [{"type": "token", "value": "*[What I did]* answered as Core\n\n"}, {"type": "flush"},
+             {"type": "token", "value": "[Core]\n\nMy mis"}, {"type": "token", "value": "take — you're the one"},
+             {"type": "token", "value": " building me."}, {"type": "flush"}, {"type": "reply_done"}]
+    text, kinds = asyncio.run(run(lines, True))
+    assert "My mistake" not in text and "You're the one building me." in text and "*[What I did]*" in text
+    assert kinds[-1] == "reply_done"
+    text, _ = asyncio.run(run(lines, False))
+    assert "My mistake" in text

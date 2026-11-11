@@ -272,10 +272,68 @@ def honest_about_failure(events, tool_label: str, memory: bool = False):
     yield from others
 
 
-async def scrub_stream(lines: AsyncIterator[str]) -> AsyncIterator[str]:
+# n828: corrected about something her last reply never said, she opened "My
+# mistake" 4/4 anyway. Words that only open a sentence aren't names.
+_NOT_NAMES = {"oh", "no", "yes", "well", "so", "actually", "but", "and", "i", "gaia", "hey", "ok", "okay",
+              "the", "he", "she", "they", "it", "that", "this", "you", "we", "my", "your", "his", "her"}
+_NAMEWORD_RE = re.compile(r"\b[A-Z][a-z]{1,}\b")
+_APOLOGY_RE = re.compile(
+    r"^(?P<lead>\s*(?:\[[^\]\n]{1,40}\]\s*)?)"
+    r"(?:my\s+(?:mistake|apologies|bad)|(?:i'?m\s+)?sorry|apologies|i\s+apologi[sz]e)\b[^\u2014\u2013.!\n]{0,40}"
+    r"(?:[\u2014\u2013.!]|\s-\s)\s*"
+    r"(?:(?:you'?re|you\s+are)\s+right[,.!\u2014\u2013]?\s*)?"
+    r"(?:(?:let\s+me|i'?ll)\s+(?:correct|fix|clarify)\s+(?:it|that|myself)[.!]\s*)?",
+    re.IGNORECASE)
+_APOLOGY_HOLD = 160
+
+
+def unfounded_apology(asked: str, last_reply: str) -> bool:
+    """Whether an apology would be for something her last reply never said: a
+    correction naming someone her last reply doesn't mention. With no name to
+    go by it can't tell, and says no."""
+    from gaia_common.utils.conversation_memory import is_correction
+    if not is_correction(asked) or not (last_reply or "").strip():
+        return False
+    names = {w for w in _NAMEWORD_RE.findall(asked or "") if w.lower() not in _NOT_NAMES}
+    said = (last_reply or "").lower()
+    return bool(names) and not any(n.lower() in said for n in names)
+
+
+def trim_apology(text: str) -> str:
+    """`text` without an apology opening its reply."""
+    m = _APOLOGY_RE.match(text or "")
+    if not m:
+        return text
+    rest = text[m.end():]
+    return m.group("lead") + rest[:1].upper() + rest[1:]
+
+
+async def scrub_stream(lines: AsyncIterator[str], drop_apology: bool = False) -> AsyncIterator[str]:
     """The /process_packet NDJSON stream with its token events scrubbed; every
-    other event passes through, after anything held back."""
+    other event passes through, after anything held back. With `drop_apology`,
+    the opening of her reply is held until an apology there can be cut."""
     scrubber = HeadScrubber()
+    hold = [""] if drop_apology else None   # reply text held while it may open with one
+
+    def _release(final: bool = False) -> str:
+        text = hold[0]
+        body = text.lstrip()
+        if body.startswith("*[") and "\n" not in body and not final:
+            return ""          # a header line still arriving
+        if body.startswith("*["):
+            hold[0] = ""
+            return text        # a header line, not her reply: keep holding after it
+        if not final and len(text) < _APOLOGY_HOLD:
+            return ""
+        hold.clear()           # decided, once
+        return trim_apology(text)
+
+    def _out(text: str) -> str:
+        if hold is None or not hold:
+            return text
+        hold[0] += text
+        return _release()
+
     async for line in lines:
         try:
             event = json.loads(line)
@@ -283,14 +341,18 @@ async def scrub_stream(lines: AsyncIterator[str]) -> AsyncIterator[str]:
         except (TypeError, ValueError):
             event, is_token = None, False
         if is_token:
-            text = scrubber.feed(event.get("value") or "")
+            text = _out(scrubber.feed(event.get("value") or ""))
             if text:
                 yield json.dumps({"type": "token", "value": text}) + "\n"
             continue
-        held = scrubber.flush()
+        held = _out(scrubber.flush())
+        if hold and hold[0]:
+            held += _release(final=True)
         if held:
             yield json.dumps({"type": "token", "value": held}) + "\n"
         yield line
-    held = scrubber.flush()
+    held = _out(scrubber.flush())
+    if hold and hold[0]:
+        held += _release(final=True)
     if held:
         yield json.dumps({"type": "token", "value": held}) + "\n"
