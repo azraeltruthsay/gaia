@@ -295,6 +295,15 @@ async def get_status():
                  if t.device.value.startswith("gpu")]
     gpu_owner = " + ".join(gpu_tiers) if gpu_tiers else "--"
     gpu_state = watch.gpu_state.value
+    # vram_external/vram_tenants surface what the legacy watch fields can't
+    # see at all: VRAM held by containers outside the tracked tiers (e.g. a
+    # GPU tenant like gaia-prime-candidate's vLLM). Without this, /status can
+    # read "all tiers unloaded" while several GB sit resident and unexplained
+    # (seen 2026-11-12: watch showed 0MB everywhere, nvidia-smi showed ~8GB).
+    vram_external_mb = None
+    vram_actual_used_mb = None
+    vram_tenants: list = []
+    gpu_holders: list = []
     # yfr8: the watch rotation's own fields went stale (gpu_state 'focusing'
     # while awake with Core on the GPU; Prime at 0 MB and the nano alias listed
     # as holders). The lifecycle machine is the source of truth for both.
@@ -307,6 +316,10 @@ async def get_status():
                     if name != "nano" and str(getattr(t, "device", "")).lower().endswith("gpu")
                     and getattr(t, "model_loaded", False)]
             gpu_owner = " + ".join(held) if held else "--"
+            vram_external_mb = snap.vram_external_mb
+            vram_actual_used_mb = snap.vram_actual_used_mb
+            vram_tenants = snap.vram_tenants
+            gpu_holders = snap.gpu_holders
         except Exception:
             logger.debug("status: lifecycle snapshot unavailable; watch fields used", exc_info=True)
 
@@ -316,6 +329,10 @@ async def get_status():
         "gpu": state.gpu.model_dump(),
         "gpu_owner": gpu_owner,
         "gpu_state": gpu_state,
+        "vram_actual_used_mb": vram_actual_used_mb,
+        "vram_external_mb": vram_external_mb,
+        "vram_tenants": vram_tenants,
+        "gpu_holders": gpu_holders,
         "watch": {n: {"device": t.device.value, "vram_mb": t.vram_mb}
                   for n, t in watch.tiers.items()},
         "nano": state.nano.model_dump(),
