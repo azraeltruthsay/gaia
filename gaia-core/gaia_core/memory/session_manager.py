@@ -167,6 +167,15 @@ class SessionManager:
             if not content.strip():
                 logger.warning(f"Skipping empty assistant message for session '{session_id}' (was only think tags)")
                 return
+        if role == "user":
+            # kkij: in a group channel, each line says who said it.
+            try:
+                from gaia_common.utils.people import channel_speaker, is_channel
+                if is_channel(session_id) and channel_speaker(session_id) and not content.startswith(
+                        channel_speaker(session_id) + ": "):
+                    content = f"{channel_speaker(session_id)}: {content}"
+            except Exception:
+                logger.debug("channel speaker unavailable", exc_info=True)
         session = self.get_or_create_session(session_id)
         turn: Dict[str, Any] = {
             "id": f"m{uuid.uuid4().hex[:8]}",

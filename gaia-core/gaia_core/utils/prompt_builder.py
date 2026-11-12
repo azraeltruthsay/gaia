@@ -380,15 +380,22 @@ def build_from_packet(packet: CognitionPacket, *args, **kwargs) -> List[Dict]:
     """The prompt for a packet, told who she is speaking with (751u)."""
     messages = _assemble_from_packet(packet, *args, **kwargs)
     try:
-        from gaia_common.utils.people import creator_line, mentioned_line, speaker_line
+        from gaia_common.utils.people import (channel_speaker_line, creator_line, is_channel,
+                                              mentioned_line, speaker_line)
         _sid = getattr(getattr(packet, "header", None), "session_id", "") or ""
-        line = speaker_line(_sid)
+        _author = ""
+        if is_channel(_sid):   # kkij: a group channel; who wrote this message
+            _primary = getattr(getattr(getattr(packet, "header", None), "output_routing", None), "primary", None)
+            _author = str(getattr(_primary, "user_id", "") or "")
+            line = channel_speaker_line(_sid, _author)
+        else:
+            line = speaker_line(_sid)
         _asked = getattr(getattr(packet, "content", None), "original_prompt", "") or ""
         _named = mentioned_line(_asked, _sid)
         if _named:
             line = f"{line} {_named}".strip()
         if line:   # a person's session, not her own loops (i4vn)
-            line = f"{line} {creator_line(_sid, _asked)}".strip()
+            line = f"{line} {creator_line(_sid, _asked, author_id=_author)}".strip()
         _fix = correction_line(_asked, messages)
         if _fix:
             line = f"{line}\n\n{_fix}".strip()

@@ -2533,6 +2533,18 @@ async def process_packet(packet_data: Dict[str, Any]):
             from gaia_common.utils.people import PeopleRegistry as _People
             _people = _People()
             _people.note_claim(_sid, _asked)
+            # kkij: in a channel, who wrote it, from the Discord account; and
+            # "X is a friend of mine named Y" from anyone, kept as told.
+            from gaia_common.utils import people as _pp
+            from gaia_common.utils.conversation_memory import channel_of as _channel_of
+            _teller = None
+            if _pp.is_channel(_sid):
+                _route = (((packet_data or {}).get("header") or {}).get("output_routing") or {}).get("primary") or {}
+                _teller = _pp.note_channel_author(_sid, str(_route.get("user_id") or ""),
+                                                  (_route.get("metadata") or {}).get("author_name") or "", _people)
+            else:
+                _teller = _people.for_session(_sid)
+            _pp.note_introduction(_asked, _pp._main_name(_teller) if _teller else "", _channel_of(_sid), _people)
             if _people.note_pronouns(_sid, _asked):
                 from gaia_core.cognition import outcome_ledger as _ol
                 _ol.note_call(_sid, "people", "set_pronouns", True)

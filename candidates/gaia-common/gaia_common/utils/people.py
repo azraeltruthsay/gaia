@@ -280,16 +280,176 @@ def mentioned_line(text: str, session_id: str = "", registry: Optional[PeopleReg
     return " ".join(lines)
 
 
-def creator_line(session_id: str = "", text: str = "", registry: Optional[PeopleRegistry] = None) -> str:
+def person_for_discord(author_id: str, registry: Optional["PeopleRegistry"] = None) -> Optional[Dict]:
+    """The person whose Discord account this is, if anyone's."""
+    if not author_id:
+        return None
+    return next((p for p in (registry or PeopleRegistry()).everyone() for a in p.get("accounts", [])
+                 if a.get("kind") == "discord" and a.get("id") == str(author_id)), None)
+
+
+def creator_line(session_id: str = "", text: str = "", registry: Optional[PeopleRegistry] = None,
+                 author_id: str = "") -> str:
     """Azrael's pronouns, or that there are none on file, when Azrael is neither
     the speaker nor named in the message: the system prompt names Azrael as
     her creator every turn, and she guessed "He's also friends with Andy" (i4vn)."""
     try:
         registry = registry or PeopleRegistry()
         found = registry.find_by_name(CREATOR)
-        speaker = registry.for_session(session_id) if session_id else None
+        # In a channel the session isn't anyone: the message's author is.
+        speaker = (person_for_discord(author_id, registry) if author_id
+                   else registry.for_session(session_id) if session_id else None)
     except OSError:
         return ""
     if len(found) != 1 or (speaker or {}).get("id") == found[0].get("id") or re.search(rf"\b{CREATOR}\b", text or ""):
         return ""
-    return pronoun_words(found[0]) + "."
+    # Someone else speaking took Azrael's name 1/3 ("you're Azrael, my architect").
+    return f"{CREATOR}, who created you, is not the one speaking now. " + pronoun_words(found[0]) + "."
+
+
+# ── Discord channels (kkij, 2026-11-12) ──────────────────────────────────
+# In the Grotto, Nick ("Schwiftyboi") joked he'd eat her for dinner; she had no
+# idea who was speaking: only DMs and claimed web sessions map to a person.
+# Each channel message carries its author's account and display name.
+_CHANNEL_RE = re.compile(r"^discord_channel_\d+$")
+_speaking: Dict[str, str] = {}   # channel session -> who said the message in hand
+
+# "Schwiftyboi is a friend of mine named Nick", "X is my brother Sam".
+_INTRO_RE = re.compile(
+    r"\b(?:named |called )?(?P<a>[A-Z][\w-]{2,30}) is (?:actually )?(?:a |my |our )?"
+    r"(?P<rel>friend|brother|sister|partner|wife|husband|son|daughter|cousin|coworker|colleague|roommate|neighbou?r)"
+    r"(?: of mine| of ours)?,? (?:named |called )?(?P<b>[A-Z][a-z]{1,20})\b")
+
+
+def is_channel(session_id: str) -> bool:
+    return bool(_CHANNEL_RE.match(session_id or ""))
+
+
+def channel_speaker(session_id: str) -> str:
+    """Who said the message being handled in a channel session, for its history."""
+    return _speaking.get(session_id, "")
+
+
+def _alias(registry: "PeopleRegistry", person: Dict, name: str, source: str) -> Dict:
+    if name.lower() not in {n.lower() for n in person.get("names", [])}:
+        with _lock:
+            fresh = registry.get(person["id"]) or person
+            fresh.setdefault("names", []).append(name)
+            fresh.setdefault("name_sources", {})[name] = source
+            registry._write(fresh)
+            person = fresh
+    return person
+
+
+def note_channel_author(session_id: str, author_id: str, display_name: str,
+                        registry: Optional["PeopleRegistry"] = None) -> Optional[Dict]:
+    """The person who wrote a channel message: by their Discord account, else
+    by a name someone told her (then the account is linked), else a new record
+    of the account under its display name. An account speaking is a fact."""
+    if not (is_channel(session_id) and author_id and str(author_id).isdigit()):
+        return None
+    registry = registry or PeopleRegistry()
+    person = next((p for p in registry.everyone() for a in p.get("accounts", [])
+                   if a.get("kind") == "discord" and a.get("id") == str(author_id)), None)
+    if person is None and display_name:
+        named = registry.find_by_name(display_name)
+        if len(named) == 1 and not any(a.get("kind") == "discord" for a in named[0].get("accounts", [])):
+            person = named[0]
+            with _lock:
+                person.setdefault("accounts", []).append(
+                    {"kind": "discord", "id": str(author_id), "linked_at": _now(), "source": f"spoke in {session_id}"})
+                registry._write(person)
+            logger.info("People: %s's Discord account linked by display name", person["id"])
+    if person is None:
+        person = registry.create(display_name or f"Discord user {author_id}",
+                                 [{"kind": "discord", "id": str(author_id)}], source=f"spoke in {session_id}")
+        logger.info("People: new person %s from %s", person["id"], session_id)
+    if display_name:
+        person = _alias(registry, person, display_name, f"Discord display name in {session_id}")
+        if "display name" not in (person.get("name_sources") or {}).get(display_name, ""):
+            with _lock:
+                fresh = registry.get(person["id"]) or person
+                fresh.setdefault("name_sources", {})[display_name] = f"Discord display name in {session_id}"
+                registry._write(fresh)
+                person = fresh
+    _speaking[session_id] = _main_name(person)
+    return person
+
+
+def note_introduction(text: str, told_by: str, where: str = "",
+                      registry: Optional["PeopleRegistry"] = None) -> List[Dict]:
+    """"Schwiftyboi is a friend of mine named Nick": Nick is another name for
+    Schwiftyboi, and Schwiftyboi is the teller's friend. Kept as told, with who
+    told it. A name not on file yet becomes a person with both names, linked to
+    an account when that name speaks."""
+    registry = registry or PeopleRegistry()
+    out = []
+    for m in _INTRO_RE.finditer(text or ""):
+        a, rel, b = m.group("a"), m.group("rel").lower(), m.group("b")
+        if a in _NOT_A_NAME or b in _NOT_A_NAME or a.lower() == b.lower():
+            continue
+        relationship = f"{told_by}'s {rel}" if told_by else rel
+        known = registry.find_by_name(a) or registry.find_by_name(b)
+        if len(known) > 1:
+            continue
+        source = f"told by {told_by or 'someone'}" + (f" in {where}" if where else "")
+        if known:
+            person = _alias(registry, _alias(registry, known[0], a, source), b, source)
+            if not person.get("relationship"):
+                with _lock:
+                    person["relationship"] = relationship
+                    registry._write(person)
+        else:
+            person = registry.create(a, [], relationship=relationship, source=source)
+            person = _alias(registry, person, b, source)
+        registry.add_fact(person["id"], f"{a} is {relationship}, named {b}", told_by or "someone", where)
+        logger.info("People: %s introduced %s as %s", told_by or "someone", a, b)
+        out.append(person)
+    return out
+
+
+def channel_speaker_line(session_id: str, author_id: str, registry: Optional["PeopleRegistry"] = None) -> str:
+    """Who is speaking in a channel, for this message."""
+    if not is_channel(session_id):
+        return ""
+    try:
+        registry = registry or PeopleRegistry()
+        person = next((p for p in registry.everyone() for a in p.get("accounts", [])
+                       if a.get("kind") == "discord" and a.get("id") == str(author_id)), None)
+    except OSError:
+        return ""
+    if not person:
+        return "You are in a group Discord channel; you don't know who wrote this message."
+    # The DM form ("You are speaking with Azrael"): told "This message is from
+    # Testbot" she called a made-up introspect(whois) to find out (2026-11-12).
+    line = f"You are speaking with {_display(person)}"
+    if person.get("relationship"):
+        line += f", {person['relationship']}"
+    line += (", in a group Discord channel where others speak too; earlier lines start with who "
+             "said them. Speak to them as \"you\".")
+    facts = [f["text"] for f in person.get("facts", []) if f.get("status") != "wrong"][:3]
+    if facts:
+        line += " What you've been told about them: " + "; ".join(facts) + "."
+    return line + " " + pronoun_words(person) + "."
+
+
+def _display(person: Dict) -> str:
+    """"Nick (Schwiftyboi on Discord)": the name they were introduced by, with
+    the Discord display name when it differs."""
+    return f"{_main_name(person)} ({_screen_name(person)} on Discord)" \
+        if _screen_name(person) and _screen_name(person) != _main_name(person) else _main_name(person)
+
+
+def _main_name(person: Dict) -> str:
+    sources = person.get("name_sources") or {}
+    told = [n for n in person.get("names", []) if sources.get(n, "").startswith("told")
+            and n != _screen_name(person)]
+    return (told or person.get("names") or ["someone"])[-1] if told else (person.get("names") or ["someone"])[0]
+
+
+def _screen_name(person: Dict) -> str:
+    sources = person.get("name_sources") or {}
+    shown = [n for n in person.get("names", []) if "display name" in sources.get(n, "")]
+    if shown:
+        return shown[-1]
+    return person["names"][0] if person.get("source", "").startswith("spoke in") and person.get("names") else ""

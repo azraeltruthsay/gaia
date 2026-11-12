@@ -75,3 +75,48 @@ def test_days_are_azraels_days(monkeypatch):
     assert local_day("2026-11-05T16:28:02+00:00") == "2026-11-05"
     assert local_day("2026-11-05") == "2026-11-05"
     assert local_day("") == ""
+
+
+def test_who_speaks_in_a_channel(tmp_path):
+    """kkij: Nick ("Schwiftyboi") trolled her in the Grotto and she had no idea
+    who it was; Azrael told her in a DM who he is."""
+    from gaia_common.utils.people import (PeopleRegistry, channel_speaker, channel_speaker_line,
+                                          note_channel_author, note_introduction)
+    reg = PeopleRegistry(tmp_path)
+    reg.create("Azrael", [{"kind": "discord", "id": "596925786208993283"}], "who created you")
+    grotto = "discord_channel_1484003096337191067"
+    # Told first, then he speaks.
+    note_introduction("FYI, GAIA, that guy in the Grotto named Schwiftyboi is a friend of mine named Nick.",
+                      "Azrael", "Discord DM", reg)
+    nick = note_channel_author(grotto, "111111111111111111", "Schwiftyboi", reg)
+    assert set(nick["names"]) == {"Schwiftyboi", "Nick"} and nick["relationship"] == "Azrael's friend"
+    assert channel_speaker(grotto) == "Nick"
+    line = channel_speaker_line(grotto, "111111111111111111", reg)
+    assert "You are speaking with Nick (Schwiftyboi on Discord), Azrael's friend" in line
+    # The same account again is the same person; a stranger is new and named as shown.
+    assert note_channel_author(grotto, "111111111111111111", "Schwiftyboi", reg)["id"] == nick["id"]
+    other = note_channel_author(grotto, "222222222222222222", "Pixel", reg)
+    assert other["names"] == ["Pixel"] and channel_speaker(grotto) == "Pixel"
+    assert "You are speaking with Pixel, in a group" in channel_speaker_line(grotto, "222222222222222222", reg)
+    # A DM isn't a channel.
+    assert note_channel_author("discord_dm_596925786208993283", "596925786208993283", "Anton", reg) is None
+
+
+def test_introduced_after_speaking(tmp_path):
+    from gaia_common.utils.people import PeopleRegistry, channel_speaker_line, note_channel_author, note_introduction
+    reg = PeopleRegistry(tmp_path)
+    grotto = "discord_channel_1484003096337191067"
+    note_channel_author(grotto, "111111111111111111", "Schwiftyboi", reg)
+    note_introduction("Schwiftyboi is a friend of mine named Nick", "Azrael", "Discord DM", reg)
+    assert "speaking with Nick (Schwiftyboi on Discord), Azrael's friend" in channel_speaker_line(grotto, "111111111111111111", reg)
+    assert note_introduction("I'm going to eat you for dinner.", "Nick", "", reg) == []
+
+
+
+def test_azrael_in_a_channel_is_not_told_he_is_absent(tmp_path):
+    from gaia_common.utils.people import PeopleRegistry, creator_line
+    reg = PeopleRegistry(tmp_path)
+    reg.create("Azrael", [{"kind": "discord", "id": "596925786208993283"}], "who created you")
+    grotto = "discord_channel_1484003096337191067"
+    assert creator_line(grotto, "hi", reg, author_id="596925786208993283") == ""
+    assert "is not the one speaking now" in creator_line(grotto, "hi", reg, author_id="111111111111111111")
