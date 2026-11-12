@@ -222,7 +222,10 @@ class SessionManager:
 
         # Check if the conversation is long enough to be archived
         if len(session.history) >= self.max_active_messages:
-            self.summarize_and_archive(session_id)
+            # wj5b: after the reply, not inside it. The summary is a model call
+            # (15 s of 503s from a standby Prime held a reply on 2026-11-11).
+            self._archive_soon(session_id)
+            self._save_state()
         else:
             # If not archiving, just save the new message to the state file
             self._save_state()
@@ -306,6 +309,21 @@ class SessionManager:
                 f.write(f"{header}\n\n{content}\n\n---\n\n")
         except Exception as e:
             logger.warning(f"Could not update Markdown log for {session_id}: {e}")
+
+    def _archive_soon(self, session_id: str) -> None:
+        """Archive in the background, one at a time per session."""
+        busy = self.__dict__.setdefault("_archiving", set())
+        if session_id in busy:
+            return
+        busy.add(session_id)
+
+        def _run():
+            try:
+                self.summarize_and_archive(session_id)
+            finally:
+                busy.discard(session_id)
+
+        threading.Thread(target=_run, daemon=True, name=f"archive-{session_id[:24]}").start()
 
     def summarize_and_archive(self, session_id: str):
         """

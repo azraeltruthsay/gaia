@@ -22,6 +22,22 @@ def _get_model_pool():
     except Exception:
         return None
 
+def _gpu_mind() -> str:
+    """The mind on the GPU: Prime in FOCUSING, else Core (always loaded, on
+    the GPU or the CPU). Summaries went to Prime by name, on standby in gear 1,
+    and 503'd for 15 s inside a turn (wj5b)."""
+    import json as _json
+    import os as _os
+    from urllib.request import urlopen as _urlopen
+    try:
+        url = _os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410") + "/lifecycle/state"
+        with _urlopen(url, timeout=3) as r:
+            state = str(_json.loads(r.read().decode()).get("state", "")).lower()
+        return "prime" if state == "focusing" else "core"
+    except Exception:
+        return "core"
+
+
 class ConversationSummarizer:
     """
     Uses the LLM to summarize a conversation history.
@@ -60,7 +76,7 @@ class ConversationSummarizer:
             if not llm:
                 try:
                     mp = _get_model_pool()
-                    llm = mp.get_model_for_role('prime') if mp is not None else None
+                    llm = mp.get_model_for_role(_gpu_mind()) if mp is not None else None
                 except Exception:
                     llm = None
             if not llm:
