@@ -118,12 +118,21 @@ class EmbedIntentClassifier:
         text: str,
         confidence_threshold: float = 0.45,
         top_k: int = 3,
+        conservative: bool = True,
     ) -> Tuple[str, float]:
         """Classify a user query by embedding similarity.
 
         Returns:
             (intent_label, confidence_score).
-            Falls back to ("other", 0.0) if not ready or below threshold.
+            Falls back to ("other", 0.0) if not ready.
+            Below threshold: ("other", score) when conservative (the default —
+            every routing decision that trusts this label outright keeps that),
+            or (best_guess, score) when conservative=False, for a caller that
+            only uses the label to decide whether to SKIP something. A missed
+            skip costs nothing; discarding a correct-but-underconfident guess
+            doesn't (found 2026-11-12: "identity" scored 0.293 against a 0.45
+            threshold, got thrown away, and a self-introduction got web-grounded
+            as an unknown entity instead of being left alone).
         """
         if not self._ready or self._embed_model is None or self._exemplar_matrix is None or getattr(self._exemplar_matrix, 'ndim', 0) < 2:
             return ("other", 0.0)
@@ -162,10 +171,11 @@ class EmbedIntentClassifier:
 
             if best_score < confidence_threshold:
                 logger.info(
-                    "Embed intent below threshold: best=%s score=%.3f (threshold=%.2f)",
+                    "Embed intent below threshold: best=%s score=%.3f (threshold=%.2f)%s",
                     best_intent, best_score, confidence_threshold,
+                    "" if conservative else " — trusted anyway (conservative=False)",
                 )
-                return ("other", best_score)
+                return (best_intent, best_score) if not conservative else ("other", best_score)
 
             logger.info(
                 "Embed intent classified: %s (score=%.3f)",

@@ -26,6 +26,24 @@ _TOLD_RES = (
 # "Remember that the lantern is in the attic", not "remember that time we...".
 _REMEMBER_RE = re.compile(r"^\W*(?:please\s+)?remember\s+(?:this\s*[:,\-\u2014]?|that\s*[:,\-\u2014]\s*|that\s+(?!time\b|day\b|one\b|when\b))\s*(?P<fact>\S.*)$",
                           re.IGNORECASE | re.DOTALL)
+# A natural self-introduction \u2014 "You can call me X" / "Refer to me as X" /
+# "I go by X" / "My name is X" / "You may know me as X" \u2014 not phrased as an
+# explicit "remember"/"save to knowledge base" instruction, so it used to
+# fall straight through to ordinary chat and was never kept (found
+# 2026-11-12, GAIA's Grotto: "You can refer to me as The Blonde Santa Claus"
+# went ungrounded and unsaved). This is a SPAN EXTRACTOR only \u2014 whether a
+# match here is actually kept as a fact is decided in told_fact() by the
+# caller's own soft_intent, not by this regex matching at all: the model
+# (EmbedIntentClassifier) already correctly reads this class of message as
+# "identity", it was just being thrown away below its confidence threshold.
+# The capital-letter/quote guard on the name stays anyway, as a second,
+# cheap check \u2014 it costs nothing and still rules out "You can call me
+# anytime" even if the model ever agreed that one was identity-flavored too.
+_SELF_NAME_RE = re.compile(
+    r"^\W*(?i:(?:you\s+(?:can|may)\s+)?(?:call\s+me|refer\s+to\s+me\s+as|know\s+me\s+as)"
+    r"|i\s+go\s+by|my\s+name\s+is)\s+"
+    r"(?P<name>[A-Z\u2018\u201c\"'].*?)\W*$",
+    re.DOTALL)
 _QUESTION_RE = re.compile(r"\?\s*$|^\W*(?:who|what|when|where|which|why|how|do\s+you\s+know|tell\s+me)\b", re.IGNORECASE)
 _KNOW_ABOUT_RE = re.compile(
     r"^\W*(?:what\s+do\s+you\s+know\s+about|tell\s+me\s+(?:what\s+you\s+know\s+)?about)\s+(?P<topic>.+?)"
@@ -67,12 +85,28 @@ def speaker(source: str, session_id: str, metadata: Optional[dict]) -> dict:
     return who
 
 
-def told_fact(text: str) -> Optional[str]:
-    """The fact in a request to keep one, or None."""
+def told_fact(text: str, soft_intent: str = "") -> Optional[str]:
+    """The fact in a request to keep one, or None.
+
+    `soft_intent` is an under-confidence-threshold-tolerant intent guess
+    (EmbedIntentClassifier.classify(..., conservative=False)) from the
+    caller — the explicit "remember.../save to knowledge base..." patterns
+    are unambiguous commands and need no model agreement, but a bare
+    self-introduction ("You can call me X") only counts as a kept fact when
+    the model itself reads this turn as identity-flavored. Without that gate
+    this was either silent (missing the phrasing) or risked treating
+    "You can call me anytime" as a nickname; with it, the decision is the
+    model's, and the regex only finds which span of text is the name."""
     for pattern in (*_TOLD_RES, _REMEMBER_RE):
         m = pattern.match(text or "")
         if m:
             return m.group("fact").strip()
+    if soft_intent == "identity":
+        m = _SELF_NAME_RE.match(text or "")
+        if m:
+            name = m.group("name").strip().strip("\"'‘’“”").strip()
+            if name:
+                return f"wants to be called {name}"
     return None
 
 

@@ -42,6 +42,43 @@ def test_not_requests_to_keep_a_fact(text):
     assert told_fact(text) is None
 
 
+@pytest.mark.parametrize("text,name", [
+    ("You can refer to me as The Blonde Santa Claus", "The Blonde Santa Claus"),
+    ("Call me Nick.", "Nick"),
+    ("you can call me Nick", "Nick"),
+    ("Refer to me as Blondie", "Blondie"),
+    ("I go by Nick", "Nick"),
+    ('I go by "Blondie"', "Blondie"),
+    ("My name is Nick.", "Nick"),
+    ("You may know me as Blondie", "Blondie"),
+])
+def test_self_introduction_is_kept_as_a_fact_when_the_model_agrees(text, name):
+    # Found 2026-11-12, GAIA's Grotto: this phrasing fell through to ordinary
+    # chat (and ungrounded web search) instead of being saved. The decision
+    # to keep it is the model's (soft_intent), not the regex's — it only
+    # extracts which span is the name.
+    assert told_fact(text, soft_intent="identity") == f"wants to be called {name}"
+
+
+@pytest.mark.parametrize("soft_intent", ["", "other", "chat"])
+def test_self_introduction_is_not_kept_without_the_models_agreement(soft_intent):
+    # The exact point of this change: a well-formed self-introduction is
+    # still just chat until the model itself reads the turn as identity.
+    assert told_fact("You can refer to me as The Blonde Santa Claus", soft_intent) is None
+
+
+@pytest.mark.parametrize("text", [
+    "Can you call me later?",
+    "You can call me anytime",
+    "You can call me when you're free",
+    "What do you call this?",
+    "call me nick",  # no capital: not confidently a name, left alone on purpose
+])
+def test_self_introduction_does_not_catch_other_uses_of_call_me(text):
+    # Belt-and-suspenders: even WITH the model's agreement, these aren't names.
+    assert told_fact(text, soft_intent="identity") is None
+
+
 def test_questions_and_told_facts():
     assert is_question("Where is it kept?") and is_question("what is it") and not is_question("It is kept here.")
     hits = [{"kind": "search", "snippet": "a"}, {"kind": "told", "snippet": "b"}, {"kind": "told"}]
@@ -77,6 +114,25 @@ def test_the_save_runs_whatever_she_would_have_done_and_she_words_the_reply():
     params = core._palace_call.call_args.args[1]
     assert params["fact"] == FACT and params["_told_by"]["why"] == "asked me to keep it"
     assert f"Saved: {FACT}" in core.generate_continuation.call_args.kwargs["messages"][1]["content"]
+
+
+def test_a_self_introduction_is_saved_through_the_same_path():
+    # _told_fact_reply itself stays model-free (no model_pool on this stub
+    # core at all) — soft_intent is something the CALLER (run_turn) computed
+    # and hands in, same as metadata.
+    core = _core((True, {"ok": True}))
+    reply = core._told_fact_reply("You can refer to me as The Blonde Santa Claus", "s",
+                                  soft_intent="identity")
+    assert reply == "Done, I noted that."
+    params = core._palace_call.call_args.args[1]
+    assert params["fact"] == "wants to be called The Blonde Santa Claus"
+    assert params["_told_by"]["why"] == "asked me to keep it"
+
+
+def test_a_self_introduction_is_not_saved_without_soft_intent():
+    core = _core((True, {"ok": True}))
+    assert core._told_fact_reply("You can refer to me as The Blonde Santa Claus", "s") is None
+    core._palace_call.assert_not_called()
 
 
 def test_a_failed_save_cannot_be_reported_as_done():

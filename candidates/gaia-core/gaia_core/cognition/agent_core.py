@@ -1538,8 +1538,28 @@ class AgentCore:
 
         # Facts she was told, kept and recalled. Ahead of research and the
         # old save-to-file route, which get these turns otherwise (1zbx).
+        # A cheap, under-threshold-tolerant intent guess so told_fact() can
+        # recognize a bare self-introduction ("You can call me X") without
+        # a hand-written pattern deciding that on its own — the same
+        # EmbedIntentClassifier singleton the early-intent block below
+        # uses; calling it again here just adds one embedding comparison,
+        # not a reload (2026-11-12, GAIA's Grotto memory-confusion fix).
+        _tf_soft_intent = ""
         try:
-            _palace_reply = (self._told_fact_reply(user_input, session_id, source, _metadata)
+            from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
+            _tf_embed_model = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
+            if _tf_embed_model is not None:
+                _tf_clf = EmbedIntentClassifier.instance()
+                if not _tf_clf.ready:
+                    _tf_clf.initialise(_tf_embed_model, config=constants.get("EMBED_INTENT", {}) or {})
+                if _tf_clf.ready:
+                    _tf_soft_intent, _ = _tf_clf.classify(user_input, conservative=False)
+        except Exception:
+            logger.debug("Told-fact soft intent estimate failed (non-blocking)", exc_info=True)
+
+        try:
+            _palace_reply = (self._told_fact_reply(user_input, session_id, source, _metadata,
+                                                    soft_intent=_tf_soft_intent)
                              or self._host_fact_reply(user_input, session_id)
                              or self._founding_doc_reply(user_input, session_id))
             if _palace_reply:
@@ -1720,7 +1740,12 @@ class AgentCore:
                         _clf.initialise(_embed_model, config=_embed_intent_cfg)
                     if _clf.ready:
                         _thr = float(_embed_intent_cfg.get("confidence_threshold", 0.42))
-                        _ei, _es = _clf.classify(user_input, confidence_threshold=_thr)
+                        # conservative=False: this estimate only ever gates whether
+                        # grounding gets SKIPPED below. A missed skip is cheap; an
+                        # under-confident-but-correct guess discarded here isn't
+                        # (2026-11-12: "identity" at 0.293 vs. a 0.45 threshold got
+                        # thrown away, and a self-introduction got web-grounded).
+                        _ei, _es = _clf.classify(user_input, confidence_threshold=_thr, conservative=False)
                         if _ei:
                             _early_intent = _ei
                             # o9dh/saq3: `packet` doesn't exist yet here either
@@ -7902,12 +7927,17 @@ RESULT: COMPLEX (reason: <brief reason>)
         body = (document.get("content") or "").strip()
         return f"Here is **{title}**:\n\n{excerpt(body, requested_part(user_input)) or body}"
 
-    def _told_fact_reply(self, user_input: str, session_id: str, source: str = "", metadata: dict = None) -> Optional[str]:
+    def _told_fact_reply(self, user_input: str, session_id: str, source: str = "", metadata: dict = None,
+                          soft_intent: str = "") -> Optional[str]:
         """Her reply when this turn keeps a fact she was told or asks for one;
         None when it does neither. Her words stand if they match what really
-        happened; otherwise the plain result does."""
+        happened; otherwise the plain result does.
+
+        `soft_intent`: an under-threshold-tolerant intent guess from the
+        caller (see told_fact's docstring) — this function stays a pure,
+        model-free check otherwise, so the caller does any classification."""
         who = speaker(source, session_id, metadata)
-        fact = told_fact(user_input)
+        fact = told_fact(user_input, soft_intent)
         if fact:
             teller = {**who, "why": "asked me to keep it", "said": user_input[:300]}
             label, ok, result = "knowledge(add)", *self._palace_call("add_document", {"fact": fact, "_told_by": teller})
