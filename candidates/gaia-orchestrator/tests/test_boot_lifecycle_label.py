@@ -16,6 +16,7 @@ def _matrix(persisted, core, prime, healthy=True):
     lm = MagicMock()
     lm._snapshot.state = persisted
     lm.set_state_external = AsyncMock()
+    lm.transition = AsyncMock(return_value=MagicMock(ok=True, to_state="focusing"))
     m = ConsciousnessMatrix(lifecycle_machine=lm)
     for tier, level in (("core", core), ("prime", prime)):
         m._tiers[tier].target = level
@@ -66,3 +67,32 @@ async def test_meditation_never_relabeled():
     m, lm = _matrix("meditation", core=U, prime=U)
     await m._verify_boot_lifecycle_label()
     lm.set_state_external.assert_not_awaited()
+
+
+
+@pytest.mark.asyncio
+async def test_awake_before_boot_goes_on_to_the_resting_gear(monkeypatch):
+    """rm08: relabeled to parked, she sat there until an explicit awake."""
+    import gaia_common.utils.maintenance as mt
+    monkeypatch.setattr(mt, "is_maintenance_active", lambda: False)
+    m, lm = _matrix("focusing", core=S, prime=U)
+    await m._verify_boot_lifecycle_label()
+    from gaia_common.lifecycle.states import TransitionTrigger
+    lm.transition.assert_awaited_once()
+    assert lm.transition.await_args.args[0] == TransitionTrigger.WAKE_SIGNAL
+
+
+@pytest.mark.asyncio
+async def test_relabel_to_awake_needs_no_wake(monkeypatch):
+    m, lm = _matrix("focusing", core=C, prime=S)
+    await m._verify_boot_lifecycle_label()
+    lm.transition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_maintenance_keeps_her_parked(monkeypatch):
+    import gaia_common.utils.maintenance as mt
+    monkeypatch.setattr(mt, "is_maintenance_active", lambda: True)
+    m, lm = _matrix("focusing", core=S, prime=U)
+    await m._verify_boot_lifecycle_label()
+    lm.transition.assert_not_awaited()

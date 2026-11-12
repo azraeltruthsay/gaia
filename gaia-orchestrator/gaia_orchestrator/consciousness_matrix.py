@@ -1047,6 +1047,21 @@ class ConsciousnessMatrix:
                 target=inferred,
                 reason=f"boot_verify: persisted {current.value} contradicted by placement",
             )
+            # rm08: she was awake before this boot, and now reads parked. Go on
+            # into the resting gear as a wake would; 2026-11-10 she sat parked
+            # until an explicit /consciousness/awake. (gaia-core's startup wake
+            # had run while the label still read 'focusing', so it did nothing.)
+            if inferred == LifecycleState.PARKED and current in (
+                    LifecycleState.AWAKE, LifecycleState.FOCUSING, LifecycleState.LISTENING):
+                from gaia_common.utils.maintenance import is_maintenance_active
+                if is_maintenance_active():
+                    logger.info("Boot check: maintenance mode, staying parked")
+                    return
+                from gaia_common.lifecycle.states import TransitionTrigger
+                result = await self._lifecycle_machine.transition(
+                    TransitionTrigger.WAKE_SIGNAL, reason="boot_verify: back to the resting gear")
+                logger.info("Boot check: wake into the resting gear -> %s",
+                            getattr(result, "to_state", result))
         except Exception as e:
             logger.warning("Boot lifecycle label check failed: %s", e)
 
