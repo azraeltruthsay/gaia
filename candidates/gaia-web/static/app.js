@@ -829,6 +829,17 @@ function chatPanel() {
                 responseText = '';
                 continue;
               }
+              if (chunk.type === 'status') {
+                // She was asleep: say so while she wakes, until her first word
+                // replaces it (the bubble sat empty, and looked stuck).
+                const msg = messages.find(m => m.id === streamId);
+                if (msg && !responseText) {
+                  msg.text = chunk.value === 'awake' ? ''
+                    : chunk.value === 'waking' ? `GAIA was asleep, waking her up… (${chunk.waited_s || 0}s)`
+                    : (chunk.value || '');
+                }
+                continue;
+              }
               if (chunk.type === 'token' && replyDone && !messages.find(m => m.id === streamId && m.type === 'gaia streaming')) {
                 streamId = store._nextMsgId++;
                 messages.push({ text: '', type: 'gaia streaming', id: streamId, ts: new Date().toISOString() });

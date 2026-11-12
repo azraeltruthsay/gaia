@@ -258,8 +258,16 @@ async def process_user_input(user_input: str, request: Request):
                         import time as _time
                         _deadline = _time.monotonic() + 120.0
                         _woke = False
+                        _waited = 0.0
                         while _time.monotonic() < _deadline:
                             await asyncio.sleep(1.5)
+                            _waited += 1.5
+                            # Never silent while she wakes: 2026-11-12 the
+                            # connection idled out after ~28 s with no bytes,
+                            # 8 s before she was up, and the message was lost.
+                            if _waited % 4.5 < 1.5:
+                                yield json.dumps({"type": "status", "value": "waking",
+                                                  "waited_s": int(_waited)}) + "\n"
                             try:
                                 async with httpx.AsyncClient(timeout=5.0) as poll_client:
                                     s = await poll_client.get(f"{core_url}/sleep/status")
@@ -268,6 +276,8 @@ async def process_user_input(user_input: str, request: Request):
                                         break
                             except Exception:
                                 pass
+                        if _woke:
+                            yield json.dumps({"type": "status", "value": "awake"}) + "\n"
                         if not _woke:
                             yield json.dumps({"type": "error", "value": "GAIA is having trouble waking up. Please try again in a moment.", "error_code": "GAIA-WEB-050"}) + "\n"
                             return
