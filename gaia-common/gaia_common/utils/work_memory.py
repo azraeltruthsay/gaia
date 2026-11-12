@@ -71,6 +71,17 @@ a an the of and in on to from for by poem poems speech text full whole entire co
 """.split())
 
 
+# Wikipedia-style footnote markers stuck to the text: Ozymandias recited from
+# the palace as "Stand in the desart.[d]" (dpi5). Attached to a word or
+# punctuation only, so a bracket that belongs to the work is kept.
+_FOOTNOTE_RE = re.compile(r"(?<=[^\s\[])\[(?:[a-z]{1,2}|\d{1,3}|note \d{1,3}|nb \d{1,3}|citation needed|clarification needed)\]",
+                          re.IGNORECASE)
+
+
+def strip_footnotes(text: str) -> str:
+    return _FOOTNOTE_RE.sub("", text or "")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -327,7 +338,7 @@ class WorkMemory:
     def remember(self, name: str, text: str, sources: List[dict]) -> Optional[str]:
         """Keep a verified text. Learning it again adds its sources and names;
         the words already kept stay unless the new copy holds more."""
-        text = (text or "").strip()
+        text = strip_footnotes(text or "").strip()
         if not name_terms(name) or not text:
             return None
         rid = hashlib.sha256(" ".join(sorted(title_terms(name) or name_terms(name))).encode()).hexdigest()[:16]
@@ -368,9 +379,10 @@ class WorkMemory:
             if wanted <= known and wanted & titles:
                 if best is None or len(known) < len(best[0]):
                     best = (known, rec)
-        if best:
-            return best[1]
-        return self._recall_misspelled(wanted)
+        rec = best[1] if best else self._recall_misspelled(wanted)
+        if rec and rec.get("text"):
+            rec = {**rec, "text": strip_footnotes(rec["text"])}   # entries kept before dpi5
+        return rec
 
     def _recall_misspelled(self, wanted: set) -> Optional[dict]:
         """One long word a letter or two off: "Jabberwockey" is Jabberwocky. Without
