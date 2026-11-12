@@ -748,6 +748,16 @@ class DiscordInterface:
 
             # Show typing indicator while GAIA processes the request
             async with message_obj.channel.typing():
+                # w1hf: Nick's Grotto message was lost when gaia-core was
+                # restarting ("All connection attempts failed"). Nothing has
+                # reached her yet, so wait for her core to come back first.
+                if not await self._wait_for_core(core_client):
+                    await self._send_response(
+                        message_obj,
+                        "I can't reach my core right now, so I didn't get to read that. "
+                        "Please send it again in a couple of minutes.",
+                        is_dm)
+                    return
                 # Use streaming POST to receive real-time tokens (Reflexes)
                 async with core_client.stream(
                     "POST",
@@ -844,6 +854,28 @@ class DiscordInterface:
         finally:
             # Return to idle presence after message processing completes
             await self._set_presence("idle", "over the studio")
+
+    async def _wait_for_core(self, client, deadline_s: float = 120.0) -> bool:
+        """Whether gaia-core answers its health check, waiting up to
+        `deadline_s` with backoff while it restarts. A quick yes when it's up."""
+        delay, waited = 1.0, 0.0
+        while True:
+            try:
+                r = await client.get(f"{self.core_endpoint}/health", timeout=5.0)
+                if r.status_code < 500:
+                    if waited:
+                        logger.info("Discord: gaia-core back after %.0fs; delivering the message", waited)
+                    return True
+            except (httpx.TransportError, httpx.TimeoutException):
+                pass
+            if waited >= deadline_s:
+                logger.warning("Discord: gaia-core unreachable for %.0fs; message not delivered", waited)
+                return False
+            if not waited:
+                logger.info("Discord: gaia-core unreachable; holding the message")
+            await asyncio.sleep(delay)
+            waited += delay
+            delay = min(delay * 2, 15.0)
 
     @staticmethod
     async def _set_presence(status: str, activity: str):
