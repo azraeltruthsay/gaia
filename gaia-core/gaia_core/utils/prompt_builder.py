@@ -359,6 +359,23 @@ def correction_line(asked: str, messages: List[Dict]) -> str:
             "words; where it already agrees with them, say so. Then carry on from what they said.")
 
 
+_POST_ASK_RE = re.compile(
+    r"\b(?:post|say|tell|send|message|announce|share|let)\b[^.?!]{0,120}\b(?:grotto|discord channel|the channel)\b"
+    r"|\b(?:grotto|discord channel)\b[^.?!]{0,60}\b(?:post|say|tell|send|announce)\b", re.IGNORECASE)
+
+
+def post_line(asked: str) -> str:
+    """How to post in the Grotto, when she's asked to. Asked in a chat turn
+    (lean prompt, no tool list) she called palace(store) and said it was
+    posted, then palace(store) with no text (2026-11-12)."""
+    if not _POST_ASK_RE.search(asked or ""):
+        return ""
+    from gaia_common.utils.tool_call_parser import TOOL_CALL_CLOSE, TOOL_CALL_OPEN
+    return ("\n\nYou can post in your Discord channel, the Grotto, and everyone there sees it: "
+            f'{TOOL_CALL_OPEN}{{"tool":"discord","action":"post","message":"<what to say, in your own words>"}}'
+            f"{TOOL_CALL_CLOSE}. A note in your memory palace reaches no one.")
+
+
 def build_from_packet(packet: CognitionPacket, *args, **kwargs) -> List[Dict]:
     """The prompt for a packet, told who she is speaking with (751u)."""
     messages = _assemble_from_packet(packet, *args, **kwargs)
@@ -616,6 +633,8 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
         # Skip the capability block so Core answers from context instead of
         # emitting a (noisy, redundant) worldstate call.
         _world_answerable = _li in _WORLD_ANSWERABLE_INTENTS
+        persona_anchor = persona_anchor + post_line(
+            getattr(getattr(packet, 'content', None), 'original_prompt', '') or '')
         if not (_chitchat or _world_answerable):
             persona_anchor = persona_anchor + _capability_block
         elif _chitchat:

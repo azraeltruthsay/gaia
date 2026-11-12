@@ -128,3 +128,13 @@ def test_a_news_request_asks_for_recent_news():
     sel = fn("Can you look up the latest news on fusion energy?")
     assert sel.params == {"action": "search", "query": "fusion energy", "recent": "m"}
     assert fn("What's today's news?").params["recent"] == "d"
+
+
+def test_asked_to_post_in_the_grotto_she_is_told_how():
+    """2026-11-12: in a chat turn (no tool list) she called palace(store) instead."""
+    from gaia_core.utils.prompt_builder import post_line
+    line = post_line("Post in the Grotto that you've heard Schwiftyboi is a silly fella named Nick please")
+    assert '"tool":"discord","action":"post"' in line and "reaches no one" in line
+    assert post_line("Can you tell Nick in the grotto I said hi?")
+    assert post_line("What's the Grotto like?") == ""
+    assert post_line("Tell me about your day") == ""
