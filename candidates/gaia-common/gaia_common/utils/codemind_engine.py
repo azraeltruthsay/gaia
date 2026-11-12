@@ -94,6 +94,8 @@ DEFAULT_CONFIG = {
     "max_changes_per_cycle": 3,
     "auto_promote": False,
     "dry_run": True,
+    "write_regression_test": True,  # a0aw.8: write+prove a test alongside the fix
+    "replay_check": True,  # a0aw.3: resend the offending turn to the candidate
     "scope_tiers": {
         "tier1_auto": True,
         "tier2_supervised": True,
@@ -372,6 +374,52 @@ CURRENT CODE:
 
 Respond with ONLY the complete fixed file content. No markdown fences. No explanation.
 Start with the first line of the file."""
+
+    # ── Regression-Test Prompt Construction (a0aw.8) ────────────────────
+
+    @staticmethod
+    def build_regression_test_prompt(
+        file_path: str,
+        module: str,
+        issue_description: str,
+        file_content: str,
+        patch_summary: str = "",
+    ) -> str:
+        """Build the LLM prompt for CodeMind's regression-test step: a
+        complete pytest module that reproduces the specific bug just fixed.
+
+        Shown the SAME content the fix itself was shown (file_content may be
+        an excerpt of one function for an oversized file, a0aw.7) so the test
+        matches what the model actually reasoned about. The caller never
+        trusts this as a safety boundary — it is AST-validated, then run
+        against the untouched original before being trusted as proof of
+        anything (if it doesn't fail there, it proves nothing and is
+        discarded, never applied).
+        """
+        patch_line = f"\nTHE FIX JUST APPLIED: {patch_summary}" if patch_summary else ""
+        return f"""You are CodeMind, GAIA's code self-improvement layer. Write ONE regression test \
+that reproduces the specific bug below — it must FAIL against the current (buggy) code shown, \
+and would PASS once the fix is applied.
+
+RULES:
+- Output a COMPLETE, self-contained pytest module. No markdown fences, no explanation.
+- It MUST import {module} (or call into it directly) and define at least one `def test_...`.
+- Test the specific scenario in the bug description — do not write a generic smoke test.
+- No mocks that bypass the buggy code path itself.
+- Keep it short: one or two test functions, no fixtures beyond what's needed.
+- If you can't write a test that actually exercises this bug, respond: NO_TEST: <reason>
+
+FILE: {file_path}
+MODULE: {module}
+BUG: {issue_description}{patch_line}
+
+CURRENT CODE:
+```python
+{file_content}
+```
+
+Respond with ONLY the complete test module source. No markdown fences. No explanation.
+Start with the first line of the file (an import)."""
 
     # ── Capability-Skill Prompt Construction (9ar0) ─────────────────────
 

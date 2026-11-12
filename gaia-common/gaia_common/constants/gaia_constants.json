@@ -754,6 +754,8 @@
     "max_changes_per_cycle": 3,
     "auto_promote": false,
     "dry_run": false,
+    "write_regression_test": true,
+    "replay_check": true,
     "scope_tiers": {
       "tier1_auto": true,
       "tier2_supervised": true,

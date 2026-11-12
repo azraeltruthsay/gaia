@@ -1620,6 +1620,9 @@ class SleepTaskScheduler:
             # a restart manifest at cycle end (self-deploy loop closure).
             _cycle_applied_files: list = []
             _cycle_tested: list = []  # a0aw.2: what the candidate tests said
+            _cycle_regression_tests: list = []  # a0aw.8: written+proven test files to ship with their fix
+            _cycle_replay_confirmed: set = set()  # a0aw.3: issue-sourced, non-vital, replay said symptom's gone
+            _cycle_replay_notes: list = []  # a0aw.3: evidence strings for the manifest
 
             # ── Direct seed bridge (fallback if initiative_cycle didn't run) ──
             # Initiative cycle is gated on serenity; this ensures seeds
@@ -1842,6 +1845,7 @@ class SleepTaskScheduler:
                 run_tests = bool(engine.config.get("validation", {}).get("pytest", True))
                 attempts = 1 + (int(codemind_cfg.get("test_retries", 1)) if run_tests else 0)
                 feedback = ""
+                extra_test_path: Optional[Path] = None
                 for attempt in range(attempts):
                     if attempt:
                         engine.transition(CodeMindState.PROPOSE)
@@ -1893,6 +1897,18 @@ class SleepTaskScheduler:
                         engine.transition(CodeMindState.IDLE)
                         break
 
+                    # ── a0aw.8: write a regression test while the original is
+                    # still on disk — it's only trustworthy proof if it fails
+                    # against the unfixed code. Soft/advisory: a declined,
+                    # unparsable, or non-reproducing test never blocks the fix.
+                    if (extra_test_path is None and not attempt
+                            and bool(codemind_cfg.get("write_regression_test", True))):
+                        extra_test_path = self._codemind_write_regression_test(
+                            engine, file_path, issue + feedback, prompt_content,
+                            change.diff_summary,
+                            hint=(detection.get("metadata") or {}).get("issue_id")
+                                 or os.path.basename(file_path))
+
                     engine.transition(CodeMindState.APPLY)
                     self.check_interrupted()
 
@@ -1915,7 +1931,8 @@ class SleepTaskScheduler:
                     if run_tests:
                         engine.transition(CodeMindState.VERIFY)
                         from gaia_common.utils.codemind_tests import run_test_step
-                        tested = run_test_step(file_path)
+                        tested = run_test_step(
+                            file_path, extra=[str(extra_test_path)] if extra_test_path else None)
                         change.validation_result = {**(change.validation_result or {}), "tests": {
                             k: tested.get(k) for k in ("ok", "service", "paths", "summary")}}
                         if not tested.get("ok"):
@@ -1937,11 +1954,63 @@ class SleepTaskScheduler:
                         logger.info("CodeMind: tests passed for %s: %s", file_path, tested.get("summary"))
                         _cycle_tested.append(f"{os.path.basename(file_path)}: {tested.get('summary')}")
 
+                    # ── a0aw.3: replay the offending turn on the candidate —
+                    # the module's tests prove the function behaves; this
+                    # proves the real symptom is gone, independent of whether
+                    # her diagnosis even named the right place.
+                    _replay_result: Optional[dict] = None
+                    if _from_issue and bool(codemind_cfg.get("replay_check", True)):
+                        from gaia_common.utils import codemind_replay
+                        _meta = detection.get("metadata") or {}
+                        _checks = (codemind_replay.check_for_playbook(_meta.get("playbook", ""))
+                                   if _meta.get("original_prompt") else None)
+                        if _checks:
+                            if not run_tests:
+                                engine.transition(CodeMindState.VERIFY)
+                            self.check_interrupted()
+                            _replay_result = codemind_replay.replay_turn(_meta["original_prompt"], **_checks)
+                            if _replay_result.get("symptom_seen"):
+                                with open(file_path, "w", encoding="utf-8") as f:
+                                    f.write(original_content)
+                                change.error = f"Replay: symptom still present ({_replay_result.get('detail')})"
+                                change.validation_result = {**(change.validation_result or {}),
+                                                            "replay": _replay_result}
+                                logger.warning(
+                                    "CodeMind: replay still shows the symptom for %s (%s); file restored%s",
+                                    file_path, _replay_result.get("detail"),
+                                    ", proposing again" if attempt + 1 < attempts else "")
+                                engine.record_change(change)
+                                feedback = (
+                                    "\n\nYour previous fix passed the tests, but replaying the original "
+                                    "request against the candidate still showed the symptom "
+                                    f"({_replay_result.get('detail')}). Propose a different fix, or "
+                                    "answer CANNOT_FIX.")
+                                if attempt + 1 >= attempts:
+                                    engine.transition(CodeMindState.IDLE)
+                                continue
+                            if _replay_result.get("ok"):
+                                change.validation_result = {**(change.validation_result or {}),
+                                                            "replay": _replay_result}
+                            else:
+                                _replay_result = None  # inconclusive — trusted neither way
+
                     change.applied = True
                     _cycle_applied_files.append(file_path)
+                    if extra_test_path:
+                        _cycle_regression_tests.append(str(extra_test_path))
+                    if _replay_result and _replay_result.get("ok") and not _replay_result.get("symptom_seen"):
+                        _cycle_replay_confirmed.add(file_path)
+                        _cycle_replay_notes.append(
+                            f"{os.path.basename(file_path)}: replay confirmed symptom gone "
+                            f"({_replay_result.get('detail')})")
                     engine.record_change(change)
                     engine.transition(CodeMindState.IDLE)
                     break
+
+                # a0aw.8: a test written for a fix that was never kept is an
+                # orphan — never leave a permanently-failing test in the tree.
+                if extra_test_path and file_path not in _cycle_applied_files:
+                    extra_test_path.unlink(missing_ok=True)
 
             # a0aw.7: tell her issues how it went
             _changes = list(engine._current_cycle.changes) if engine._current_cycle else []
@@ -1952,10 +2021,16 @@ class SleepTaskScheduler:
                 mine = [c for c in _changes if c.get("file_path") == fp]
                 kept = fp in _cycle_applied_files
                 tests = ((mine[-1].get("validation_result") or {}).get("tests") or {}) if mine else {}
+                replay = ((mine[-1].get("validation_result") or {}).get("replay") or {}) if mine else {}
                 if kept:
                     why = f"candidate tests: {tests.get('summary') or 'not run'}"
-                    why += "; waiting for Azrael to review and promote" + (
-                        f" ({os.path.basename(fp)} is a vital organ)" if is_vital_organ(fp) else "")
+                    if replay:
+                        why += f"; replay confirmed symptom gone on gaia-core-candidate ({replay.get('detail', '')})"
+                    if is_vital_organ(fp) or fp not in _cycle_replay_confirmed:
+                        why += "; waiting for Azrael to review and promote" + (
+                            f" ({os.path.basename(fp)} is a vital organ)" if is_vital_organ(fp) else "")
+                    else:
+                        why += "; self-deploying (not a vital organ, replay confirmed the symptom is gone)"
                 elif mine:
                     why = mine[-1].get("error") or "no change was kept"
                 else:
@@ -1975,20 +2050,24 @@ class SleepTaskScheduler:
             # A vital organ (main.py, agent_core.py, ...) is never self-deployed:
             # its manifest goes to the architect queue for Azrael (a0aw.7; the
             # gate existed as is_vital_organ but nothing called it).
-            # Nor is a fix for one of her issues, until a replay step shows the
-            # symptom gone: her lead can be wrong and still pass the tests.
+            # a0aw.3: a fix for one of her issues on a NON-vital file now
+            # self-deploys once replay confirms the symptom is gone — a vital
+            # organ (_vital, via `or`) always goes to Azrael regardless.
             _from_issues = {d.get("file_path") for d in detections if (d.get("metadata") or {}).get("issue_id")}
             _vital = [f for f in _cycle_applied_files if is_vital_organ(f)]
-            _review = _vital or [f for f in _cycle_applied_files if f in _from_issues]
+            _review = _vital or [f for f in _cycle_applied_files
+                                  if f in _from_issues and f not in _cycle_replay_confirmed]
             if _cycle_applied_files and bool(codemind_cfg.get("self_deploy", True)):
                 try:
                     from gaia_common.utils.codemind_manifest import build_manifest_for_files
                     _repo = os.environ.get("GAIA_REPO_ROOT", "/gaia/GAIA_Project")
                     manifest, merr = build_manifest_for_files(
-                        [os.path.relpath(f, _repo) if os.path.isabs(f) else f for f in _cycle_applied_files],
+                        [os.path.relpath(f, _repo) if os.path.isabs(f) else f
+                         for f in _cycle_applied_files + _cycle_regression_tests],
                         requested_by="codemind",
                         evidence=[f"validate_full + diff_safety passed on {len(_cycle_applied_files)} file(s)"]
-                        + [f"candidate tests: {t}" for t in _cycle_tested],
+                        + [f"candidate tests: {t}" for t in _cycle_tested]
+                        + [f"replay: {t}" for t in _cycle_replay_notes],
                     )
                     if merr:
                         logger.info("CodeMind: no self-deploy manifest (%s)", merr)
@@ -2063,6 +2142,49 @@ class SleepTaskScheduler:
             logger.info("CodeMind: LLM declined: %s", proposed.strip()[:200])
             return None
         return proposed
+
+    # ------------------------------------------------------------------
+    def _codemind_write_regression_test(
+        self, engine, file_path: str, issue: str, prompt_content: str,
+        diff_summary: str, hint: str,
+    ) -> Optional[Path]:
+        """a0aw.8: ask for a pytest module reproducing this bug; keep it only
+        if it fails on the untouched original (file_path still holds it here
+        when this is called) — that's the proof it exercises the bug, not
+        theater. Soft/advisory throughout: a decline, an unparsable response,
+        or a test that doesn't reproduce the bug all return None and change
+        nothing — VERIFY then runs exactly what it runs today."""
+        from gaia_common.utils import codemind_regression, codemind_tests
+
+        repo_root = Path(os.environ.get("GAIA_REPO_ROOT", str(codemind_tests.REPO_ROOT)))
+        located = codemind_tests.locate(file_path, repo_root=repo_root)
+        if located is None:
+            return None
+        service, root, module = located
+
+        response = self._codemind_propose(engine.build_regression_test_prompt(
+            file_path=file_path, module=module, issue_description=issue,
+            file_content=prompt_content, patch_summary=diff_summary,
+        ))
+        if not response or response.strip().startswith("NO_TEST"):
+            return None
+
+        ok, why = codemind_regression.validate_test_code(response, module)
+        if not ok:
+            logger.info("CodeMind: regression test for %s rejected (%s)", file_path, why)
+            return None
+
+        path = codemind_regression.write_test(root, response, codemind_regression.test_filename(hint))
+        rel = str(path.relative_to(root))
+        result = codemind_tests.run_tests(service, [rel])
+        if result.get("ok"):
+            logger.info("CodeMind: regression test for %s passed against the UNFIXED original "
+                       "(proves nothing); discarding: %s", file_path, rel)
+            path.unlink(missing_ok=True)
+            return None
+        logger.info("CodeMind: regression test for %s fails on the original as expected (%s): %s",
+                   file_path, result.get("summary"), rel)
+        return path
 
     # ------------------------------------------------------------------
     @staticmethod

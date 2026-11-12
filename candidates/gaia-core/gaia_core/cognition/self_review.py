@@ -136,9 +136,30 @@ def _only_asked(line: str, asked: List[str]) -> bool:
     return bool(e) and any(e in a or a in e for a in asked if a)
 
 
+def _match_turn(finding: Dict[str, object], turns: List[dict]) -> Optional[dict]:
+    """The one turn this finding's evidence points to (a0aw.3) — its
+    `asked_full` becomes the finding's `original_prompt`, for a later replay
+    step to resend. A wrong match here would let a fix get validated against
+    the wrong request, so it never guesses: an evidence line under 12 chars
+    is too generic to trust, and if the remaining lines point at zero or
+    more than one turn, this returns None rather than picking one."""
+    matched: set = set()
+    evidence = finding.get("evidence")
+    for line in (evidence if isinstance(evidence, list) else []):
+        line = str(line).strip().lower()
+        if len(line) < 12:
+            continue
+        for i, t in enumerate(turns):
+            if line in (t.get("rendered") or "").lower():
+                matched.add(i)
+    if len(matched) == 1:
+        return turns[next(iter(matched))]
+    return None
+
+
 def record(findings: List[Dict[str, object]], base: Optional[Path] = None,
            playbooks: Optional[List[str]] = None, max_new: Optional[int] = None,
-           asked: Optional[List[str]] = None) -> Dict[str, list]:
+           asked: Optional[List[str]] = None, turns: Optional[List[dict]] = None) -> Dict[str, list]:
     """File each finding in her ledger; a duplicate of an open issue becomes a note.
     A playbook name that isn't one she was shown is dropped (she named playbooks
     that don't exist in the first trial); the finding itself still stands."""
@@ -157,9 +178,11 @@ def record(findings: List[Dict[str, object]], base: Optional[Path] = None,
         if len(filed) >= (MAX_FILED_PER_BATCH if max_new is None else max_new):
             refused.append({"title": f["title"], "error": f"more than {MAX_FILED_PER_BATCH} in one review"})
             continue
+        matched = _match_turn(f, turns or [])
         r = L.file_issue(str(f["title"]), str(f["symptom"]), list(f["evidence"]),
                          suspected_cause=str(f["cause"]), playbook=str(f["playbook"]),
-                         source=SOURCE, base=base)
+                         source=SOURCE, base=base,
+                         original_prompt=(matched.get("asked_full") or "") if matched else "")
         if not r.get("ok"):
             refused.append({"title": f["title"], "error": r.get("error", "")})
         elif r.get("duplicate"):
@@ -201,7 +224,7 @@ def run_self_review(generate: Callable[[str, str], str], *, log_file: Path, hist
             break
         findings = parse_findings(answer)
         result = record(findings, base=base, playbooks=view.get("playbooks") or [],
-                        asked=asked_lines(view["text"]))
+                        asked=asked_lines(view["text"]), turns=view.get("turns"))
         last = datetime.fromisoformat(view["turns"][-1]["ts"])
         _log_review({"ts": time.time(), "since": cursor.isoformat(), "through": last.isoformat(),
                      "turns": [t["ref"] for t in view["turns"]], "seconds": round(time.time() - started, 1),

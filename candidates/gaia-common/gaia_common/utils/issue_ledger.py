@@ -189,6 +189,7 @@ def issues(base: Optional[Path] = None) -> Dict[str, dict]:
                 "filed": ev.get("ts"),
                 "notes": [],
                 "file": "",
+                "original_prompt": ev.get("original_prompt", ""),
             }
         elif iid in state and kind == "note":
             state[iid]["notes"].append({"ts": ev.get("ts"), "text": ev.get("text", "")})
@@ -213,9 +214,15 @@ def _is_closed(issue: dict) -> bool:
 
 
 def file_issue(title: str, symptom: str, evidence, suspected_cause: str = "",
-               playbook: str = "", source: str = "self", base: Optional[Path] = None) -> dict:
+               playbook: str = "", source: str = "self", base: Optional[Path] = None,
+               original_prompt: str = "") -> dict:
     """Record a bug she found. `evidence` is the log lines or reply text she
-    actually saw (a string or a list of lines); at least one is required."""
+    actually saw (a string or a list of lines); at least one is required.
+
+    `original_prompt` (a0aw.3): the verbatim request that triggered this,
+    when the caller can tie the finding to one specific turn — kept separate
+    from `evidence` (which deliberately excludes bare "asked" text as fault
+    evidence) so a later replay step can resend exactly what was asked."""
     title = _clip(title, 120)
     symptom = _clip(symptom)
     if isinstance(evidence, str):
@@ -254,7 +261,8 @@ def file_issue(title: str, symptom: str, evidence, suspected_cause: str = "",
     iid = "gi-" + hashlib.sha1(f"{title}|{symptom}|{ts}".encode()).hexdigest()[:6]
     _append({"event": "file", "id": iid, "ts": ts, "title": title, "symptom": symptom,
              "evidence": evidence, "evidence_verified": verified, "suspected_cause": _clip(suspected_cause),
-             "playbook": _clip(playbook, 80), "source": _clip(source, 40)}, base)
+             "playbook": _clip(playbook, 80), "source": _clip(source, 40),
+             "original_prompt": _clip(original_prompt, 4000)}, base)
     unverified = len(verified) - sum(verified)
     note = f" {unverified} evidence line(s) did not match what you were shown and are marked unverified." if unverified else ""
     return {"ok": True, "id": iid, "evidence_verified": verified, "message": f"Filed {iid}.{note} It becomes a bead (label gaia-found) "

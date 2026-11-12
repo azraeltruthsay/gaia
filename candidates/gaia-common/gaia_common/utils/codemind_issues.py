@@ -191,7 +191,9 @@ def detections(base: Optional[Path] = None, repo_root: Optional[Path] = None, li
         out.append({
             "source": SOURCE, "issue_type": "self_reported", "file_path": str(path),
             "description": describe(issue, symbol), "severity": "warn",
-            "metadata": {"issue_id": issue["id"], "symbol": symbol, "fingerprint": _fingerprint(issue)},
+            "metadata": {"issue_id": issue["id"], "symbol": symbol, "fingerprint": _fingerprint(issue),
+                         "playbook": issue.get("playbook", ""),
+                         "original_prompt": issue.get("original_prompt", "")},
         })
         if len(out) >= limit:
             break

@@ -198,6 +198,23 @@ def test_criteria_fit_inside_budget(tmp_path):
     assert len(r["text"]) < 1400 and "playbooks say" in r["text"]
 
 
+def test_turns_carry_asked_full_and_rendered(tmp_path):
+    """a0aw.3: a later replay step needs the verbatim request and the
+    rendered block each turn dict now carries, not just its ref/ts."""
+    log, hist = _setup(tmp_path)
+    r = T.review_turns(log, hist, since=T.parse_window_bound(60, NOW), now=NOW)
+    turns = r["turns"]
+    assert len(turns) == 2
+    poem, haiku = turns
+    assert poem["asked_full"] == "Write a two-line poem about rain on a tin roof."
+    assert haiku["asked_full"] == "Write a haiku about a cat watching snow."
+    assert "tool routing fired (intent brainstorming)" in haiku["rendered"]
+    assert "tool routing did not fire" in poem["rendered"]
+    # rendered stays in lockstep with the budget-trimming loop, not just the raw turn list
+    r2 = T.review_turns(log, hist, since=T.parse_window_bound(60, NOW), now=NOW, text_budget=50)
+    assert len(r2["turns"]) == 1 and r2["turns"][0]["rendered"]
+
+
 def test_oldest_first_shows_first_turns_and_their_times(tmp_path):
     log = tmp_path / "gaia-core.log"
     log.write_text(LOG)

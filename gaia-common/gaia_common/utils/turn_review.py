@@ -394,6 +394,7 @@ def review_turns(log_file: Path, history_dir: Path, since: Optional[datetime] = 
         "count": total,
         "playbooks": [name for name, _ in criteria],
         "turns": [{"ref": t["ref"], "packet": t["packet"], "session": t.get("session"),
-                   "ts": t["ts"].isoformat()} for t in turns],
+                   "ts": t["ts"].isoformat(), "asked_full": t.get("asked_full") or t.get("asked", ""),
+                   "rendered": "\n".join(r)} for t, r in zip(turns, rendered)],
         "_raw_lines": [ln for t in turns for ln in t["_lines"]],
     }

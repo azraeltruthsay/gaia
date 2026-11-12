@@ -27,6 +27,10 @@ def setup(tmp_path, monkeypatch):
     s = SleepTaskScheduler.__new__(SleepTaskScheduler)
     s.config = SimpleNamespace(constants={"CODEMIND": {
         "enabled": True, "dry_run": False, "patch_mode": False, "self_deploy": False, "test_retries": 1,
+        # a0aw.8/a0aw.3 are exercised by their own dedicated tests; this
+        # fixture's call-counting mocks don't expect the extra propose() call
+        # the regression-test step would make.
+        "write_regression_test": False, "replay_check": False,
         "validation": {"py_compile": True, "ruff": False, "ast_parse": True, "pytest": True}}})
     s.check_interrupted = lambda: None
     return s, target, codemind_tests, monkeypatch

@@ -1,6 +1,8 @@
 # Self-Repair Loop — GAIA finds, fixes and tracks her own bugs
 
-> Status: **PROPOSED, first run pending** (2026-11-08). Experiment bead: `mjcg`.
+> Status: **infrastructure complete (2026-11-12), first full run still pending**. All eight
+> loop steps exist now (Notice→Match→Record→Analyze→Propose→Test→Validate→Promote); none has
+> yet carried a real bug all the way through on its own. Experiment bead: `mjcg`.
 
 ## Why
 
@@ -22,9 +24,9 @@ logs, and the fix and its lesson both stay with her, is the point.
 | **Record** | the `self_review` sleep task (a0aw.4, `gaia_core/cognition/self_review.py`) does Notice → Match → Record in one pass: turn view (oldest first from a cursor) + playbook symptoms in, her `ISSUE/PLAYBOOK/EVIDENCE/SYMPTOM/CAUSE` blocks out, filed by code; every review kept with her full answer in `reviews.jsonl`. Also her issue ledger: `issue(action=file / note / status / list)` → `/shared/issues/ledger.jsonl` (`gaia_common/utils/issue_ledger.py`); evidence required, duplicates of open issues refused, 10/day cap. Host bridge `scripts/gaia_issue_bridge.py` makes each a bead (`gaia-found`) and writes bead id + status back (`beads.json`) | **yes** (a0aw.1); bridge timer in `scripts/systemd/`, installed by hand |
 | **Analyze** | the `issue_investigation` sleep task (a0aw.9, `gaia_core/cognition/issue_investigation.py`): for an open issue naming no place, she gets the issue and her matched playbook (whole, "Find it" included) and up to 8 actions — `SEARCH` / `READ` over the candidate packages — ending in `PLACE` + `NOTE` or `NOT_FOUND`. The place must be one she read or saw in a search result; a large file needs a function. The finding goes on her issue as a note with `file`. Transcripts in `investigations.jsonl` | **yes** (a0aw.9) |
 | **Propose** | CodeMind ANALYZE → PROPOSE (`build_fix_prompt`, `codemind_patch` search/replace blocks), candidate files only. Her open issues reach it once she names where (`issue(note/status, file=…)`, or a file/function in her cause or notes): `gaia_common/utils/codemind_issues.py` (a0aw.7) turns them into direct-fix detections, a large file is shown as the function she named, and the outcome goes back to her issue ('proposed' with the test result, or a note why not; 2 tries, a retry only after she adds something) | **yes** (a0aw.7); she finds the place herself in sleep (a0aw.9, `issue_investigation`) |
-| **Test** | candidate pytest for the touched module, plus a new regression test she writes | **yes** (a0aw.2): CodeMind's VERIFY runs the tests named after or importing the touched module in `gaia-core-candidate` (orchestrator `POST /candidate/test`, `gaia_common/utils/codemind_tests.py`); failure restores the file and goes back to PROPOSE once with the report. No covering test = not validated. She can't write the regression test yet |
-| **Validate** | the live symptom gone on `gaia-core-candidate` (replay the turn that showed it) | **gap**: no replay step |
-| **Promote** | `promote_pipeline.sh`; vital organs (`agent_core.py`, `main.py`, …) need Azrael's approval: a CodeMind fix touching one is written to `/shared/doctor/architect_queue/`, never `restart_requests/` (the `is_vital_organ` gate existed but nothing called it until a0aw.7) | yes (gated) |
+| **Test** | candidate pytest for the touched module, plus a new regression test she writes | **yes** (a0aw.2, a0aw.8): CodeMind's VERIFY runs the tests named after or importing the touched module in `gaia-core-candidate` (orchestrator `POST /candidate/test`, `gaia_common/utils/codemind_tests.py`); failure restores the file and goes back to PROPOSE once with the report. Before APPLY, `_codemind_write_regression_test` (`sleep_task_scheduler.py`) asks for a pytest module (`codemind_engine.build_regression_test_prompt`), AST-validates it (`gaia_common/utils/codemind_regression.py`), and — the proof, not theater — runs it against the still-unpatched original: kept as VERIFY's `extra` test only if it fails there; discarded (and the orphan file deleted) if it doesn't, or if the model declines (`NO_TEST: …`) |
+| **Validate** | the live symptom gone on `gaia-core-candidate` (replay the turn that showed it) | **yes** (a0aw.3, `gaia_common/utils/codemind_replay.py`): for an issue-sourced fix whose playbook has a registered check (today: `ts-misrouted-request` → no `Tool routing triggered for intent:` line) and whose issue carries the verbatim `original_prompt` she was asked, `replay_turn` resends it as a real CognitionPacket straight to `gaia-core-candidate:6415/process_packet` and polls its own log (`gaia_common/utils/turn_review.read_log_lines`) for the symptom. `original_prompt` is new on the issue ledger and only populated going forward — self_review's `_match_turn` attaches a turn's verbatim text to a finding only when its evidence uniquely matches one turn (ambiguous → none, never a guess); the 5 issues open before this shipped have none, so replay is skipped for them. Symptom still present → treated as a test failure (restored, retried). Inconclusive (unreachable, no check, no prompt) → skipped, never a verdict either way |
+| **Promote** | `promote_pipeline.sh`; vital organs (`agent_core.py`, `main.py`, …) need Azrael's approval: a CodeMind fix touching one is written to `/shared/doctor/architect_queue/`, never `restart_requests/` (the `is_vital_organ` gate existed but nothing called it until a0aw.7) | yes (gated). **a0aw.3**: a non-vital, issue-sourced fix whose replay confirmed the symptom gone now skips the architect queue and self-deploys — `_vital` still wins unconditionally, so a vital organ (mjcg's `agent_core.py` among them) always waits for Azrael regardless of replay |
 | **Learn** | write or update the playbook that would have found this faster; record the outcome in the palace (`record_skill_outcome`); close the issue | partial (SkillCreator drafts from failure patterns) |
 
 The **Learn** step is the recursion: every fix leaves a playbook, and the playbooks are
@@ -59,9 +61,9 @@ not do her steps for her.
 1. ~~Issue ledger she can write that lands in beads.~~ Done (a0aw.1).
 2. ~~Test step in CodeMind VALIDATE (run the touched module's tests in the candidate).~~ Done (a0aw.2).
 5. ~~Her issue becomes a CodeMind detection; a direct-fix path for a one-file behavioral bug.~~ Done (a0aw.7).
-6. CodeMind writes a regression test with the fix (a0aw.8).
+6. ~~CodeMind writes a regression test with the fix (a0aw.8).~~ Done.
 7. ~~She investigates an open issue in sleep and names where the bug is (a0aw.9).~~ Done.
-3. Replay step: re-send the offending turn to `gaia-core-candidate` and compare.
+3. ~~Replay step: re-send the offending turn to `gaia-core-candidate` and compare.~~ Done (a0aw.3).
 4. A sleep task that runs the Notice step over the day's logs with the playbooks. **Done** (`a0aw.4`): `self_review`.
 
 ## Run log
@@ -153,3 +155,21 @@ not do her steps for her.
   honest "it's in gaia-mcp's code, which I can't read here". So every fix from her issues now
   waits in the architect queue: her lead can be wrong and still pass the tests, and no
   replay step checks the symptom yet.
+- **2026-11-12, Test + Validate** (`a0aw.8`, `a0aw.3`, Claude — infrastructure only, never the
+  fix itself): both remaining gaps closed. `_codemind_write_regression_test` now asks for a
+  test before APPLY and keeps it only if it fails on the untouched original — proof the test
+  exercises the bug, not theater; a test that passes on the buggy original, or a decline
+  (`NO_TEST: …`), is discarded without blocking the fix. `codemind_replay.replay_turn` resends
+  the real request straight into `gaia-core-candidate` and polls its own log, so Validate no
+  longer trusts her diagnosis — only what actually happens. The missing piece for Validate was
+  that no issue carried the verbatim request forward: `self_review`'s `_match_turn` now attaches
+  one only when a finding's evidence uniquely matches a single turn (ambiguous → none, by
+  design — a wrong match could validate a fix against the wrong request). A non-vital,
+  issue-sourced fix with a confirmed-clean replay now self-deploys instead of waiting in the
+  architect queue; `agent_core.py` (where `mjcg` lives) is a vital organ, so it waits regardless
+  of replay, same as before. The 5 issues open before this shipped (including `mjcg`'s own,
+  `ts-misrouted-request`) have no `original_prompt` and are unaffected until she adds something
+  new. 1523 gaia-core + 1034 gaia-common tests pass; one live smoke call against the real
+  `gaia-core-candidate` (a generic, bug-agnostic check) confirmed the packet→log round trip.
+  Verified `mjcg` itself was never touched, hand-filed, or hinted at by this work — she still has
+  to find, name, and propose it herself.

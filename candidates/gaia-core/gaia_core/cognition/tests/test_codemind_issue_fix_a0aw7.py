@@ -43,6 +43,10 @@ def _setup(tmp_path, monkeypatch, filename):
     s = SleepTaskScheduler.__new__(SleepTaskScheduler)
     s.config = SimpleNamespace(constants={"CODEMIND": {
         "enabled": True, "dry_run": False, "patch_mode": True, "self_deploy": True,
+        # a0aw.8/a0aw.3 are exercised by their own dedicated tests; this
+        # fixture's mock returns the same patch for every _codemind_propose
+        # call regardless of prompt, so leave the newer steps off here.
+        "write_regression_test": False, "replay_check": False,
         "validation": {"py_compile": True, "ruff": False, "ast_parse": True, "pytest": True}}})
     s.check_interrupted = lambda: None
     prompts = []

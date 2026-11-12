@@ -62,6 +62,25 @@ def test_open_issue_naming_a_place_becomes_a_detection(tmp_path):
     assert d["file_path"].endswith("agent_core.py") and "tool routing fired" in d["description"]
 
 
+def test_detection_carries_playbook_and_original_prompt(tmp_path):
+    """a0aw.3: a later replay step needs these on the detection metadata,
+    not just the issue — empty when the issue has neither."""
+    root, base = _repo(tmp_path), tmp_path / "issues"
+    iid = _issue(base, suspected_cause="AgentCore._should_use_tool_routing",
+                playbook="ts-misrouted-request",
+                original_prompt="Write a haiku about a cat watching snow.")
+    [d] = C.detections(base, root)
+    assert d["metadata"]["playbook"] == "ts-misrouted-request"
+    assert d["metadata"]["original_prompt"] == "Write a haiku about a cat watching snow."
+
+    L.record_shown(["selector: no tool needed"], base=base)
+    iid2 = L.file_issue("Another misroute entirely", "also routed wrongly, a different one",
+                        ["selector: no tool needed"], suspected_cause="AgentCore.run_turn", base=base)["id"]
+    [d2] = [x for x in C.detections(base, root) if x["metadata"]["issue_id"] == iid2]
+    assert d2["metadata"]["playbook"] == "" and d2["metadata"]["original_prompt"] == ""
+    assert iid != iid2
+
+
 def test_no_place_no_detection_until_she_names_one(tmp_path):
     root, base = _repo(tmp_path), tmp_path / "issues"
     iid = _issue(base, suspected_cause="the routing trigger misread the request")

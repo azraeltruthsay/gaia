@@ -127,6 +127,28 @@ def test_shown_lines_expire(tmp_path, monkeypatch):
     assert L.verify_evidence(["tool routing fired (intent brainstorming)"], base=tmp_path) == [False]
 
 
+def test_original_prompt_round_trips(tmp_path):
+    """a0aw.3: the verbatim request a replay step resends, kept separate
+    from fault evidence."""
+    r = _file(tmp_path, original_prompt="Write a haiku about a cat watching snow.")
+    issue = L.get_issue(r["id"], base=tmp_path)["issue"]
+    assert issue["original_prompt"] == "Write a haiku about a cat watching snow."
+    assert issue["evidence"] == EVIDENCE  # unaffected, a separate field
+
+
+def test_original_prompt_defaults_empty(tmp_path):
+    """Issues filed before this field existed (or without it) must read back
+    '' — never None, never missing — so callers can treat it uniformly."""
+    r = _file(tmp_path)
+    assert L.get_issue(r["id"], base=tmp_path)["issue"]["original_prompt"] == ""
+
+
+def test_original_prompt_clipped(tmp_path):
+    r = _file(tmp_path, original_prompt="x" * 5000)
+    got = L.get_issue(r["id"], base=tmp_path)["issue"]["original_prompt"]
+    assert len(got) <= 4000 and got.endswith("…")
+
+
 def test_tool_wiring():
     assert ACTION_TO_LEGACY[("introspect", "turns")] == "introspect_turns"
     assert "introspect_turns" in TOOLS and "introspect_turns" in SAFE_SIDECAR_TOOLS
