@@ -120,3 +120,25 @@ def test_azrael_in_a_channel_is_not_told_he_is_absent(tmp_path):
     grotto = "discord_channel_1484003096337191067"
     assert creator_line(grotto, "hi", reg, author_id="596925786208993283") == ""
     assert "is not the one speaking now" in creator_line(grotto, "hi", reg, author_id="111111111111111111")
+
+
+
+def test_pronouns_said_in_a_channel_are_the_authors(tmp_path):
+    from gaia_common.utils.people import PeopleRegistry, channel_speaker_line, note_channel_author
+    reg = PeopleRegistry(tmp_path)
+    grotto = "discord_channel_1484003096337191067"
+    nick = note_channel_author(grotto, "111111111111111111", "Schwiftyboi", reg)
+    assert reg.note_pronouns(grotto, "fyi my pronouns are he/him") is None      # the channel isn't him
+    reg.note_pronouns(grotto, "fyi my pronouns are he/him", speaker=nick)
+    assert reg.get(nick["id"])["pronouns"] == "he/him"
+    assert "Schwiftyboi's pronouns are he/him" in channel_speaker_line(grotto, "111111111111111111", reg)
+
+
+
+def test_pronoun_line_uses_the_name_they_were_introduced_by(tmp_path):
+    from gaia_common.utils.people import PeopleRegistry, note_channel_author, note_introduction, pronoun_words
+    reg = PeopleRegistry(tmp_path)
+    note_introduction("Schwiftyboi is a friend of mine named Nick", "Azrael", "Discord DM", reg)
+    nick = note_channel_author("discord_channel_1484003096337191067", "111111111111111111", "Schwiftyboi", reg)
+    reg.note_pronouns("x", "my pronouns are he/him", speaker=nick)
+    assert pronoun_words(reg.get(nick["id"])).startswith("Nick's pronouns are he/him")

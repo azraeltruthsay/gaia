@@ -2545,7 +2545,7 @@ async def process_packet(packet_data: Dict[str, Any]):
             else:
                 _teller = _people.for_session(_sid)
             _pp.note_introduction(_asked, _pp._main_name(_teller) if _teller else "", _channel_of(_sid), _people)
-            if _people.note_pronouns(_sid, _asked):
+            if _people.note_pronouns(_sid, _asked, speaker=_teller if _pp.is_channel(_sid) else None):
                 from gaia_core.cognition import outcome_ledger as _ol
                 _ol.note_call(_sid, "people", "set_pronouns", True)
         if _drop_apology:

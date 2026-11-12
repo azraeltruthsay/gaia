@@ -78,7 +78,7 @@ def stated_pronouns(text: str) -> Optional[str]:
 def pronoun_words(person: Dict) -> str:
     """How she is told to speak of someone: their stated pronouns, or no guess.
     By name: "use their name or they" left Azrael "he" 2 in 3 (i4vn)."""
-    name = ((person or {}).get("names") or ["them"])[0]
+    name = _main_name(person) if (person or {}).get("names") else "them"
     pronouns = (person or {}).get("pronouns")
     if pronouns:
         return f"{name}'s pronouns are {pronouns}; use them when you speak of {name}"
@@ -184,12 +184,14 @@ class PeopleRegistry:
                 self._write(person)
         return person
 
-    def note_pronouns(self, session_id: str, text: str) -> Optional[Dict]:
-        """The speaker saying their own pronouns, kept for whoever the session is."""
+    def note_pronouns(self, session_id: str, text: str, speaker: Optional[Dict] = None) -> Optional[Dict]:
+        """The speaker saying their own pronouns, kept for whoever the session
+        is, or for `speaker`: in a channel the session isn't anyone, the
+        message's author is."""
         pronouns = stated_pronouns(text)
         if not pronouns:
             return None
-        person = self.for_session(session_id)
+        person = speaker or self.for_session(session_id)
         if not person:
             return None
         logger.info("People: %s gave their pronouns", person["id"])
