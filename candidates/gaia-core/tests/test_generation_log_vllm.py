@@ -55,3 +55,27 @@ def test_the_label_is_what_the_engine_runs(monkeypatch):
     monkeypatch.setattr(sm, "minds", lambda: (_ for _ in ()).throw(OSError("down")))
     monkeypatch.setattr(VLLMRemoteModel, "_label_cache", {})
     assert m._gen_label() == "Gemma4-E4B-GAIA-Core-v1"          # engines unreadable: the configured name
+
+
+def test_window_follows_the_gear_23st(monkeypatch):
+    """On the GPU the engine holds 8192; the configured 16384 is the CPU's."""
+    m = VLLMRemoteModel.__new__(VLLMRemoteModel)
+    m.endpoint, m._gpu_ctx_seen = "http://localhost:8092", (0.0, None)
+    m.max_model_len = 16384
+    monkeypatch.setenv("GGUF_CTX_SIZE_GPU", "8192")
+
+    class R:
+        def __init__(self, gpu): self.gpu = gpu
+        def json(self): return {"has_gpu": self.gpu}
+
+    class S:
+        gpu = True
+        def get(self, url, timeout=2): return R(S.gpu)
+
+    m._session = S()
+    assert m.max_model_len == 8192
+    S.gpu = False
+    m._gpu_ctx_seen = (0.0, None)
+    assert m.max_model_len == 16384
+    m.endpoint = "http://gaia-prime:7777"                 # not Core's engine
+    assert m.max_model_len == 16384

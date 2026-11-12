@@ -51,7 +51,8 @@ class VLLMRemoteModel:
 
         self.timeout = int(model_config.get("timeout", 300))
 
-        # Context window size for auto-clamping max_tokens
+        # Context window size for auto-clamping max_tokens (see the property)
+        self._gpu_ctx_seen = (0.0, None)
         self.max_model_len = int(
             model_config.get("max_model_len")
             or model_config.get("context_length")
@@ -301,6 +302,30 @@ class VLLMRemoteModel:
             "model": self.model_name,
             "provider": "vllm_remote",
         }
+
+    # ── Context window (23st) ─────────────────────────────────────────────────
+    # Core's engine holds 16384 tokens on the CPU and 8192 on the GPU (gear 1),
+    # but the configured window was the CPU's whatever the gear: a prompt in
+    # between wasn't trimmed and would overflow the GPU engine.
+    @property
+    def max_model_len(self) -> int:
+        configured = self._max_model_len
+        gpu_ctx = int(os.getenv("GGUF_CTX_SIZE_GPU", "0") or 0)
+        if not gpu_ctx or ":8092" not in (self.endpoint or ""):
+            return configured
+        at, on_gpu = self._gpu_ctx_seen
+        if time.time() - at > 30:
+            try:
+                r = self._session.get(f"{self.endpoint}/health", timeout=2)
+                on_gpu = bool(r.json().get("has_gpu"))
+            except Exception:
+                on_gpu = None
+            self._gpu_ctx_seen = (time.time(), on_gpu)
+        return min(configured, gpu_ctx) if on_gpu else configured
+
+    @max_model_len.setter
+    def max_model_len(self, value: int) -> None:
+        self._max_model_len = int(value)
 
     # ── Mission Control's live generation view ──────────────────────────────
     # Every call to Core or Prime passes here, streamed or not. The view read
