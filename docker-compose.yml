@@ -885,6 +885,8 @@ services:
       - DEADMAN_BATTERY_SECTION=${DEADMAN_BATTERY_SECTION:-identity}
       - DEADMAN_BATTERY_QUERY_TIMEOUT=${DEADMAN_BATTERY_QUERY_TIMEOUT:-180}
       - COMPOSE_PROJECT_NAME=gaia_project
+      # oeki: the host's secrets dir, for the compose recreates the doctor runs.
+      - GAIA_SECRETS_DIR=${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}
       # HA candidate compose must resolve relative volume paths (./candidates/...)
       # against the real project root, NOT the /compose mount point — otherwise
       # docker mounts a bogus empty /compose/candidates/* over /app and the
@@ -899,6 +901,10 @@ services:
       - COGNITIVE_MONITOR_INTERVAL=${COGNITIVE_MONITOR_INTERVAL:-300}
 
     volumes:
+      # oeki: .env.discord etc. are links into ../gaia-instance/secrets; the
+      # compose recreates the doctor runs must read them too. (It already holds
+      # the docker socket, so this grants nothing it couldn't reach.)
+      - ../gaia-instance/secrets:/gaia/gaia-instance/secrets:ro
       # Docker socket (read-write — doctor needs to restart containers)
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # Docker CLI + compose plugin (bind-mounted from host, avoids installing full docker.io)
@@ -1182,16 +1188,18 @@ volumes:
 # ═══════════════════════════════════════════════════════════════════════════
 secrets:
   groq_api_key:
-    file: ${HOME}/.gaia/secrets/groq_api_key
+    # gaia-doctor runs compose from its container, where HOME=/home/gaia: the
+    # host's secrets dir comes in as GAIA_SECRETS_DIR (oeki, 2026-11-11).
+    file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/groq_api_key
   openai_api_key:
-    file: ${HOME}/.gaia/secrets/openai_api_key
+    file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/openai_api_key
   gemini_api_key:
-    file: ${HOME}/.gaia/secrets/gemini_api_key
+    file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/gemini_api_key
   anthropic_api_key:
-    file: ${HOME}/.gaia/secrets/anthropic_api_key
+    file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/anthropic_api_key
   kanka_api_key:
-    file: ${HOME}/.gaia/secrets/kanka_api_key
+    file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/kanka_api_key
   discord_bot_token:
-    file: ${HOME}/.gaia/secrets/discord_bot_token
+    file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/discord_bot_token
   gaia_service_key:
-    file: ${HOME}/.gaia/secrets/gaia_service_key
+    file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/gaia_service_key
