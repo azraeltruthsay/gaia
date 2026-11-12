@@ -10895,7 +10895,7 @@ Start your response with the first line of the file."""
             "/gaia", "/knowledge", "/app", "/docs"
         ]
         file_indicators = [
-            "read ", "open ", "show ", "view ", "cat ",
+            "read ", "open ", "show ", "view ",
             "save ", "create file",
         ] + file_signals
         # yn31: "write " alone is a creative verb ("Write a two-line poem")
@@ -10903,6 +10903,13 @@ Start your response with the first line of the file."""
         # whose not-found result then stood in for the poem. It counts only
         # beside a file signal.
         if "write " in lowered and (
+                "file" in lowered or any(s in lowered for s in file_signals)):
+            return True
+
+        # mjcg: "cat " alone is usually the animal ("a haiku about a cat
+        # watching snow"), not the shell command; same shape as yn31's
+        # "write " above, same fix — it counts only beside a file signal.
+        if "cat " in lowered and (
                 "file" in lowered or any(s in lowered for s in file_signals)):
             return True
 

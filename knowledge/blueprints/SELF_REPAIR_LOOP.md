@@ -2,7 +2,12 @@
 
 > Status: **infrastructure complete (2026-11-12), first full run still pending**. All eight
 > loop steps exist now (Notice→Match→Record→Analyze→Propose→Test→Validate→Promote); none has
-> yet carried a real bug all the way through on its own. Experiment bead: `mjcg`.
+> yet carried a real bug all the way through on its own. `mjcg` itself was fixed directly by
+> Claude on 2026-11-12, at Azrael's explicit direction (rescinding the original "Claude does
+> NOT fix this one" rule) — watching a live run surfaced a structural reason she could never
+> have reached it (see "Duplicate-closing policy" below), and Azrael chose to fix the bug and
+> fix the policy rather than keep the first test case stuck. The loop now needs a **new** first
+> case: whatever she finds next on her own.
 
 ## Why
 
@@ -40,21 +45,52 @@ heartbeat-drift detection (fixed upstream by `wlmf`), one multi-file, one drafte
 playbook (`capgap_units_convert`). The machinery is live; it has never carried a real
 bug from notice to promote.
 
-## First run: `mjcg`
+## First run: `mjcg` — CLOSED, fixed directly by Claude (2026-11-12)
 
-Symptom she can see from her side: *"Write a haiku about a cat watching snow"* →
-log shows `Tool routing triggered for intent: brainstorming` on a creative turn.
-Playbook `ts-misrouted-request` (written from `yn31`) covers this class. Success =
-she, not Claude:
-1. finds the misrouted turn in her logs,
-2. names the cause (`"cat "` in `exec_indicators`, `AgentCore._should_use_tool_routing`),
-3. proposes a candidate patch + regression test,
-4. the test and the candidate suite pass, the haiku no longer routes on the candidate,
-5. Azrael approves (vital organ), promoted,
-6. she updates the playbook with what she learned.
+Original plan, kept for the record: symptom she can see from her side: *"Write a haiku
+about a cat watching snow"* → log shows `Tool routing triggered for intent: brainstorming`
+on a creative turn. Playbook `ts-misrouted-request` (written from `yn31`) covers this
+class. Success was meant to be hers, not Claude's: find the misrouted turn, name the
+cause (`"cat "` in `AgentCore._should_use_tool_routing`'s `file_indicators`, not
+`exec_indicators` as first described), propose a candidate patch + regression test, pass
+the candidate suite, get Azrael's approval (vital organ), promote, update the playbook.
 
-Claude's role: watch, unblock infrastructure gaps (above), and record what broke —
-not do her steps for her.
+**What actually happened**: she *did* do the first two steps, on 2026-11-08 (`ycx7`) — she
+found the exact turn and matched it to `ts-misrouted-request` on her own. But she could
+never reach Record→Propose, for a reason only visible once `a0aw.8`/`a0aw.3` existed and a
+live run was watched end to end (2026-11-12): every time she *rediscovered* the same
+symptom in a fresh conversation, the new issue got filed, bridged to a bead, and then
+closed as a duplicate of `mjcg` by whoever triaged the `gaia-found` queue — correctly, by
+the letter of avoiding redundant investigation, but with the side effect that `mjcg`
+itself never had a live, open ledger entry for her own pipeline to act on. Three instances
+(`gi-30a99e`→`z18l`, `gi-24a975`→`2d3j`, `gi-7a6ab2`→`jcio`) were closed this way; one
+close reason literally states the cause in its own text. Azrael's call, once this was
+explained: fix the bug directly (the fix itself was trivial and well-understood — pull
+`"cat "` out of the unconditional `file_indicators` list and guard it the same way `"write
+"` is already guarded, immediately above it in the same function) and fix the *policy*
+(below) instead of leaving the first test case permanently stuck. Fixed in
+`candidates/gaia-core/gaia_core/cognition/agent_core.py`, regression test
+`gaia-core/tests/test_mjcg_cat_haiku_not_tool_routed.py` (mirrors `test_yn31_...`'s shape).
+
+The loop's infrastructure is otherwise untouched by this — it still needs a real end-to-end
+run. The next bug she finds and fully carries through, herself, is the de facto new first
+case.
+
+## Duplicate-closing policy for tracked experiment issues (decided 2026-11-12)
+
+The bridge (`scripts/gaia_issue_bridge.py`) mirrors her filed issues into beads; closing one
+as a duplicate is a **manual** step (whoever triages the `gaia-found` label), not an
+algorithm — there is no dedup code to patch. The policy going forward: when a fresh
+self-found issue duplicates the symptom of a bead that is still open and is explicitly
+being tracked as a self-repair-loop experiment (label `self-improvement-experiment`, or any
+bead the loop is meant to let her reach), do **not** close the new issue as "duplicate of
+that bead" while the bead remains unfixed. Leave the newest instance open — or, if an
+earlier instance is already open and un-deduped, close the new one as a duplicate of *that
+instance* instead of the bead — so there is always exactly one live, actionable ledger
+entry per unresolved tracked bug for Analyze/Propose to reach. Only fold everything
+together (close the tracked bead and every instance pointing at it) once the bug is
+actually fixed. Ordinary, non-experiment misroutes keep deduping exactly as before — this
+only changes handling for issues flagged as part of an active experiment.
 
 ## Gaps to build (each its own bead)
 
@@ -173,3 +209,17 @@ not do her steps for her.
   `gaia-core-candidate` (a generic, bug-agnostic check) confirmed the packet→log round trip.
   Verified `mjcg` itself was never touched, hand-filed, or hinted at by this work — she still has
   to find, name, and propose it herself.
+- **2026-11-12, watching a live run**: with a0aw.8/a0aw.3 just shipped, let the system run on
+  its own idle/sleep schedule rather than forcing anything. Found and fixed a real operational
+  gap along the way: `gaia-issue-bridge.timer` had unit files in the repo since 2026-11-08 but
+  had never actually been installed — no systemd timer existed, last sync 10+ hours stale.
+  Installed as a user unit (`~/.config/systemd/user/`, `systemctl --user enable --now`), runs
+  every 10 min. Also surfaced why `mjcg` could never be reached (see "First run" above) — bead
+  `cm7k`. Azrael's decision: fix `mjcg` directly and change the duplicate-closing policy (see
+  new section above) rather than leave the first case permanently stuck. `self_review` and
+  `codemind_cycle` both confirmed running correctly on their own schedule throughout (one
+  self_review batch correctly self-refused two findings for citing only the request text, not
+  fault evidence); `issue_investigation` had nothing reachable to work until the bridge was
+  fixed, and still had nothing *new* to find afterward — no fresh symptom had appeared, since
+  no new conversation activity had happened to produce one. Next: watch for her to find
+  something on her own now that the loop is unblocked end to end.
