@@ -152,6 +152,10 @@ json_rpc_methods:
     description: "Create a note in NotebookLM"
     sensitive: true
 
+  - method: discord_post
+    description: "Post in an allowlisted Discord channel (GAIA_DISCORD_CHANNELS; the Grotto)"
+    sensitive: false
+
   - method: notebooklm_add_text_source
     description: "Add text to NotebookLM as a source (what the Audio Overview reads)"
     sensitive: true

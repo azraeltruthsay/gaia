@@ -333,6 +333,13 @@ DOMAIN_TOOLS: Dict[str, dict] = {
     },
 
     # ── Notebook (NotebookLM) ──────────────────────────────────────────
+    "discord": {
+        "description": "Your Discord channel, the Grotto: post a message there",
+        "actions": {
+            "post": {"params": {"message": "string", "channel": "string?"}, "maps_to": "discord_post"},
+        },
+    },
+
     "notebook": {
         "description": "Google NotebookLM — notebooks, sources, notes, AI chat",
         "actions": {

@@ -1102,6 +1102,22 @@ async def generate_session_summary(session_id: str):
     }
 
 
+@app.post("/api/sessions/{session_id}/posted")
+async def record_post(request: Request, session_id: str):
+    """Something she posted on her own (discord_post), kept in that channel's
+    history so she knows what she said there when someone answers it. Not an
+    exchange: nobody's message prompted it."""
+    if _ai_manager is None:
+        return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
+    data = await request.json()
+    text = (data.get("text") or "").strip()
+    if not text:
+        return JSONResponse(status_code=400, content={"error": "text is required"})
+    _ai_manager.session_manager.add_message(
+        session_id, "assistant", text, meta={"unprompted": True, "via": data.get("via") or "post"})
+    return {"ok": True, "session_id": session_id}
+
+
 @app.put("/api/sessions/{session_id}/meta")
 async def update_session_meta(request: Request, session_id: str):
     """Update session metadata (title, etc.)."""

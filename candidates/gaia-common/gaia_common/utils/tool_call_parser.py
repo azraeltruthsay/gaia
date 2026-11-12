@@ -452,6 +452,10 @@ TOOL_ANSWER_SYSTEM = (
     "text.\n"
     "- If it returned what was asked for: answer "
     "from it, and name where it came from.\n"
+    "- Say only what the tool did. If it did something "
+    "other than what they asked (saving a note to your "
+    "memory sends nothing to anyone), say what you did "
+    "and that you can't do what they asked.\n"
     "- If it failed: say so in one short sentence and "
     "pivot back to the conversation. Do NOT invent "
     "error-report URLs, web forms, support emails, "
@@ -467,15 +471,18 @@ def tool_answer_messages(user_input: str, tool_label: str, tool_text: str) -> li
     Result first, then the request as something already done: with the
     question first and ~4k chars after it, Core carried on writing the page;
     with the bare request last, an imperative one made her call the tool again
-    (A/B on the live engine, 2026-10-28). No '---' rule between result and
+    (A/B on the live engine, 2026-10-28). "You already did that" claimed the
+    request done whatever the tool was: asked to post in a Discord channel she
+    stored a palace note and said "It's in the Grotto now", 5/5 (2026-11-12);
+    it names the call instead. No '---' rule between result and
     request: Core read it as a section break and carried on past it, echoing
     it in 10/20 replies vs 0/20 without, same answers (gjuh.8, 2026-10-29)."""
     return [
         {"role": "system", "content": TOOL_ANSWER_SYSTEM},
         {"role": "user", "content": (
             f"{tool_label} returned the following.\n\n{tool_text}\n\n"
-            f'They asked: "{user_input}" You already did that, and it returned '
-            f"the above. Your reply to them:")},
+            f'They asked: "{user_input}" What you did: you called {tool_label}, '
+            f"and it returned the above. Your reply to them:")},
     ]
 
 

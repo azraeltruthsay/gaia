@@ -164,7 +164,10 @@ async def push_message(session_id: str, request: Request):
 
         if session_id.startswith("discord_"):
             from gaia_web.discord_interface import send_to_channel
+            # Channel sessions are discord_channel_<id>; "channel_<id>" isn't a channel id.
             channel_id = session_id[len("discord_"):]
+            if channel_id.startswith("channel_"):
+                channel_id = channel_id[len("channel_"):]
             ok = await send_to_channel(channel_id, text)
             return {"delivered": ok, "channel": "discord_channel"}
 

@@ -47,9 +47,10 @@ def test_deliberate_injects_real_tool_schema():
     assert "You have these tools available:" in sys_text
     # A real registered domain must appear...
     assert "- web(action):" in sys_text
-    # ...and the hallucinated one from the live incident must not be implied
-    # as valid (it's simply absent from the real domain list).
-    assert "- discord(action):" not in sys_text
+    # The "discord" tool Prime made up in that incident is real since
+    # 2026-11-12 (post, Grotto only), so it is listed; an invented one isn't.
+    assert "- discord(action): post" in sys_text
+    assert "- twitter(action):" not in sys_text
 
 
 def test_deliberate_schema_injection_is_fail_open(monkeypatch):

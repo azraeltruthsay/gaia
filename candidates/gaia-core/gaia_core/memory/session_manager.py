@@ -197,7 +197,7 @@ class SessionManager:
         # 6qzb: the palace's read-only record of the conversation. Written
         # here, by code, and nowhere else (no tool writes it). The user turn
         # is the latest one, past any tool-result turns in between.
-        if role == "assistant":
+        if role == "assistant" and not (meta or {}).get("unprompted"):
             _user = next((t.get("content") or "" for t in reversed(session.history[:-1])
                           if t.get("role") == "user"), "")
             if _user:

@@ -23,7 +23,16 @@ from typing import List, Optional, Sequence, Tuple
 # Finished actions she might claim. Future ("I'll add") and negated forms
 # ("I haven't saved", "wasn't added") don't match.
 _VERBS = (r"added|filed|created|saved|recorded|logged|stored|written|wrote|updated|committed|"
-          r"deleted|removed|appended|noted|remembered|kept|pinned|scheduled")
+          r"deleted|removed|appended|noted|remembered|kept|pinned|scheduled|sent|posted|messaged")
+# Saying it reached someone needs a call that sends: asked to post in the
+# Grotto, she stored a palace note and said "Sent to the Grotto" (2026-11-12);
+# any write backed it.
+_SEND_RE = re.compile(
+    r"\bI(?:'ve| have| just|'ve just)?\s+(?:sent|posted|messaged)\b"
+    r"|(?:^|(?<=[.!]\s))\s*\**(?:sent|posted)\b"
+    r"|\bit'?s (?:in|up in|posted in) the \w+ now\b"
+    r"|\b(?:message|it|that|note)\s+(?:was|has been|is)\s+(?:now\s+)?(?:sent|posted)\b", re.I | re.M)
+_SENDS = {("discord", "post"), ("discord_post", "")}
 _FIRST_PERSON = re.compile(rf"\bI(?:'ve| have| just|'ve just| have just)?\s+(?:successfully\s+)?(?:{_VERBS})\b", re.I)
 # Passive claims need a subject she could have acted on, or "successfully":
 # "the note was added" is a claim, "Python was created in 1991" is not.
@@ -81,6 +90,12 @@ def check(reply: str, calls: Sequence[Call]) -> Optional[dict]:
     """None if the reply claims nothing, or a write that succeeded backs it.
     Otherwise {"claims", "failed": [labels of writes that failed]}."""
     said = claims(reply)
+    if _SEND_RE.search(_QUOTE.sub("", _CODE.sub("", reply or ""))):
+        said = list(dict.fromkeys(said + [_SEND_RE.search(reply).group(0)]))
+        sends = [c for c in calls if ((c[1] or "").lower(), (c[2] or "").lower()) in _SENDS]
+        if not any(c[3] for c in sends):
+            failed = [f"{c[1]}({c[2]})" if c[2] else c[1] for c in sends]
+            return {"claims": said, "failed": list(dict.fromkeys(failed)), "sent": True}
     if not said:
         return None
     writes = [c for c in calls if is_write(c[1], c[2])]
@@ -91,6 +106,9 @@ def check(reply: str, calls: Sequence[Call]) -> Optional[dict]:
 
 
 def correction(result: dict) -> str:
+    if result.get("sent") and not result["failed"]:
+        return ("Correction: I didn't actually send that. Nothing that posts a message ran, "
+                "so no one has received it.")
     if result["failed"]:
         return (f"Correction: that didn't go through. {', '.join(result['failed'][:3])} failed, "
                 "so nothing was changed.")

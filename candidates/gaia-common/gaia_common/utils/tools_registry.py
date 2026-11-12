@@ -632,6 +632,17 @@ TOOLS = {
             "required": ["notebook_id", "title"]
         }
     },
+    "discord_post": {
+        "description": "Post a message in your Discord channel, the Grotto (the only one allowed). Use when asked to say something there; it reaches everyone in the channel.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "description": "What to post."},
+                "channel": {"type": "string", "description": "Optional: 'grotto' (the default)."}
+            },
+            "required": ["message"]
+        }
+    },
     "notebooklm_add_text_source": {
         "description": "Add text to a NotebookLM notebook as a source, which the Audio Overview hosts read (a note they don't). Requires approval. Use for a penpal letter to the hosts.",
         "params": {

@@ -38,6 +38,7 @@ from .notebooklm_tools import (
     notebooklm_create_note,
     notebooklm_add_text_source,
 )
+from .discord_tools import discord_post
 from .listener_tools import (
     audio_listen_start, audio_listen_stop, audio_listen_status,
 )
@@ -382,6 +383,7 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "notebooklm_generate_audio": notebooklm_generate_audio,
         "notebooklm_create_note": notebooklm_create_note,
         "notebooklm_add_text_source": notebooklm_add_text_source,
+        "discord_post": discord_post,
         # Study mode / LoRA adapter tools (gateway calls to gaia-study)
         "study_start": _study_start_impl,
         "study_status": _study_status_impl,

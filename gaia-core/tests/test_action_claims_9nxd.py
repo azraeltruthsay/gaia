@@ -92,3 +92,31 @@ def test_mcp_call_noted_for_the_turn(monkeypatch):
         turn_context.clear_turn()
     mcp_client.call_jsonrpc("add_document", {"fact": "y"})  # no turn: not noted
     assert [(c[1], c[3]) for c in OL.session_tools("s-mcp-9nxd")] == [("add_document", False)]
+
+
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize("reply", [
+    "Sent to the Grotto (palace_id: 2026-11-12_8fddd0dba2). He'll see it immediately.",
+    "It's in the Grotto now (palace_id: 2026-11-12_8fddd0dba2). He'll see it immediately.",
+    "I've posted it for him.",
+])
+def test_saying_it_reached_someone_needs_a_post(reply):
+    """2026-11-12: asked to post in the Grotto she stored a palace note; the
+    write backed the claim. A send claim needs a call that sends."""
+    from gaia_core.cognition import action_claims as ac
+    palace = [(0.0, "palace", "store", True)]
+    result = ac.check(reply, palace)
+    assert result and result.get("sent")
+    assert "didn't actually send" in ac.correction(result)
+    assert ac.check(reply, palace + [(1.0, "discord", "post", True)]) is None
+
+
+@_pytest.mark.parametrize("reply", [
+    "Thanks for the letter you sent me.", "We went through it together.",
+    "The episode was posted last week, they said.",
+])
+def test_ordinary_words_are_not_send_claims(reply):
+    from gaia_core.cognition import action_claims as ac
+    assert ac.check(reply, [(0.0, "palace", "store", True)]) is None
