@@ -56,9 +56,14 @@ def _system(text, intent):
 
 
 def _compact_core(monkeypatch):
+    """A Core with a 4096 window, as the E4B had: the compact path. The prompt
+    builder makes a new Config() per build, so the patched one is handed to it;
+    patching some other instance only worked while 4096 was the real value
+    (the 12B's is 8192 since ecm4)."""
     cfg = prompt_builder.Config()
     monkeypatch.setitem(cfg.constants, "USE_META_VERBS", True)
     monkeypatch.setitem(cfg.MODEL_CONFIGS, "core", {**cfg.MODEL_CONFIGS.get("core", {}), "max_model_len": 4096})
+    monkeypatch.setattr(prompt_builder, "Config", lambda: cfg)
 
 
 def test_social_turn_keeps_anchor_drops_tools(monkeypatch):

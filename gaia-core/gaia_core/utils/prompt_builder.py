@@ -1245,6 +1245,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
             _context_window_early = int(_val)
     except Exception:
         pass
+    _model_cfg_early: dict = {}
     try:
         _model_name_early = getattr(packet.header.model, 'name', '')
         # Try exact match first, then check if any config key is a substring
@@ -1261,7 +1262,11 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                     _context_window_early = int(_mml)
     except Exception:
         pass
-    _tiny_context_early = _context_window_early <= 4096
+    # ecm4: Core's prompt design (compact, lean social turns) was tuned while
+    # its window was 4096, and "tiny" picked it. The 12B has 8192; the design
+    # stays by the model's own flag, the window is the real one.
+    _tiny_context_early = _context_window_early <= 4096 or bool(
+        (_model_cfg_early or {}).get("compact_prompt"))
     _use_compact_debug = _tiny_context_early and config.constants.get("USE_META_VERBS", False)
     logger.info("Early context: window=%d tiny=%s use_compact=%s model_name=%r",
                 _context_window_early, _tiny_context_early, _use_compact_debug,
@@ -1421,6 +1426,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
     # Also check max_model_len from MODEL_CONFIGS — this is the actual engine
     # context limit, which may be smaller than the packet's context_window_tokens
     # (which defaults to max_tokens_lite=8192 regardless of model).
+    _model_cfg: dict = {}
     try:
         _model_name = getattr(packet.header.model, 'name', '')
         if isinstance(_model_name, str):
@@ -1437,7 +1443,8 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
     except Exception:
         pass
     _small_context = _context_window <= 8192
-    _tiny_context = _context_window <= 4096  # Gemma 4 E4B at max_model_len=4096
+    _tiny_context = _context_window <= 4096 or bool(  # E4B's window; or the model's compact_prompt flag (ecm4)
+        (_model_cfg or {}).get("compact_prompt"))
     logger.info("Context window: %d (tiny=%s, small=%s)", _context_window, _tiny_context, _small_context)
 
     # For tiny context models, skip ALL verbose directives — the identity

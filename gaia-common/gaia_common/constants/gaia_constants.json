@@ -44,8 +44,9 @@
       "path": "/models/core",
       "type": "managed",
       "endpoint": "http://localhost:8092",
-      "max_model_len": 4096,
-      "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Gemma4-E4B-GAIA-Core CORE_IDENTITY_V3 (baked 2026-06-09)"
+      "max_model_len": 8192,
+      "compact_prompt": true,
+      "description": "Core (Operator) \u2014 embedded GAIA Engine in gaia-core, Gemma4-12B-GAIA-Core-v2 on gaia_cpp: ctx 8192 on the GPU (GGUF_CTX_SIZE_GPU), 16384 on the CPU. 4096 was the E4B's and made every 12B prompt 'tiny' (ecm4)."
     },
     "observer": {
       "enabled": true,
@@ -63,7 +64,8 @@
       "path": "Gemma4-E4B-GAIA-Core-v1",
       "type": "managed",
       "endpoint": "http://localhost:8092",
-      "max_model_len": 4096,
+      "max_model_len": 8192,
+      "compact_prompt": true,
       "description": "RETIRED tier \u2014 legacy alias to Core's embedded engine (Sovereign Duality: Core handles all triage)"
     }
   },
