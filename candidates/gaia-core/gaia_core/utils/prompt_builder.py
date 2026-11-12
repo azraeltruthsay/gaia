@@ -396,6 +396,11 @@ def build_from_packet(packet: CognitionPacket, *args, **kwargs) -> List[Dict]:
             line = f"{line} {_named}".strip()
         if line:   # a person's session, not her own loops (i4vn)
             line = f"{line} {creator_line(_sid, _asked, author_id=_author)}".strip()
+        # Last in the system prompt: mid-prompt, with her own failed palace
+        # attempt in the history after it, she called palace(store) again (2026-11-12).
+        _post = post_line(_asked).strip()
+        if _post:
+            line = f"{line}\n\n{_post}".strip()
         _fix = correction_line(_asked, messages)
         if _fix:
             line = f"{line}\n\n{_fix}".strip()
@@ -640,8 +645,6 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
         # Skip the capability block so Core answers from context instead of
         # emitting a (noisy, redundant) worldstate call.
         _world_answerable = _li in _WORLD_ANSWERABLE_INTENTS
-        persona_anchor = persona_anchor + post_line(
-            getattr(getattr(packet, 'content', None), 'original_prompt', '') or '')
         if not (_chitchat or _world_answerable):
             persona_anchor = persona_anchor + _capability_block
         elif _chitchat:

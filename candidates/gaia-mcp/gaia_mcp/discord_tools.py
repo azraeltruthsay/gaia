@@ -40,11 +40,16 @@ def channels() -> Dict[str, str]:
 
 def _channel_id(name: str) -> str:
     allowed = channels()
-    key = re.sub(r"^the\s+", "", (name or "").strip().lower()) or next(iter(allowed), "")
+    # "the-grotto", "#grotto", "GAIA's Grotto", "the Grotto channel": she named
+    # it "the-grotto" and was refused (2026-11-12).
+    raw = (name or "").strip().lower()
+    if raw in allowed.values():
+        return raw
+    words = [w for w in re.split(r"[^a-z0-9]+", raw)
+             if w and w not in ("the", "gaia", "gaias", "s", "channel", "discord", "my", "your", "her")]
+    key = "".join(words) or next(iter(allowed), "")
     if key in allowed:
         return allowed[key]
-    if key in allowed.values():
-        return key
     raise ValueError(f"not a channel she can post to: {name!r} (allowed: {', '.join(allowed) or 'none'})")
 
 

@@ -51,8 +51,10 @@ async def test_posts_to_the_grotto_and_keeps_it(http):
 
 
 @pytest.mark.asyncio
-async def test_the_grotto_by_name(http):
-    assert (await dt.discord_post({"message": "hi", "channel": "The Grotto"}))["ok"]
+@pytest.mark.parametrize("name", ["The Grotto", "the-grotto", "#grotto", "GAIA's Grotto",
+                                  "grotto channel", "1484003096337191067"])
+async def test_the_grotto_by_name(http, name):
+    assert (await dt.discord_post({"message": "hi", "channel": name}))["ok"]
 
 
 @pytest.mark.asyncio
