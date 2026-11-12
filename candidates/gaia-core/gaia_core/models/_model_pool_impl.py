@@ -569,7 +569,7 @@ class ModelPool:
             # Remote inference via CORE_CPU_ENDPOINT (GAIA Engine in gaia-core)
             core_cpu_endpoint = os.getenv("CORE_CPU_ENDPOINT")
             if core_cpu_endpoint:
-                core_cpu_model = os.getenv("CORE_CPU_MODEL", "/models/Gemma4-E4B-GAIA-Core-v1")
+                core_cpu_model = os.getenv("CORE_CPU_MODEL", "Gemma4-12B-GAIA-Core-v2")
                 self.config.MODEL_CONFIGS["core"] = {
                     "type": "managed",
                     "endpoint": core_cpu_endpoint,

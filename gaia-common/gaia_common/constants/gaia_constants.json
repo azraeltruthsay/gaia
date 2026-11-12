@@ -61,7 +61,7 @@
     },
     "nano": {
       "enabled": true,
-      "path": "Gemma4-E4B-GAIA-Core-v1",
+      "path": "Gemma4-12B-GAIA-Core-v2",
       "type": "managed",
       "endpoint": "http://localhost:8092",
       "max_model_len": 8192,

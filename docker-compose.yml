@@ -337,10 +337,10 @@ services:
       # Nano tier RETIRED (vjdf) — legacy NANO_* consumers alias to Core's
       # embedded engine directly (the socat proxy container is gone)
       - NANO_ENDPOINT=${NANO_ENDPOINT:-http://localhost:8092}
-      - NANO_MODEL=${NANO_MODEL:-Gemma4-E4B-GAIA-Core-v1}
+      - NANO_MODEL=${NANO_MODEL:-Gemma4-12B-GAIA-Core-v2}
       # Core/Operator inference endpoint (GAIA Engine managed mode)
       - CORE_CPU_ENDPOINT=${CORE_CPU_ENDPOINT:-http://localhost:8092}
-      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Gemma4-E4B-GAIA-Core-v1}
+      - CORE_CPU_MODEL=${CORE_CPU_MODEL:-Gemma4-12B-GAIA-Core-v2}   # a label only: the engine ignores the request model field (3hp6)
       # Safetensors mode (GPU-native, enables SAE/ROME): loads from warm pool
       - CORE_SAFETENSORS_PATH=${CORE_SAFETENSORS_PATH:-/models/core}
       - CORE_DEVICE=${CORE_DEVICE:-cuda}
