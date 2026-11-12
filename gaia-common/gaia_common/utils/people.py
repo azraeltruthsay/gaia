@@ -77,13 +77,19 @@ def stated_pronouns(text: str) -> Optional[str]:
 
 def pronoun_words(person: Dict) -> str:
     """How she is told to speak of someone: their stated pronouns, or no guess.
-    By name: "use their name or they" left Azrael "he" 2 in 3 (i4vn)."""
+    By name: "use their name or they" left Azrael "he" 2 in 3 (i4vn). Phrased
+    as a writing instruction, not a fact about them ("X's pronouns are Y") —
+    the fact-shaped version got echoed back unprompted (2026-11-12, GAIA's
+    Grotto: "his name's Nick and his pronouns are he/him", when nobody had
+    asked). A direct "when you write, do Y" instruction, like the one right
+    next to this in speaker_line ("Speak to them as \"you\", never in the
+    third person"), doesn't invite being relayed as content the same way."""
     name = _main_name(person) if (person or {}).get("names") else "them"
     pronouns = (person or {}).get("pronouns")
     if pronouns:
-        return f"{name}'s pronouns are {pronouns}; use them when you speak of {name}"
-    return (f"{name} hasn't told you their pronouns, so when you speak of {name}, "
-            f"say \"{name}\" or \"they\"")
+        return f"When you write about {name}, use \"{pronouns}\" — just use it, don't mention it"
+    return (f"When you write about {name}, say \"{name}\" or \"they\" — no pronouns are "
+            f"on record, and that's for your own phrasing, not something to bring up")
 
 
 class PeopleRegistry:

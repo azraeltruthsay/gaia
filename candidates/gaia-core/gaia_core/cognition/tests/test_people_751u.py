@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from gaia_common.utils.people import PeopleRegistry, claimed_name, speaker_line
+from gaia_common.utils.people import PeopleRegistry, claimed_name, pronoun_words, speaker_line
 
 AZRAEL_ID = "596925786208993283"
 DM = f"discord_dm_{AZRAEL_ID}"
@@ -68,6 +68,22 @@ def test_speaker_line(people):
     assert speaker_line(DM, people).startswith("You are speaking with Azrael, who created you.")
     assert "don't know who" in speaker_line("web_0000beef", people)
     assert speaker_line("smoke-test-123", people) == ""
+
+
+def test_pronoun_words_is_a_writing_instruction_not_a_fact(people):
+    # Found 2026-11-12, GAIA's Grotto: phrased as "X's pronouns are Y; use
+    # them", she echoed it back unprompted ("his pronouns are he/him"). It
+    # must never again read as something there is content to relay.
+    nick = people.create("Nick", [{"kind": "session", "id": WEB}])
+    people.set_pronouns(nick["id"], "he/him", source="said so")
+    line = pronoun_words(people.get(nick["id"]))
+    assert line == 'When you write about Nick, use "he/him" — just use it, don\'t mention it'
+    assert "pronouns are" not in line  # the exact fact-shaped phrase that got echoed back
+
+    unknown = people.create("Priya", [{"kind": "session", "id": "web_9"}])
+    line = pronoun_words(people.get(unknown["id"]))
+    assert "Priya" in line and "they" in line and "not something to bring up" in line
+    assert "Priya's pronouns" not in line  # the fact-shaped phrase, not "no pronouns are on record"
 
 
 def test_the_prompt_says_who(tmp_path, monkeypatch):
