@@ -2111,7 +2111,9 @@ async def process_packet(packet_data: Dict[str, Any]):
                             import re as _re
                             _tool_text = _re.sub(r"</?tool_result>", "", result_xml).strip()
                         _tool_label = f"{tc.tool_name}({tc.tool_action})" if tc.tool_action else tc.tool_name
-                        _tool_texts_for_observer.append(_tool_text)
+                        # 0kv2: with its name, so "the Discord API rejected
+                        # that" is backed by the discord call it describes.
+                        _tool_texts_for_observer.append(f"{_tool_label} ({tc.tool_name}): {_tool_text}")
                         # Continuation system prompt: the previous turn's
                         # full system prompt is NOT carried into this second
                         # generation. Without explicit guidance, the model

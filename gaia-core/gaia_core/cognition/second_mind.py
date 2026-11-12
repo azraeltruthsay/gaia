@@ -43,11 +43,18 @@ def _plain(reply: str) -> str:
     return _MARKUP_RE.sub("", _LABEL_RE.sub("", reply or "", count=1))
 
 
+# Ids aren't claims: "palace_id: 2026-11-12_8fddd0dba2", its "_" stripped as
+# markup, read "…-128fddd…" and came back as "I can't back up what I just
+# said about 128" (0kv2).
+_ID_RE = re.compile(r"\S*_\S*\d\S*|\S*\d\S*_\S*|\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{8,}\b")
+
+
 def unbacked(reply: str, known: str) -> List[str]:
     """Names and numbers in a reply that `known` doesn't hold."""
     words = {w.rstrip("s") for w in _words(known)}
     lowered = (known or "").lower()
-    body = _plain(reply)
+    # Before the markup strip: it drops "_", which made "…-12_8fddd…" read "128".
+    body = _plain(_ID_RE.sub(" ", reply or ""))
     out = []
     for claim in _CLAIM_RE.findall(body):
         # Also as a substring: "9950" is backed by "9950X3D", "Gemma" by "Gemma4".

@@ -281,3 +281,14 @@ def test_bold_at_the_start_of_a_line_is_not_a_name():
     reply = "The ball costs **$0.05**.\n\n**Explanation**:\nLet the ball be x.\n## Summary\nDone."
     assert unbacked(reply, "ball 0.05") == []
     assert unbacked("I met **Bob** there.", "") == ["Bob"]
+
+
+def test_ids_and_named_tools_are_not_claims_0kv2():
+    """Discord DM 2026-11-12: 'I can't back up what I just said about 128' (no 128
+    in the reply) and '... about Discord' (it described the discord call's error)."""
+    from gaia_core.cognition.second_mind import unbacked
+    assert unbacked("It's in the Grotto now (palace_id: 2026-11-12_8fddd0dba2).",
+                    "Post in the Grotto\npalace(store) (palace): stored") == []
+    assert unbacked("The Discord API rejected that channel name.",
+                    "Post in the Grotto\ndiscord(post) (discord): not a channel she can post to: 'the-grotto'") == []
+    assert unbacked("The capital is Paris, with 2148271 people.", "What is the capital of France?") == ["Paris", "2148271"]
