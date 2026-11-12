@@ -294,13 +294,28 @@ async def get_status():
     gpu_tiers = [f"{n}({t.vram_mb}MB)" for n, t in watch.tiers.items()
                  if t.device.value.startswith("gpu")]
     gpu_owner = " + ".join(gpu_tiers) if gpu_tiers else "--"
+    gpu_state = watch.gpu_state.value
+    # yfr8: the watch rotation's own fields went stale (gpu_state 'focusing'
+    # while awake with Core on the GPU; Prime at 0 MB and the nano alias listed
+    # as holders). The lifecycle machine is the source of truth for both.
+    if _lifecycle_machine is not None:
+        try:
+            snap = await _lifecycle_machine.get_snapshot()
+            life = getattr(snap.state, "value", str(snap.state)).lower()
+            gpu_state = {"focusing": "focusing", "transitioning": "transitioning"}.get(life, "idle")
+            held = [f"{name}({t.vram_mb}MB)" for name, t in (snap.tiers or {}).items()
+                    if name != "nano" and str(getattr(t, "device", "")).lower().endswith("gpu")
+                    and getattr(t, "model_loaded", False)]
+            gpu_owner = " + ".join(held) if held else "--"
+        except Exception:
+            logger.debug("status: lifecycle snapshot unavailable; watch fields used", exc_info=True)
 
     return {
         "service": "gaia-orchestrator",
         "status": "operational",
         "gpu": state.gpu.model_dump(),
         "gpu_owner": gpu_owner,
-        "gpu_state": watch.gpu_state.value,
+        "gpu_state": gpu_state,
         "watch": {n: {"device": t.device.value, "vram_mb": t.vram_mb}
                   for n, t in watch.tiers.items()},
         "nano": state.nano.model_dump(),
