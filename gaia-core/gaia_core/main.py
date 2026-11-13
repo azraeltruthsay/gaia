@@ -1188,9 +1188,20 @@ async def process_packet(packet_data: Dict[str, Any]):
     """
     global _agent_core, _ai_manager
 
-    # Mark system active for sleep cycle idle tracking
+    # GAIA's Grotto (2026-11-12): an ambient-channel turn (addressed_to_gaia
+    # False) she wasn't addressed in shouldn't reset the sleep idle timer
+    # just by arriving -- a chatty channel would otherwise keep her "active"
+    # forever and starve the self-repair loop's sleep-only tasks. Marked
+    # active here only when addressed; the ambient case is marked later,
+    # after the turn, and only if she actually decided to reply.
+    try:
+        _addressed = bool(packet_data.get("header", {}).get("output_routing", {})
+                          .get("addressed_to_gaia", True))
+    except Exception:
+        _addressed = True
+
     idle_monitor = getattr(app.state, "idle_monitor", None)
-    if idle_monitor:
+    if idle_monitor and _addressed:
         idle_monitor.mark_active()
 
     if _agent_core is None or _ai_manager is None:
@@ -1307,6 +1318,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                         "author_name": (routing.primary.metadata or {}).get("author_name"),
                         "reply_to_message_id": routing.primary.reply_to_message_id,
                         "is_dm": routing.primary.metadata.get("is_dm", False) if routing.primary.metadata else False,
+                        # GAIA's Grotto (2026-11-12): False for an ambient-channel
+                        # turn she wasn't addressed in — run_turn decides whether
+                        # to reply at all; _build_output_routing reads this same
+                        # key back out for the (possibly silent) reply's routing.
+                        "addressed_to_gaia": routing.addressed_to_gaia,
                     }
 
             # v0.5: Pass audio_payloads through metadata for NeuralRouter (Proposal 11)
@@ -2510,8 +2526,11 @@ async def process_packet(packet_data: Dict[str, Any]):
 
                 yield json.dumps({"type": "packet", "value": final_packet_dict}, default=str) + "\n"
 
-            # Reset idle timer after response completes
-            if idle_monitor:
+            # Reset idle timer after response completes -- an ambient turn
+            # that produced no reply never marked active at all (above), so
+            # it must not do so here either; one that genuinely interjected
+            # (full_response non-empty) counts as active either way.
+            if idle_monitor and (_addressed or full_response.strip()):
                 idle_monitor.mark_active()
 
         except Exception as e:

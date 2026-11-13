@@ -84,7 +84,10 @@ async def lifespan(app: FastAPI):
             bot_token = os.getenv("DISCORD_BOT_TOKEN")
         core_url = os.getenv("CORE_ENDPOINT", "http://gaia-core:6415")
         core_fallback = os.getenv("CORE_FALLBACK_ENDPOINT", "")
-        
+        # Channels where every message reaches GAIA as ambient context, not
+        # just ones that @mention her — she decides whether to interject.
+        ambient_channel_ids = {c.strip() for c in os.getenv("DISCORD_AMBIENT_CHANNEL_IDS", "").split(",") if c.strip()}
+
         if not bot_token:
             log_gaia_error(logger, "GAIA-WEB-015", "Discord bot enabled but DISCORD_BOT_TOKEN not set")
         else:
@@ -94,7 +97,8 @@ async def lifespan(app: FastAPI):
                 bot_token=bot_token,
                 core_endpoint=core_url,
                 message_queue=mq,
-                core_fallback_endpoint=core_fallback
+                core_fallback_endpoint=core_fallback,
+                ambient_channel_ids=ambient_channel_ids,
             )
             asyncio.create_task(discord_bot.start())
             logger.info("Discord bot initialization task started")

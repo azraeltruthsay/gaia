@@ -1577,6 +1577,31 @@ class AgentCore:
         except Exception:
             logger.warning("Told-fact check failed, continuing", exc_info=True)
 
+        # Ambient channel turn: she sees it, but only replies if she decides
+        # to. An @mention or DM always has addressed_to_gaia=True (the
+        # default) and skips this entirely (GAIA's Grotto, 2026-11-12).
+        if not _metadata.get("addressed_to_gaia", True):
+            try:
+                if not _user_msg_persisted:
+                    self.session_manager.add_message(session_id, "user", user_input)
+                    self._emit_timeline_message(session_id, "user", source)
+                    _user_msg_persisted = True
+                from gaia_core.cognition.ambient_interject import should_interject
+                from gaia_core.cognition.self_review import chat_generator
+                history = self.session_manager.get_history(session_id)
+                speaks = should_interject(
+                    session_id, history, user_input,
+                    chat_generator(self.model_pool, max_tokens=5, temperature=0.1))
+                if not speaks:
+                    yield {"type": "flush"}
+                    return
+                self.logger.info("Ambient turn: GAIA decided to interject in %s", session_id)
+                # Falls through to the normal pipeline below, exactly as if
+                # addressed -- same session, same history, same everything.
+            except Exception:
+                logger.warning("Ambient turn handling failed, treating as silent", exc_info=True)
+                return
+
         # Research orchestration — "research X", "look into X", etc. fan out
         # across all KBs + web search and synthesize a brief in a single turn.
         try:

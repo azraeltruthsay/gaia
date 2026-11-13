@@ -489,6 +489,11 @@ services:
       # It must NOT be in .env.discord / env vars: env_file injection leaks
       # the token to anything that can `docker inspect`. (GAIA_Project-1axq)
       - ENABLE_DISCORD=${ENABLE_DISCORD:-1}
+      # GAIA's Grotto (2026-11-12): channels (comma-separated IDs) where every
+      # message reaches her as ambient context, not just @mentions -- she
+      # decides whether to interject. Empty by default; this changes nothing
+      # anywhere until a channel ID is actually set.
+      - DISCORD_AMBIENT_CHANNEL_IDS=${DISCORD_AMBIENT_CHANNEL_IDS:-}
       # HA failover — candidate-core as fallback
       - CORE_FALLBACK_ENDPOINT=${CORE_FALLBACK_ENDPOINT:-http://gaia-core-candidate:6415}
       # Wiki proxy (internal, auto-resolves on gaia-net)

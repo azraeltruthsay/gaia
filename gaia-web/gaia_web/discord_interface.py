@@ -1,4 +1,5 @@
 import json
+
 """
 Discord Interface for GAIA Web Gateway
 
@@ -7,28 +8,56 @@ Discord messages are received here, converted to CognitionPackets, sent to gaia-
 for processing, and responses are routed back to Discord.
 """
 
+import asyncio
+import logging
 import math
 import os
 import re
+import threading
 import time
 import uuid
-import asyncio
-import logging
-import threading
+from collections.abc import Callable
 from datetime import datetime
-from typing import Optional, Dict, Any, Callable, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
-from gaia_web.security.middleware import SecurityScanMiddleware
-from gaia_web.attachment_handler import process_attachments
+
 # Import all necessary dataclasses for CognitionPacket
 from gaia_common.protocols.cognition_packet import (
     COGPACKET_VERSION,
-    CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
-    Attachment, OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
-    SessionHistoryRef, Constraints, Reasoning, ToolRoutingState, Response, Safety, Governance, TokenUsage, Metrics, Status,
-    PacketState, TargetEngine
+    Attachment,
+    CognitionPacket,
+    Constraints,
+    Content,
+    Context,
+    DataField,
+    DestinationTarget,
+    Governance,
+    Header,
+    Intent,
+    Metrics,
+    Model,
+    OperationalStatus,
+    Origin,
+    OutputDestination,
+    OutputRouting,
+    PacketState,
+    Persona,
+    PersonaRole,
+    Reasoning,
+    Response,
+    Routing,
+    Safety,
+    SessionHistoryRef,
+    Status,
+    SystemTask,
+    TargetEngine,
+    TokenUsage,
+    ToolRoutingState,
 )
+
+from gaia_web.attachment_handler import process_attachments
+from gaia_web.security.middleware import SecurityScanMiddleware
 
 logger = logging.getLogger("GAIA.Web.Discord")
 
@@ -43,8 +72,8 @@ _security_middleware = SecurityScanMiddleware()
 
 # Discord bot instance (module-level for access from main.py)
 _bot = None
-_client_session: Optional[httpx.AsyncClient] = None  # Persistent HTTP session
-_bot_loop: Optional[asyncio.AbstractEventLoop] = None  # The bot's own event loop
+_client_session: httpx.AsyncClient | None = None  # Persistent HTTP session
+_bot_loop: asyncio.AbstractEventLoop | None = None  # The bot's own event loop
 
 
 async def get_core_client() -> httpx.AsyncClient:
@@ -62,15 +91,15 @@ async def close_core_client():
     if _client_session is not None:
         await _client_session.aclose()
         _client_session = None
-_message_handler: Optional[Callable] = None
+_message_handler: Callable | None = None
 _voice_manager = None  # VoiceManager instance (set by start_discord_bot)
 _dm_blocklist = None   # DMBlocklist instance (set by start_discord_bot)
 _core_endpoint = ""    # Core endpoint URL (set by start_discord_bot)
-_typing_wake_sent: Dict[str, float] = {}  # user_id -> last wake signal timestamp
-_wake_config_cache: Dict[str, Any] = {}   # {"config": {...}, "fetched_at": float}
+_typing_wake_sent: dict[str, float] = {}  # user_id -> last wake signal timestamp
+_wake_config_cache: dict[str, Any] = {}   # {"config": {...}, "fetched_at": float}
 
 # Pending approval waiters: (channel_id, user_id) -> waiter context dict
-_pending_approvals: Dict[Tuple[str, str], dict] = {}
+_pending_approvals: dict[tuple[str, str], dict] = {}
 _MCP_BASE_URL = os.getenv("MCP_ENDPOINT", "http://gaia-mcp:8765/jsonrpc").rsplit("/", 1)[0]
 _APPROVAL_STALE_SECONDS = 960  # 16 minutes (MCP TTL is 15 min)
 
@@ -115,11 +144,16 @@ class DiscordInterface:
     - Converting between Discord events and CognitionPackets
     """
 
-    def __init__(self, bot_token: str, core_endpoint: str, message_queue=None, core_fallback_endpoint: str = ""):
+    def __init__(self, bot_token: str, core_endpoint: str, message_queue=None, core_fallback_endpoint: str = "",
+                 ambient_channel_ids: set | None = None):
         self.bot_token = bot_token
         self.core_endpoint = core_endpoint
         self.core_fallback_endpoint = core_fallback_endpoint
         self.message_queue = message_queue
+        # Channels where every message reaches GAIA as ambient context, not
+        # just ones that @mention her — she decides whether to interject
+        # (agent_core.py's run_turn, addressed_to_gaia gate).
+        self.ambient_channel_ids = ambient_channel_ids or set()
         self._bot = None
         self._loop = None
 
@@ -254,9 +288,18 @@ class DiscordInterface:
                 addressed = message.content.lower().startswith(("@gaia", "gaia,", "gaia:"))
                 should_respond = mentioned or addressed
 
-            logger.debug(f"Discord message received: is_dm={is_dm}, should_respond={should_respond}, content={message.content[:50]}")
+            # Ambient channels: every message reaches her as context, not just
+            # ones that address her — she decides whether to interject
+            # (agent_core.py's run_turn, addressed_to_gaia gate). Only for
+            # channel messages that don't already address her; a DM or an
+            # explicit mention always takes the guaranteed-response path above.
+            is_ambient = (not should_respond and not is_dm
+                         and str(message.channel.id) in self.ambient_channel_ids)
 
-            if should_respond:
+            logger.debug(f"Discord message received: is_dm={is_dm}, should_respond={should_respond}, "
+                        f"is_ambient={is_ambient}, content={message.content[:50]}")
+
+            if should_respond or is_ambient:
                 content = message.content
                 for mention in message.mentions:
                     content = content.replace(f"<@{mention.id}>", "").replace(f"<@!{mention.id}>", "")
@@ -279,8 +322,11 @@ class DiscordInterface:
                     names = ", ".join(a["filename"] for a in attachments)
                     content = f"[Attached: {names}]"
 
-                # Auto-translate non-English messages
-                if content and not content.startswith("!"):
+                # Auto-translate non-English messages. Not for an ambient
+                # turn — the translate reply is itself a visible bot message,
+                # which would mean "ambient" messages get an unconditional
+                # reply regardless of whether she decides to speak.
+                if content and not content.startswith("!") and not is_ambient:
                     try:
                         from gaia_web.translation import detect_and_translate_to_english
                         translation_result = await detect_and_translate_to_english(content)
@@ -314,6 +360,7 @@ class DiscordInterface:
                         is_dm=is_dm,
                         message_obj=message,
                         attachments=attachments,
+                        addressed_to_gaia=should_respond,
                     )
 
             if not is_dm:
@@ -439,7 +486,8 @@ class DiscordInterface:
                 return
 
             try:
-                from gaia_web.translation import detect_language, translate as do_translate, LANG_NAMES
+                from gaia_web.translation import LANG_NAMES, detect_language
+                from gaia_web.translation import translate as do_translate
 
                 detection = await detect_language(text_to_translate)
                 if detection is None:
@@ -545,7 +593,7 @@ class DiscordInterface:
 
             try:
                 await bot.wait_for("reaction_add", timeout=60.0, check=_confirmed)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await ctx.send("Timed out — nothing deleted.")
                 return
 
@@ -583,69 +631,95 @@ class DiscordInterface:
         content: str,
         channel_id: str,
         user_id: str,
-        guild_id: Optional[str],
+        guild_id: str | None,
         author_name: str,
         message_id: str,
         is_dm: bool,
         message_obj: Any,
-        attachments: Optional[list] = None,
+        attachments: list | None = None,
+        addressed_to_gaia: bool = True,
     ):
-        """Handle incoming Discord message by forwarding to gaia-core as a CognitionPacket."""
-        logger.info(f"Discord: Received {'DM' if is_dm else 'channel message'} from {author_name}")
+        """Handle incoming Discord message by forwarding to gaia-core as a CognitionPacket.
 
-        # Check if GAIA is in a state that warrants a canned response or sleep-wake
+        addressed_to_gaia=False (ambient channels): she sees it as context but
+        decides whether to reply (agent_core.py's run_turn). Never wakes her,
+        never queues for wake, and never sends a canned/distracted reply —
+        all of those are visible bot messages, and an ambient turn stays
+        silent unless she genuinely decides to speak up.
+        """
+        logger.info(f"Discord: Received {'DM' if is_dm else 'channel message'} from {author_name}"
+                   + ("" if addressed_to_gaia else " (ambient)"))
+
         core_state = "active"
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                check = await client.get(f"{self.core_endpoint}/sleep/distracted-check")
-                if check.status_code == 200:
-                    data = check.json()
-                    core_state = data.get("state", "active")
-                    canned = data.get("canned_response")
-                    if canned:
-                        logger.info("Discord: Canned response for state=%s", core_state)
-                        await self._send_response(message_obj, canned, is_dm)
-                        return
-        except Exception:
-            logger.debug("Distracted-check failed — proceeding normally", exc_info=True)
-
-        # Sleep-aware: enqueue, wake, wait, then process normally
-        if core_state in ("asleep", "drowsy") and self.message_queue is not None:
-            from gaia_web.queue.message_queue import QueuedMessage
-
-            qm = QueuedMessage(
-                message_id=message_id,
-                content=content,
-                source="discord",
-                session_id=f"discord_dm_{user_id}" if is_dm else f"discord_channel_{channel_id}",
-                metadata={"author_name": author_name, "is_dm": is_dm},
-            )
-            await self.message_queue.enqueue(qm)
-            logger.info("Discord: GAIA is asleep — queued message %s, waiting for wake", message_id)
-
-            # Show typing indicator while waiting for wake
+        if addressed_to_gaia:
+            # Check if GAIA is in a state that warrants a canned response or sleep-wake
             try:
-                async with message_obj.channel.typing():
-                    woke = await self.message_queue.wait_for_active(timeout=120.0)
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    check = await client.get(f"{self.core_endpoint}/sleep/distracted-check")
+                    if check.status_code == 200:
+                        data = check.json()
+                        core_state = data.get("state", "active")
+                        canned = data.get("canned_response")
+                        if canned:
+                            logger.info("Discord: Canned response for state=%s", core_state)
+                            await self._send_response(message_obj, canned, is_dm)
+                            return
             except Exception:
-                woke = await self.message_queue.wait_for_active(timeout=120.0)
+                logger.debug("Distracted-check failed — proceeding normally", exc_info=True)
 
-            await self.message_queue.dequeue()
+            # Sleep-aware: enqueue, wake, wait, then process normally
+            if core_state in ("asleep", "drowsy") and self.message_queue is not None:
+                from gaia_web.queue.message_queue import QueuedMessage
 
-            if not woke:
-                logger.warning("Discord: Wake timed out for message %s", message_id)
-                await self._send_response(
-                    message_obj,
-                    "I'm having trouble waking up right now... give me another moment and try again.",
-                    is_dm,
+                qm = QueuedMessage(
+                    message_id=message_id,
+                    content=content,
+                    source="discord",
+                    session_id=f"discord_dm_{user_id}" if is_dm else f"discord_channel_{channel_id}",
+                    metadata={"author_name": author_name, "is_dm": is_dm},
                 )
+                await self.message_queue.enqueue(qm)
+                logger.info("Discord: GAIA is asleep — queued message %s, waiting for wake", message_id)
+
+                # Show typing indicator while waiting for wake
+                try:
+                    async with message_obj.channel.typing():
+                        woke = await self.message_queue.wait_for_active(timeout=120.0)
+                except Exception:
+                    woke = await self.message_queue.wait_for_active(timeout=120.0)
+
+                await self.message_queue.dequeue()
+
+                if not woke:
+                    logger.warning("Discord: Wake timed out for message %s", message_id)
+                    await self._send_response(
+                        message_obj,
+                        "I'm having trouble waking up right now... give me another moment and try again.",
+                        is_dm,
+                    )
+                    return
+
+                logger.info("Discord: GAIA woke up — processing queued message %s", message_id)
+                # Fall through to normal packet construction below
+        else:
+            # Ambient: a quiet health check only, to know whether to bother
+            # forwarding at all — never wakes her, never queues, never replies.
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    check = await client.get(f"{self.core_endpoint}/sleep/distracted-check")
+                    if check.status_code == 200:
+                        core_state = check.json().get("state", "active")
+            except Exception:
+                logger.debug("Ambient distracted-check failed — proceeding", exc_info=True)
+            if core_state in ("asleep", "drowsy"):
+                logger.debug("Discord: ambient message not forwarded — GAIA is %s", core_state)
                 return
 
-            logger.info("Discord: GAIA woke up — processing queued message %s", message_id)
-            # Fall through to normal packet construction below
-
-        # Show GAIA as online while processing this message
-        await self._set_presence("online", "Thinking...")
+        # Show GAIA as online while processing this message — not for an
+        # ambient turn, where the overwhelming majority produce no reply and
+        # flipping presence on every message in an active channel is noise.
+        if addressed_to_gaia:
+            await self._set_presence("online", "Thinking...")
 
         packet_id = str(uuid.uuid4())
         session_id = f"discord_dm_{user_id}" if is_dm else f"discord_channel_{channel_id}"
@@ -684,7 +758,7 @@ class DiscordInterface:
                         metadata={"is_dm": is_dm, "author_name": author_name}
                     ),
                     source_destination=OutputDestination.DISCORD,
-                    addressed_to_gaia=True, # Assuming direct address
+                    addressed_to_gaia=addressed_to_gaia,
                 ),
                 operational_status=OperationalStatus(status="initialized")
             ),
@@ -752,11 +826,12 @@ class DiscordInterface:
                 # restarting ("All connection attempts failed"). Nothing has
                 # reached her yet, so wait for her core to come back first.
                 if not await self._wait_for_core(core_client):
-                    await self._send_response(
-                        message_obj,
-                        "I can't reach my core right now, so I didn't get to read that. "
-                        "Please send it again in a couple of minutes.",
-                        is_dm)
+                    if addressed_to_gaia:
+                        await self._send_response(
+                            message_obj,
+                            "I can't reach my core right now, so I didn't get to read that. "
+                            "Please send it again in a couple of minutes.",
+                            is_dm)
                     return
                 # Use streaming POST to receive real-time tokens (Reflexes)
                 async with core_client.stream(
@@ -832,25 +907,30 @@ class DiscordInterface:
 
         except httpx.TimeoutException:
             log_gaia_error(logger, "GAIA-WEB-001", "Request to gaia-core timed out")
-            await self._send_response(
-                message_obj,
-                "I'm sorry, GAIA Core took too long to respond. Please try again.",
-                is_dm
-            )
+            if addressed_to_gaia:
+                await self._send_response(
+                    message_obj,
+                    "I'm sorry, GAIA Core took too long to respond. Please try again.",
+                    is_dm
+                )
         except httpx.HTTPStatusError as e:
             log_gaia_error(logger, "GAIA-WEB-001", f"Core HTTP error: {e.response.status_code}")
-            await self._send_response(
-                message_obj,
-                "I encountered an error communicating with my core systems. Please try again in a moment.",
-                is_dm
-            )
+            if addressed_to_gaia:
+                await self._send_response(
+                    message_obj,
+                    "I encountered an error communicating with my core systems. Please try again in a moment.",
+                    is_dm
+                )
         except Exception as e:
             log_gaia_error(logger, "GAIA-WEB-010", f"Unexpected error during packet processing: {e}", exc_info=True)
-            await self._send_response(
-                message_obj,
-                "An unexpected error occurred. Please try again.",
-                is_dm
-            )
+            # An ambient turn stays silent even on failure -- a visible error
+            # reply would itself be an unprompted interjection.
+            if addressed_to_gaia:
+                await self._send_response(
+                    message_obj,
+                    "An unexpected error occurred. Please try again.",
+                    is_dm
+                )
         finally:
             # Return to idle presence after message processing completes
             await self._set_presence("idle", "over the studio")
@@ -975,7 +1055,7 @@ class DiscordInterface:
 
     # --- Approval Flow ---
 
-    def _extract_pending_approval(self, packet: CognitionPacket) -> Optional[dict]:
+    def _extract_pending_approval(self, packet: CognitionPacket) -> dict | None:
         """Check if a completed packet contains a pending approval request."""
         if not packet.tool_routing or not packet.tool_routing.execution_result:
             return None
@@ -1036,7 +1116,7 @@ class DiscordInterface:
     async def _handle_approval_response(
         self,
         content: str,
-        waiter_key: Tuple[str, str],
+        waiter_key: tuple[str, str],
         message_obj: Any,
         is_dm: bool,
     ):
@@ -1163,7 +1243,7 @@ class DiscordInterface:
         return ""
 
 
-async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Optional[str] = None) -> bool:
+async def send_to_channel(channel_id: str, content: str, reply_to_message_id: str | None = None) -> bool:
     """Send a message to a specific Discord channel (for autonomous messages).
 
     Safe to call from any event loop — schedules work on the bot's own loop.
@@ -1308,7 +1388,7 @@ def is_bot_ready() -> bool:
     return _bot is not None and _bot.is_ready()
 
 
-def get_discord_status() -> Dict[str, Any]:
+def get_discord_status() -> dict[str, Any]:
     """Return Discord bot connectivity status for the dashboard."""
     global _bot, _bot_loop
     if _bot is None:
