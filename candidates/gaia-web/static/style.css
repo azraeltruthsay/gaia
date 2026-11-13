@@ -432,8 +432,13 @@ html, body {
   resize: horizontal; overflow: auto; direction: rtl; }
 .mind-map-column > * { direction: ltr; }
 
-/* Unified brain container — fills the column */
-.unified-brain { flex: 1; overflow: hidden; min-height: 120px; }
+/* Unified brain container — fills the column.
+   Locked to the SVG's own aspect ratio (280x225) and never allowed to
+   flex-shrink: a sibling appearing/disappearing below it (the inspector
+   used to pop in on hover) was changing this box's height, which rescaled
+   the SVG, which moved the neuron out from under the cursor, which
+   dismissed the hover, which undid the resize — a 60Hz flicker loop. */
+.unified-brain { width: 100%; aspect-ratio: 280 / 225; flex-shrink: 0; overflow: hidden; }
 
 /* Live generation under the brain: three quarters of the column */
 .chat-gen { flex: 3; min-height: 0; display: flex; flex-direction: column;
@@ -534,9 +539,13 @@ html, body {
 .tier-label { font-size: 9px; opacity: 0.35; pointer-events: none;
   text-transform: uppercase; letter-spacing: 2px; font-weight: 700; }
 
-/* Legend */
-.mind-map-legend { padding: 6px 8px; font-size: 10px; border-top: 1px solid var(--border);
-  color: var(--text-dim); display: flex; gap: 8px; min-height: 24px; flex-wrap: wrap; }
+/* Neural Inspector — a permanent, fixed-height panel beneath the brain
+   (never x-show'd away) so hovering a neuron or region never changes this
+   column's layout. Idle state shows a placeholder at the same height. */
+.mind-map-inspector { height: 95px; min-height: 95px; flex-shrink: 0; overflow-y: auto;
+  padding: 6px 8px; font-size: 10px; border-top: 1px solid var(--border); color: var(--text-dim); }
+.inspector-placeholder { height: 100%; display: flex; align-items: center; justify-content: center;
+  text-align: center; opacity: 0.6; }
 .legend-tier { color: var(--highlight); font-weight: 700; text-transform: uppercase; font-size: 9px; letter-spacing: 1px; }
 .legend-label { color: var(--text); font-weight: 600; }
 .legend-strength { color: var(--highlight); }
