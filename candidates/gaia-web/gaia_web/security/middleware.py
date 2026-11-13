@@ -16,9 +16,9 @@ Audit log: /logs/security_audit.jsonl (JSONL, append mode)
   - Each line contains safe redacted_excerpt values only.
 """
 
-import logging
 import json
-from datetime import datetime, timezone
+import logging
+from datetime import UTC, datetime, timezone
 from typing import Tuple
 
 from gaia_common.protocols.cognition_packet import (
@@ -26,9 +26,10 @@ from gaia_common.protocols.cognition_packet import (
     SecurityScan,
     SecurityScanResult,
 )
+
 from gaia_web.security.scanner import (
-    PromptInjectionScanner,
     PIIRedactionScanner,
+    PromptInjectionScanner,
     SecretsScanner,
     VulnerabilityScanner,
 )
@@ -92,7 +93,7 @@ class SecurityScanMiddleware:
     # Public API
     # ------------------------------------------------------------------
 
-    def scan_packet(self, packet: CognitionPacket) -> Tuple[CognitionPacket, bool]:
+    def scan_packet(self, packet: CognitionPacket) -> tuple[CognitionPacket, bool]:
         """
         Scan a CognitionPacket's original_prompt.
 
@@ -124,7 +125,7 @@ class SecurityScanMiddleware:
 
         return packet, should_block
 
-    def scan_text(self, text: str, packet_id: str, session_id: str) -> Tuple[str, SecurityScan, bool]:
+    def scan_text(self, text: str, packet_id: str, session_id: str) -> tuple[str, SecurityScan, bool]:
         """
         Scan raw text (for dict-based paths such as main.py).
 
@@ -181,7 +182,7 @@ class SecurityScanMiddleware:
         )
 
         # --- Audit log (safe values only — raw matches never logged) ---
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         for hit in all_hits:
             entry = {
                 "packet_id": packet_id,

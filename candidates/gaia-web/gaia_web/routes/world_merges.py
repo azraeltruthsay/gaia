@@ -99,7 +99,7 @@ class _ApproveRequest(BaseModel):
 
 
 @router.post("/{merge_id}/approve")
-async def approve(merge_id: str, request: Optional[_ApproveRequest] = None) -> dict:
+async def approve(merge_id: str, request: _ApproveRequest | None = None) -> dict:
     """Proxy POST /world_merges/{merge_id}/approve."""
     payload = {"approver": (request.approver if request else "architect")}
     return await _study_post(f"/world_merges/{merge_id}/approve", payload)
@@ -110,7 +110,7 @@ class _RejectRequest(BaseModel):
 
 
 @router.post("/{merge_id}/reject")
-async def reject(merge_id: str, request: Optional[_RejectRequest] = None) -> dict:
+async def reject(merge_id: str, request: _RejectRequest | None = None) -> dict:
     """Proxy POST /world_merges/{merge_id}/reject."""
     payload = {"reason": (request.reason if request else "")}
     return await _study_post(f"/world_merges/{merge_id}/reject", payload)

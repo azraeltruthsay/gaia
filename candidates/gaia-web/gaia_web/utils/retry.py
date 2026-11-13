@@ -52,7 +52,7 @@ def _is_maintenance_mode() -> bool:
                 data = _json.loads(_MAINTENANCE_JSON.read_text())
                 if data.get("active", False):
                     return True
-        except (Exception,):
+        except Exception:
             pass
         if _LEGACY_MAINT_FLAG.exists():
             try:

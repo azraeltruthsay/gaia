@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -29,7 +29,7 @@ TRAIN_JSONL = Path(os.getenv("CURRICULUM_TRAIN_JSONL", "/knowledge/curricula/sel
 
 class ApproveRequest(BaseModel):
     approve_all: bool = False
-    pair_indices: Optional[list[int]] = None
+    pair_indices: list[int] | None = None
 
 
 def _ensure_dirs():
@@ -66,7 +66,7 @@ def _parse_candidate(filepath: Path) -> dict:
         "filename": filepath.name,
         "course": course,
         "pair_count": len(pairs),
-        "timestamp": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        "timestamp": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
         "status": "pending",
     }
 

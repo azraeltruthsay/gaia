@@ -28,7 +28,7 @@ _SCRIPT_HINTS = {
     "ru": re.compile(r"[\u0400-\u04FF]"),                     # Cyrillic
 }
 
-_client: Optional[httpx.AsyncClient] = None
+_client: httpx.AsyncClient | None = None
 
 LANG_NAMES = {
     "en": "English", "ja": "Japanese", "ko": "Korean", "zh": "Chinese",
@@ -44,7 +44,7 @@ async def _get_client() -> httpx.AsyncClient:
     return _client
 
 
-async def detect_language(text: str) -> Optional[Tuple[str, float]]:
+async def detect_language(text: str) -> tuple[str, float] | None:
     """Detect language. Returns (lang_code, confidence) or None on failure."""
     try:
         client = await _get_client()
@@ -59,7 +59,7 @@ async def detect_language(text: str) -> Optional[Tuple[str, float]]:
     return None
 
 
-async def translate(text: str, source: str, target: str) -> Optional[str]:
+async def translate(text: str, source: str, target: str) -> str | None:
     """Translate text. Returns translated string or None on failure."""
     try:
         client = await _get_client()
@@ -76,7 +76,7 @@ async def translate(text: str, source: str, target: str) -> Optional[str]:
     return None
 
 
-def _hint_language_by_script(text: str) -> Optional[str]:
+def _hint_language_by_script(text: str) -> str | None:
     """Detect language from Unicode script when LibreTranslate fails on non-Latin text."""
     # Japanese detection must precede Chinese (they share CJK ideographs)
     for lang in ("ja", "ko", "ar", "ru", "zh"):
@@ -86,7 +86,7 @@ def _hint_language_by_script(text: str) -> Optional[str]:
     return None
 
 
-async def detect_and_translate_to_english(text: str) -> Optional[Tuple[str, str, str]]:
+async def detect_and_translate_to_english(text: str) -> tuple[str, str, str] | None:
     """Detect language; if non-English, translate to English.
 
     Returns (translated_text, source_lang, source_lang_name) or None if:

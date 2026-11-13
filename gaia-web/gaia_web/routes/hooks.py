@@ -6,8 +6,8 @@ from the browser to gaia-core, avoiding CORS issues.
 """
 
 import json
-import os
 import logging
+import os
 import uuid
 
 import httpx

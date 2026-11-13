@@ -7,10 +7,10 @@ and retrieving full interaction chains.
 """
 
 import json
-import os
 import logging
+import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +22,7 @@ logger = logging.getLogger("GAIA.Web.Consent")
 
 # Module-level security middleware singleton
 from gaia_web.security.middleware import SecurityScanMiddleware
+
 _security_middleware = SecurityScanMiddleware()
 
 router = APIRouter(prefix="/api/consent", tags=["consent"])
@@ -96,7 +97,7 @@ def _load_library() -> dict:
         return {"error": f"Invalid JSON in test library: {e}", "tiers": {}}
 
 
-def _find_test(library: dict, test_id: str) -> tuple[Optional[dict], Optional[str]]:
+def _find_test(library: dict, test_id: str) -> tuple[dict | None, str | None]:
     """Find a test by ID across all tiers. Returns (test_dict, tier_key) or (None, None)."""
     for tier_key, tier_data in library.get("tiers", {}).items():
         for test in tier_data.get("tests", []):
@@ -164,18 +165,41 @@ def _classify_response(response: str) -> str:
         return "engage"
 
 
-async def _send_to_core(prompt: str, metadata: Optional[dict] = None) -> dict:
+async def _send_to_core(prompt: str, metadata: dict | None = None) -> dict:
     """Send a prompt through gaia-core's /process_packet endpoint.
 
     Returns the completed packet dict or an error dict.
     """
     from gaia_common.protocols.cognition_packet import (
         COGPACKET_VERSION,
-        CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget,
-        Content, DataField, OutputDestination, PersonaRole, Routing, Model,
-        OperationalStatus, SystemTask, Intent, Context, SessionHistoryRef,
-        Constraints, Response, Governance, Safety, Metrics, TokenUsage, Status,
-        PacketState, ToolRoutingState, Reasoning, TargetEngine,
+        CognitionPacket,
+        Constraints,
+        Content,
+        Context,
+        DataField,
+        DestinationTarget,
+        Governance,
+        Header,
+        Intent,
+        Metrics,
+        Model,
+        OperationalStatus,
+        Origin,
+        OutputDestination,
+        OutputRouting,
+        PacketState,
+        Persona,
+        PersonaRole,
+        Reasoning,
+        Response,
+        Routing,
+        Safety,
+        SessionHistoryRef,
+        Status,
+        SystemTask,
+        TargetEngine,
+        TokenUsage,
+        ToolRoutingState,
     )
 
     packet_id = f"pkt-consent-{uuid.uuid4().hex[:12]}"
@@ -266,8 +290,8 @@ async def _send_to_core(prompt: str, metadata: Optional[dict] = None) -> dict:
 
 async def _run_single_test(test: dict, tier_key: str) -> dict:
     """Run a single consent test and return the result."""
-    timestamp = datetime.now(timezone.utc).isoformat()
-    result_id = f"{test['id']}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}"
+    timestamp = datetime.now(UTC).isoformat()
+    result_id = f"{test['id']}_{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
 
     logger.info(f"Running consent test {test['id']} (tier: {tier_key})")
 
@@ -600,7 +624,7 @@ async def acknowledge_result(req: AcknowledgeRequest):
 
     # Update the result with acknowledgment
     result["acknowledgment"] = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "message": ack_message,
         "custom_message": req.custom_message,
         "gaia_response": gaia_response,

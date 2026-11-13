@@ -10,7 +10,6 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
-
 from gaia_common.utils.blueprint_io import (
     derive_component_topology,
     derive_graph_topology,
@@ -78,7 +77,7 @@ async def list_blueprints():
 
 
 @router.get("/{service_id}")
-async def get_blueprint_detail(service_id: str, candidate: Optional[bool] = None):
+async def get_blueprint_detail(service_id: str, candidate: bool | None = None):
     """Return full blueprint JSON for a service.
 
     If candidate is not specified, tries live first then candidate.
@@ -98,7 +97,7 @@ async def get_blueprint_detail(service_id: str, candidate: Optional[bool] = None
 
 
 @router.get("/{service_id}/markdown")
-async def get_blueprint_markdown(service_id: str, candidate: Optional[bool] = None):
+async def get_blueprint_markdown(service_id: str, candidate: bool | None = None):
     """Return rendered markdown for a blueprint."""
     bp = None
     if candidate is None:
@@ -115,7 +114,7 @@ async def get_blueprint_markdown(service_id: str, candidate: Optional[bool] = No
 
 
 @router.get("/{service_id}/components")
-async def get_component_topology(service_id: str, candidate: Optional[bool] = None):
+async def get_component_topology(service_id: str, candidate: bool | None = None):
     """Return internal component graph for a service.
 
     If candidate is not specified, tries live first then candidate.

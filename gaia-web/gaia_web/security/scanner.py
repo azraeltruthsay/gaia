@@ -5,12 +5,12 @@ All scanners use stdlib only (re, base64) — no additional dependencies.
 Shannon entropy is implemented inline for secrets detection.
 """
 
-import re
 import base64
-import math
 import logging
+import math
+import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import List, Tuple
 
 logger = logging.getLogger("GAIA.SecurityScanner")
@@ -26,7 +26,7 @@ class ScanHit:
     rule_id: str
     severity: str          # "INFO" | "WARN" | "BLOCK"
     redacted_excerpt: str  # Never contains raw PII/secrets
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ class PromptInjectionScanner:
     # by the embedding classifier + Nano confirmation in gaia-core's intent
     # detection pipeline, which understands context and paraphrasing.
     # These regex patterns catch obvious patterns for audit logging and dry_run.
-    _ROLE_OVERRIDE_PATTERNS: List[Tuple[re.Pattern, float]] = [
+    _ROLE_OVERRIDE_PATTERNS: list[tuple[re.Pattern, float]] = [
         (re.compile(r"ignore\s+previous\s+instructions", re.IGNORECASE), 0.30),
         (re.compile(r"you\s+are\s+now\s+a?\s*\w", re.IGNORECASE), 0.20),
         (re.compile(r"your\s+new\s+instructions\s+are", re.IGNORECASE), 0.25),
@@ -88,7 +88,7 @@ class PromptInjectionScanner:
         (re.compile(r"(reveal|show|tell\s+me|output|print)\s+.*?\b(system\s+prompt|your\s+instructions|your\s+guidelines|your\s+training)", re.IGNORECASE | re.DOTALL), 0.20),
     ]
 
-    _DELIMITER_PATTERNS: List[Tuple[re.Pattern, float]] = [
+    _DELIMITER_PATTERNS: list[tuple[re.Pattern, float]] = [
         (re.compile(r"```.*?```", re.DOTALL), 0.10),
         (re.compile(r"\[\[.*?\]\]", re.DOTALL), 0.10),
         (re.compile(r"<\|.*?\|>", re.DOTALL), 0.15),
@@ -102,10 +102,10 @@ class PromptInjectionScanner:
         "print", "output", "respond", "say", "write", "tell", "show",
     ])
 
-    def scan(self, text: str) -> Tuple[float, List[ScanHit]]:
+    def scan(self, text: str) -> tuple[float, list[ScanHit]]:
         """Return (injection_score, hits). Score is capped at 1.0."""
         score = 0.0
-        hits: List[ScanHit] = []
+        hits: list[ScanHit] = []
 
         # Tier 1 — role override
         for pattern, weight in self._ROLE_OVERRIDE_PATTERNS:
@@ -178,7 +178,7 @@ class PromptInjectionScanner:
         score = min(score, 1.0)
         return score, hits
 
-    def _check_canaries(self, text: str) -> List[str]:
+    def _check_canaries(self, text: str) -> list[str]:
         """Check if any active canary tokens appear in the input text.
 
         Canary tokens are unique per-session hashes embedded in system prompts.
@@ -216,14 +216,14 @@ class PIIRedactionScanner:
         ("cc",      re.compile(r'\b(?:\d[ -]?){13,16}\b'), None),  # Luhn-validated below
     ]
 
-    def scan(self, text: str) -> Tuple[str, List[dict], List[ScanHit]]:
+    def scan(self, text: str) -> tuple[str, list[dict], list[ScanHit]]:
         """
         Returns (redacted_text, redaction_records, hits).
         redaction_records include raw match for audit; hits have only safe excerpts.
         """
         redacted = text
-        records: List[dict] = []
-        hits: List[ScanHit] = []
+        records: list[dict] = []
+        hits: list[ScanHit] = []
 
         for pii_type, pattern, placeholder in self._PATTERNS:
             for match in pattern.finditer(redacted):
@@ -272,8 +272,8 @@ class SecretsScanner:
     _HIGH_ENTROPY_RE = re.compile(r'[A-Za-z0-9+/=_\-]{20,}')
     _ENTROPY_THRESHOLD = 4.5
 
-    def scan(self, text: str) -> List[ScanHit]:
-        hits: List[ScanHit] = []
+    def scan(self, text: str) -> list[ScanHit]:
+        hits: list[ScanHit] = []
 
         for rule_id, pattern in self._PATTERNS:
             for match in pattern.finditer(text):
@@ -323,8 +323,8 @@ class VulnerabilityScanner:
         ("xss",           re.compile(r"(?:<script|javascript:|onerror\s*=)", re.IGNORECASE)),
     ]
 
-    def scan(self, text: str) -> List[ScanHit]:
-        hits: List[ScanHit] = []
+    def scan(self, text: str) -> list[ScanHit]:
+        hits: list[ScanHit] = []
         for rule_id, pattern in self._PATTERNS:
             if pattern.search(text):
                 hits.append(ScanHit(

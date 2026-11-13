@@ -71,7 +71,7 @@ async def codemind_changelog(limit: int = 20, offset: int = 0):
 async def codemind_queue():
     """Return pending detection queue size and entries."""
     try:
-        from gaia_common.utils.codemind_detector import read_detections, queue_size
+        from gaia_common.utils.codemind_detector import queue_size, read_detections
         size = queue_size(CODEMIND_DETECT_QUEUE)
         entries = read_detections(CODEMIND_DETECT_QUEUE, limit=20)
         return {"size": size, "entries": entries}

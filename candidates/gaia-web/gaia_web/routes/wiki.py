@@ -4,8 +4,8 @@ Proxies /wiki/* -> http://gaia-wiki:8080/*
 Only active when WIKI_ENDPOINT is set.
 """
 
-import os
 import logging
+import os
 
 import httpx
 from fastapi import APIRouter, Request

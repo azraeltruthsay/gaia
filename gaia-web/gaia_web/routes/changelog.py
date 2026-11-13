@@ -6,9 +6,10 @@ POST /api/changelog  {type, service, summary, author?, detail?}
 """
 
 import logging
+from typing import Optional
+
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
-from typing import Optional
 
 logger = logging.getLogger("GAIA.Web.Changelog")
 
@@ -26,14 +27,14 @@ class ChangelogEntry(BaseModel):
     type: str
     service: str
     summary: str
-    author: Optional[str] = "manual"
-    detail: Optional[str] = None
+    author: str | None = "manual"
+    detail: str | None = None
 
 
 @router.get("")
 async def get_changelog(
-    service: Optional[str] = Query(None),
-    type: Optional[str] = Query(None, alias="type"),
+    service: str | None = Query(None),
+    type: str | None = Query(None, alias="type"),
     limit: int = Query(100, ge=1, le=1000),
 ):
     if read_entries is None:

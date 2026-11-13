@@ -12,8 +12,9 @@ import json
 import logging
 import os
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -33,7 +34,7 @@ def _kg_path() -> str:
     return os.getenv("PALACE_KG_PATH", "/shared/knowledge_graph/gaia_kg.sqlite3")
 
 
-def _json_files(directory: Path) -> Iterable[Dict]:
+def _json_files(directory: Path) -> Iterable[dict]:
     for path in sorted(directory.glob("*.json")) if directory.is_dir() else []:
         try:
             yield json.loads(path.read_text(encoding="utf-8"))
@@ -41,7 +42,7 @@ def _json_files(directory: Path) -> Iterable[Dict]:
             logger.warning("Palace report: unreadable %s", path)
 
 
-def _page(items: List[Dict], limit: int, offset: int) -> Dict:
+def _page(items: list[dict], limit: int, offset: int) -> dict:
     return {"total": len(items), "offset": offset, "limit": limit, "items": items[offset:offset + limit]}
 
 
@@ -49,11 +50,11 @@ def _matches(q: str, *fields) -> bool:
     return not q or q.lower() in " ".join(str(f or "") for f in fields).lower()
 
 
-def _people() -> List[Dict]:
+def _people() -> list[dict]:
     return list(_json_files(_root() / "people"))
 
 
-def _person_of(session_id: str, people: List[Dict]) -> Optional[Dict]:
+def _person_of(session_id: str, people: list[dict]) -> dict | None:
     discord = session_id[len("discord_dm_"):] if session_id.startswith("discord_dm_") else None
     for person in people:
         for account in person.get("accounts", []):
@@ -62,7 +63,7 @@ def _person_of(session_id: str, people: List[Dict]) -> Optional[Dict]:
     return None
 
 
-def _conversation(path: Path) -> List[Dict]:
+def _conversation(path: Path) -> list[dict]:
     records = []
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -75,7 +76,7 @@ def _conversation(path: Path) -> List[Dict]:
     return records
 
 
-def _memories() -> List[Dict]:
+def _memories() -> list[dict]:
     out = []
     for path in _root().rglob("*.aaak"):
         try:
@@ -97,7 +98,7 @@ def _kg() -> sqlite3.Connection:
 
 
 @router.get("/overview")
-async def overview() -> Dict:
+async def overview() -> dict:
     """How much is in each part of her memory."""
     root = _root()
     counts = {"people": len(_people()),
@@ -116,13 +117,13 @@ async def overview() -> Dict:
 
 
 @router.get("/people")
-async def people(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)) -> Dict:
+async def people(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)) -> dict:
     found = [p for p in _people() if _matches(q, p.get("names"), p.get("relationship"), p.get("facts"))]
     return _page(sorted(found, key=lambda p: (p.get("names") or [""])[0].lower()), limit, offset)
 
 
 @router.get("/lookups")
-async def lookups(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)) -> Dict:
+async def lookups(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)) -> dict:
     """What she has looked up or been told, most used first."""
     found = [r for r in _json_files(_root() / "knowledge" / "lookups")
              if _matches(q, r.get("title"), r.get("snippet"), r.get("queries"), r.get("url"))]
@@ -131,7 +132,7 @@ async def lookups(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT), offse
 
 
 @router.get("/works")
-async def works(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)) -> Dict:
+async def works(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)) -> dict:
     found = [w for w in _json_files(_root() / "knowledge" / "works")
              if _matches(q, w.get("title"), w.get("author"), w.get("text"))]
     return _page(sorted(found, key=lambda w: str(w.get("title") or "").lower()), limit, offset)
@@ -139,14 +140,14 @@ async def works(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT), offset:
 
 @router.get("/memories")
 async def memories(q: str = "", wing: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT),
-                   offset: int = Query(0, ge=0)) -> Dict:
+                   offset: int = Query(0, ge=0)) -> dict:
     found = [m for m in _memories() if (not wing or m["wing"] == wing)
              and _matches(q, m["text"], m["room"], m["source"], m["intent"])]
     return _page(found, limit, offset)
 
 
 @router.get("/conversations")
-async def conversations(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)) -> Dict:
+async def conversations(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)) -> dict:
     everyone = _people()
     rows = []
     for path in (_root() / "conversations").glob("*.jsonl"):
@@ -162,7 +163,7 @@ async def conversations(q: str = "", limit: int = Query(50, ge=1, le=MAX_LIMIT),
 
 
 @router.get("/conversations/{session_id}")
-async def conversation(session_id: str) -> Dict:
+async def conversation(session_id: str) -> dict:
     if not session_id or any(c not in _RE_SAFE for c in session_id) or ".." in session_id:
         raise HTTPException(status_code=400, detail="Bad session id")
     path = _root() / "conversations" / f"{session_id}.jsonl"
@@ -173,7 +174,7 @@ async def conversation(session_id: str) -> Dict:
 
 @router.get("/graph")
 async def graph(q: str = "", world: str = "", fact_type: str = "", include_ended: bool = False,
-                limit: int = Query(50, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)) -> Dict:
+                limit: int = Query(50, ge=1, le=MAX_LIMIT), offset: int = Query(0, ge=0)) -> dict:
     """Facts in the knowledge graph, newest first. A fact whose valid_to has
     passed has ended; she keeps it, and so does this view when asked."""
     where, args = [], []

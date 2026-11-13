@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter
@@ -26,7 +26,7 @@ _POLL_INTERVAL = 0.25  # 250 ms (lower frequency than generation stream)
 _HEARTBEAT_INTERVAL = 15.0  # seconds
 
 
-def append_autonomous_message(text: str, source: str, session_id: Optional[str] = None) -> bool:
+def append_autonomous_message(text: str, source: str, session_id: str | None = None) -> bool:
     """Append one line to the autonomous-message log, same shape
     ``scripts/gaia_audio_inbox.py``'s ``_push_autonomous_message()`` writes.
     ``_event_generator`` above tails this file for the Mission Control
@@ -37,7 +37,7 @@ def append_autonomous_message(text: str, source: str, session_id: Optional[str] 
     entry = {
         "type": "autonomous",
         "text": text,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "source": source,
     }
     if session_id:

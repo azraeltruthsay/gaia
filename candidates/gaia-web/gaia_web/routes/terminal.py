@@ -100,7 +100,7 @@ async def terminal_ws(ws: WebSocket, container: str = ""):
             environment={"TERM": "xterm-256color"},
         )
         sock = client.api.exec_start(exec_id, socket=True, tty=True)
-        raw_sock = sock._sock  # noqa: SLF001 — access underlying socket
+        raw_sock = sock._sock
     except DockerException as e:
         await ws.send_json({"error": f"Exec failed: {e}"})
         await ws.close(code=1011)

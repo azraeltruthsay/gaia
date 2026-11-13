@@ -11,7 +11,7 @@ feature can gate on "GAIA replied within the past N hours".
 import json
 import logging
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +74,7 @@ class DMBlocklist:
     def record_dm(self, user_id: str, name: str) -> None:
         """Record that a user sent a DM. Updates last_dm and message_count."""
         with self._lock:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             entry = self._data["dm_users"].get(user_id, {
                 "name": name,
                 "first_dm": now,
@@ -91,7 +91,7 @@ class DMBlocklist:
     def record_gaia_reply(self, user_id: str) -> None:
         """Record that GAIA sent a reply to this DM user."""
         with self._lock:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             entry = self._data["dm_users"].get(user_id)
             if entry:
                 entry["last_gaia_reply"] = now
@@ -109,8 +109,8 @@ class DMBlocklist:
             try:
                 ts = datetime.fromisoformat(last_reply)
                 if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+                    ts = ts.replace(tzinfo=UTC)
+                cutoff = datetime.now(UTC) - timedelta(hours=hours)
                 return ts > cutoff
             except (ValueError, TypeError):
                 return False

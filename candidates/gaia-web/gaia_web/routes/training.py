@@ -68,7 +68,7 @@ def _run_dir(run_id: str) -> Path:
     return p
 
 
-def _read_json(path: Path) -> Optional[dict]:
+def _read_json(path: Path) -> dict | None:
     if not path.exists():
         return None
     try:
@@ -138,7 +138,7 @@ def _build_summary_row(run_dir: Path) -> dict:
 async def list_runs(
     sort_by: str = "started_at",
     descending: bool = True,
-    limit: Optional[int] = None,
+    limit: int | None = None,
 ) -> dict:
     """List all training runs from /shared/training_runs/.
 
@@ -210,9 +210,9 @@ async def get_run(run_id: str) -> dict:
 @router.get("/runs/{run_id}/metrics")
 async def get_run_metrics(
     run_id: str,
-    limit: Optional[int] = None,
-    step_from: Optional[int] = None,
-    step_to: Optional[int] = None,
+    limit: int | None = None,
+    step_from: int | None = None,
+    step_to: int | None = None,
 ) -> dict:
     """Return the full metrics.jsonl as a JSON array.
 

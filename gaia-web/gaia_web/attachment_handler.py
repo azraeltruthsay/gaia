@@ -33,7 +33,7 @@ def _content_hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
 
 
-def _extract_pdf_text(path: str) -> Optional[str]:
+def _extract_pdf_text(path: str) -> str | None:
     """Extract text from PDF using pdftotext (poppler-utils)."""
     try:
         result = subprocess.run(
@@ -63,7 +63,7 @@ def _extract_pdf_text(path: str) -> Optional[str]:
     return None
 
 
-def _extract_text(path: str, ext: str) -> Optional[str]:
+def _extract_text(path: str, ext: str) -> str | None:
     """Extract text content based on file extension."""
     if ext in _TEXT_EXTENSIONS:
         try:
@@ -83,7 +83,7 @@ def _extract_text(path: str, ext: str) -> Optional[str]:
     return None
 
 
-async def process_attachments(message: Any) -> List[Dict]:
+async def process_attachments(message: Any) -> list[dict]:
     """
     Download and extract content from Discord message attachments.
 

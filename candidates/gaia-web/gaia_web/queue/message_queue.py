@@ -17,7 +17,7 @@ import json
 import logging
 import os
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -38,16 +38,16 @@ class QueuedMessage:
     source: str  # "discord", "web", "cli"
     session_id: str
     priority: int = 0  # Higher = more urgent
-    queued_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    queued_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["queued_at"] = self.queued_at.isoformat()
         return d
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> QueuedMessage:
+    def from_dict(cls, d: dict[str, Any]) -> QueuedMessage:
         d = dict(d)  # shallow copy
         if isinstance(d.get("queued_at"), str):
             d["queued_at"] = datetime.fromisoformat(d["queued_at"])
@@ -65,7 +65,7 @@ class MessageQueue:
         core_url: str = "http://gaia-core:6415",
         queue_file: str | None = None,
     ) -> None:
-        self._queue: List[QueuedMessage] = []
+        self._queue: list[QueuedMessage] = []
         self._lock = asyncio.Lock()
         self._wake_signal_sent = False
         self._core_url = core_url
@@ -123,7 +123,7 @@ class MessageQueue:
 
             return True
 
-    async def dequeue(self) -> Optional[QueuedMessage]:
+    async def dequeue(self) -> QueuedMessage | None:
         """Remove and return highest-priority message (FIFO within priority)."""
         async with self._lock:
             if not self._queue:
@@ -136,18 +136,18 @@ class MessageQueue:
                 self._wake_signal_sent = False
             return msg
 
-    async def peek(self) -> Optional[QueuedMessage]:
+    async def peek(self) -> QueuedMessage | None:
         async with self._lock:
             if not self._queue:
                 return None
             self._queue.sort(key=lambda m: (-m.priority, m.queued_at))
             return self._queue[0]
 
-    async def get_queue_status(self) -> Dict[str, Any]:
+    async def get_queue_status(self) -> dict[str, Any]:
         async with self._lock:
             oldest_age = 0.0
             if self._queue:
-                oldest_age = (datetime.now(timezone.utc) - self._queue[0].queued_at).total_seconds()
+                oldest_age = (datetime.now(UTC) - self._queue[0].queued_at).total_seconds()
             return {
                 "count": len(self._queue),
                 "wake_signal_sent": self._wake_signal_sent,
@@ -160,8 +160,9 @@ class MessageQueue:
         Returns True if core reached active state, False on timeout or
         unresolvable states (offline, dreaming).
         """
-        import httpx
         import time
+
+        import httpx
 
         deadline = time.monotonic() + timeout
         unresolvable = {"offline", "dreaming"}

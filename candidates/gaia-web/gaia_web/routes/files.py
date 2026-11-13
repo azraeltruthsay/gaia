@@ -5,8 +5,8 @@ Provides directory listing and file reading with path traversal
 protection and configurable root directories.
 """
 
-import os
 import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException

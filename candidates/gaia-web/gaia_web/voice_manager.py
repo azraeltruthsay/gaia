@@ -269,7 +269,6 @@ class GaiaVoiceSink(_DiscordSinkBase):  # type: ignore[misc]
 
     def cleanup(self) -> None:
         """Called when stop_recording() is invoked."""
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -588,7 +587,7 @@ class VoiceManager:
                     data = await asyncio.wait_for(
                         self._audio_queue.get(), timeout=1.0,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
 
                 if not data:
@@ -763,7 +762,8 @@ class VoiceManager:
         return None
         # Legacy code below preserved for reference:
         import uuid
-        from gaia_common.utils.packet_factory import build_packet, PacketSource
+
+        from gaia_common.utils.packet_factory import PacketSource, build_packet
 
         user_id = self._connected_user or "voice_user"
         packet = build_packet(
@@ -774,16 +774,15 @@ class VoiceManager:
         )
 
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self.core_endpoint}/process_packet",
-                    json=packet.to_serializable_dict(),
-                    headers={"Content-Type": "application/json"},
-                ) as resp:
-                    if resp.status_code != 200:
-                        return None
-                    raw = await self._parse_ndjson_response(resp)
+            async with httpx.AsyncClient(timeout=5.0) as client, client.stream(
+                "POST",
+                f"{self.core_endpoint}/process_packet",
+                json=packet.to_serializable_dict(),
+                headers={"Content-Type": "application/json"},
+            ) as resp:
+                if resp.status_code != 200:
+                    return None
+                raw = await self._parse_ndjson_response(resp)
         except Exception:
             logger.debug("Nano request failed (falling back to Prime)", exc_info=True)
             return None
@@ -880,24 +879,23 @@ class VoiceManager:
 
         Parses the NDJSON streaming response from /process_packet.
         """
-        from gaia_common.utils.packet_factory import build_packet, PacketSource
+        from gaia_common.utils.packet_factory import PacketSource, build_packet
 
         user_id = self._connected_user or "voice_user"
         packet = build_packet(PacketSource.VOICE_PRIME, text, user_id=user_id)
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self.core_endpoint}/process_packet",
-                    json=packet.to_serializable_dict(),
-                    headers={"Content-Type": "application/json"},
-                ) as resp:
-                    if resp.status_code != 200:
-                        logger.error("Core response failed: %d", resp.status_code)
-                        return None
-                    raw = await self._parse_ndjson_response(resp)
-                    return self._strip_response_header(raw) if raw else None
+            async with httpx.AsyncClient(timeout=60.0) as client, client.stream(
+                "POST",
+                f"{self.core_endpoint}/process_packet",
+                json=packet.to_serializable_dict(),
+                headers={"Content-Type": "application/json"},
+            ) as resp:
+                if resp.status_code != 200:
+                    logger.error("Core response failed: %d", resp.status_code)
+                    return None
+                raw = await self._parse_ndjson_response(resp)
+                return self._strip_response_header(raw) if raw else None
         except Exception:
             logger.error("Core request failed", exc_info=True)
         return None
@@ -909,7 +907,7 @@ class VoiceManager:
         tight token/time budgets and a stalling system hint.
         Parses the NDJSON streaming response from /process_packet.
         """
-        from gaia_common.utils.packet_factory import build_packet, PacketSource
+        from gaia_common.utils.packet_factory import PacketSource, build_packet
 
         user_id = self._connected_user or "voice_user"
         packet = build_packet(
@@ -924,17 +922,16 @@ class VoiceManager:
         )
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self.core_endpoint}/process_packet",
-                    json=packet.to_serializable_dict(),
-                    headers={"Content-Type": "application/json"},
-                ) as resp:
-                    if resp.status_code != 200:
-                        logger.error("Core stalling response failed: %d", resp.status_code)
-                        return None
-                    return await self._parse_ndjson_response(resp)
+            async with httpx.AsyncClient(timeout=15.0) as client, client.stream(
+                "POST",
+                f"{self.core_endpoint}/process_packet",
+                json=packet.to_serializable_dict(),
+                headers={"Content-Type": "application/json"},
+            ) as resp:
+                if resp.status_code != 200:
+                    logger.error("Core stalling response failed: %d", resp.status_code)
+                    return None
+                return await self._parse_ndjson_response(resp)
         except Exception:
             logger.error("Core stalling request failed", exc_info=True)
         return None
@@ -955,24 +952,23 @@ class VoiceManager:
         payload = {"prompt": text, "target": "core", "system": self._VOICE_SYS,
                    "max_tokens": 160, "temperature": 0.3}
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                async with client.stream(
-                    "POST", f"{self.core_endpoint}/api/cognitive/stream",
-                    json=payload, headers={"Content-Type": "application/json"},
-                ) as resp:
-                    if resp.status_code != 200:
-                        logger.warning("Voice stream cognition failed: %d", resp.status_code)
-                        return
-                    async for line in resp.aiter_lines():
-                        if not line:
-                            continue
-                        try:
-                            ev = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        tok = ev.get("token")
-                        if tok:
-                            yield tok
+            async with httpx.AsyncClient(timeout=30.0) as client, client.stream(
+                "POST", f"{self.core_endpoint}/api/cognitive/stream",
+                json=payload, headers={"Content-Type": "application/json"},
+            ) as resp:
+                if resp.status_code != 200:
+                    logger.warning("Voice stream cognition failed: %d", resp.status_code)
+                    return
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    tok = ev.get("token")
+                    if tok:
+                        yield tok
         except Exception:
             logger.error("Voice stream cognition error", exc_info=True)
 
@@ -1023,7 +1019,7 @@ class VoiceManager:
         self._vc.play(source, after=after_play)
         try:
             await asyncio.wait_for(done.wait(), timeout=60.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if self._vc.is_playing():
                 self._vc.stop()
 
@@ -1135,7 +1131,7 @@ class VoiceManager:
             # Wait for playback to finish (max 60s safety)
             try:
                 await asyncio.wait_for(play_done.wait(), timeout=60.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if self._vc.is_playing():
                     self._vc.stop()
 
