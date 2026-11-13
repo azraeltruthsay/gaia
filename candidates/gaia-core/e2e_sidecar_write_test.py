@@ -8,6 +8,13 @@ Exercises the real pipeline that GAIA uses when it decides to write a file:
   4. Human/orchestrator approval
   5. File written and verified
 
+GAIA_Project-96xm: approval went from a server-generated challenge
+(reversed by hand) to a real TOTP code. This script has trusted,
+same-host access to the enrolled secret (same as gaia-mcp itself), so it
+generates real current codes via TotpVerifier.current_code() instead of
+simulating a human typing one, waiting for the 30s window to roll over
+between approvals so the replay guard doesn't reject a repeat.
+
 Usage:
     docker exec gaia-core-candidate python /app/e2e_sidecar_write_test.py
 """
@@ -20,6 +27,26 @@ import sys
 import time
 
 logging.disable(logging.WARNING)
+
+
+def _load_totp_verifier():
+    from gaia_common.utils.totp import load_totp_verifier
+    return load_totp_verifier(
+        "/run/secrets/gaia_mcp_totp_secret",
+        env_var="GAIA_MCP_TOTP_SECRET_FILE",
+    )
+
+
+def _fresh_totp_code(verifier, previous: str = None, timeout_s: int = 35) -> str:
+    """A TOTP code that hasn't been used yet this run (see e2e_mcp_write_test.py)."""
+    if verifier is None:
+        return None
+    deadline = time.time() + timeout_s
+    code = verifier.current_code()
+    while code == previous and time.time() < deadline:
+        time.sleep(1)
+        code = verifier.current_code()
+    return code
 
 
 def main() -> int:
@@ -153,15 +180,16 @@ EXECUTE: write_file {json.dumps({"path": test_path, "content": test_content})}""
           json.dumps(approval_req)[:200])
 
     action_id = approval_req.get("action_id")
-    challenge = approval_req.get("challenge")
+    totp = _load_totp_verifier()
+    code = _fresh_totp_code(totp)
     check("Got action_id", bool(action_id))
-    check("Got challenge", bool(challenge))
+    check("Got TOTP code", bool(code))
 
     # --- 4. Orchestrator approval ---
     print("\n--- Orchestrator Approval ---")
     write_succeeded = False
-    if action_id and challenge:
-        approval_resp = mcp_client.approve_action_via_mcp(action_id, challenge[::-1])
+    if action_id and code:
+        approval_resp = mcp_client.approve_action_via_mcp(action_id, code)
         client_ok = approval_resp.get("ok", False)
         check("Approval submitted", client_ok, json.dumps(approval_resp)[:200])
 
@@ -205,9 +233,10 @@ EXECUTE: write_file {json.dumps({"path": test_path, "content": test_content})}""
     cleanup = mcp_client.request_approval_via_mcp("write_file", {
         "path": test_path, "content": "",
     })
-    if cleanup.get("ok") and cleanup.get("action_id"):
+    code = _fresh_totp_code(totp, previous=code)
+    if cleanup.get("ok") and cleanup.get("action_id") and code:
         mcp_client.approve_action_via_mcp(
-            cleanup["action_id"], cleanup["challenge"][::-1]
+            cleanup["action_id"], code
         )
     check("Test file cleaned up", True)
 

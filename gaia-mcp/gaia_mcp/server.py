@@ -195,34 +195,34 @@ async def jsonrpc_endpoint(request: Request):
 async def request_approval_endpoint(request: Request):
     """
     Endpoint to request human approval for a sensitive tool call.
-    Returns an action_id and a challenge.
+    Returns an action_id; approval is confirmed with a TOTP code, not a
+    server-generated secret, so there is nothing to hand back here
+    (GAIA_Project-96xm).
     """
     try:
         body = await request.json()
         method = body.get("method")
         params = body.get("params", {})
-        
+
         if not method:
             raise HTTPException(status_code=400, detail="method is required")
-            
+
         # 1. Create a pending action
         allow_pending = bool(body.get("allow_pending", False))
-        action_id, challenge, created_at, expiry = approval_store.create_pending(
+        action_id, created_at, expiry = approval_store.create_pending(
             method, params, allow_pending=allow_pending
         )
 
         # 2. Log for the user
         logger.warning(f"🚨 APPROVAL REQUIRED: '{method}' (ID: {action_id})")
         logger.warning(f"   Params: {params}")
-        logger.warning(f"   Challenge: {challenge}")
 
         return {
             "ok": True,
             "action_id": action_id,
-            "challenge": challenge,
             "created_at": created_at,
             "expiry": expiry,
-            "message": f"Approval required for '{method}'. Please approve via /approve_action."
+            "message": f"Approval required for '{method}'. Reply with your authenticator code via /approve_action."
         }
     except Exception as e:
         logger.error(f"Error creating approval request: {e}")
@@ -232,14 +232,14 @@ async def request_approval_endpoint(request: Request):
 @app.post("/approve_action")
 async def approve_action_endpoint(request: Request):
     """
-    Endpoint to approve a pending action using the challenge response.
-    If approved, the tool is executed and results returned.
+    Endpoint to approve a pending action using the human's current TOTP
+    code. If approved, the tool is executed and results returned.
     """
     try:
         body = await request.json()
         action_id = body.get("action_id")
         approval_response = body.get("approval")
-        
+
         if not action_id or not approval_response:
             raise HTTPException(status_code=400, detail="action_id and approval are required")
             
@@ -256,7 +256,7 @@ async def approve_action_endpoint(request: Request):
         try:
             pending = approval_store.approve(action_id, approval_response)
         except (KeyError, ValueError) as e:
-            return JSONResponse(content={"ok": False, "error": f"Invalid action_id or incorrect challenge response: {e}"}, status_code=403)
+            return JSONResponse(content={"ok": False, "error": f"Invalid action_id or incorrect authenticator code: {e}"}, status_code=403)
 
         # 2. Execute the tool (since it's now approved)
         method = pending["method"]

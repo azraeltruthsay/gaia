@@ -4,10 +4,18 @@ E2E test for MCP write_file tool through the candidate gaia-core.
 Validates:
 1. JSON-RPC dispatch from gaia-core to gaia-mcp
 2. SENSITIVE_TOOLS gate (403 response)
-3. Approval flow (request → auto-approve → execute)
+3. Approval flow (request -> TOTP-approve -> execute)
 4. File actually written to allowed path
 5. Path allowlist enforcement (rejected writes)
 6. read_file tool for round-trip verification
+
+GAIA_Project-96xm: approval went from a server-generated challenge
+(reversed by hand) to a real TOTP code. This script has trusted,
+same-host access to the enrolled secret (same as gaia-mcp itself), so it
+generates real current codes via TotpVerifier.current_code() instead of
+simulating a human typing one, waiting for the 30s window to roll over
+between approvals so the replay guard doesn't reject a repeat (there is
+nothing left for this script to compute locally).
 
 Usage:
     docker exec gaia-core-candidate python /app/e2e_mcp_write_test.py
@@ -19,6 +27,33 @@ import sys
 import time
 
 logging.disable(logging.WARNING)
+
+
+def _load_totp_verifier():
+    from gaia_common.utils.totp import load_totp_verifier
+    return load_totp_verifier(
+        "/run/secrets/gaia_mcp_totp_secret",
+        env_var="GAIA_MCP_TOTP_SECRET_FILE",
+    )
+
+
+def _fresh_totp_code(verifier, previous: str = None, timeout_s: int = 35) -> str:
+    """A TOTP code that hasn't been used yet this run.
+
+    gaia-mcp's ApprovalStore rejects an exact-repeat code within its reuse
+    window (GAIA_Project-96xm's replay guard), but this script approves
+    several actions back-to-back using the one enrolled secret -- waiting
+    for the 30s window to roll over is simpler and more honest than
+    disabling that protection for test runs.
+    """
+    if verifier is None:
+        return None
+    deadline = time.time() + timeout_s
+    code = verifier.current_code()
+    while code == previous and time.time() < deadline:
+        time.sleep(1)
+        code = verifier.current_code()
+    return code
 
 
 def main() -> int:
@@ -89,13 +124,13 @@ def main() -> int:
           json.dumps(approval_req)[:200])
 
     action_id = approval_req.get("action_id", "")
-    challenge = approval_req.get("challenge", "")
+    totp = _load_totp_verifier()
+    code = _fresh_totp_code(totp)
     check("Action ID returned", bool(action_id), f"id={action_id}")
-    check("Challenge returned", bool(challenge), f"challenge={challenge}")
+    check("TOTP code available", bool(code))
 
-    if action_id and challenge:
-        # Auto-approve with reversed challenge
-        approval_resp = mcp_client.approve_action_via_mcp(action_id, challenge[::-1])
+    if action_id and code:
+        approval_resp = mcp_client.approve_action_via_mcp(action_id, code)
         # approve_action_via_mcp wraps: {"ok": True, "result": <server_json>}
         # server_json is: {"ok": True, "result": <tool_result>, "approved_at": ...}
         server_resp = approval_resp.get("result", {})
@@ -114,7 +149,7 @@ def main() -> int:
         else:
             check("Write succeeded", False, json.dumps(server_resp)[:200])
     else:
-        check("Approval accepted", False, "no action_id or challenge")
+        check("Approval accepted", False, "no action_id or TOTP code")
         check("Write succeeded", False, "skipped")
 
     # --- 4. Verify file on disk ---
@@ -151,9 +186,10 @@ def main() -> int:
             "path": bad_path,
             "content": "should not write",
         })
-        if req.get("ok") and req.get("action_id") and req.get("challenge"):
+        code = _fresh_totp_code(totp, previous=code)
+        if req.get("ok") and req.get("action_id") and code:
             resp = mcp_client.approve_action_via_mcp(
-                req["action_id"], req["challenge"][::-1]
+                req["action_id"], code
             )
             # approve_action_via_mcp wraps server response:
             # {"ok": True, "result": <server_json>}
@@ -180,9 +216,10 @@ def main() -> int:
         "path": test_path,
         "content": "",
     })
-    if cleanup_req.get("ok") and cleanup_req.get("action_id"):
+    code = _fresh_totp_code(totp, previous=code)
+    if cleanup_req.get("ok") and cleanup_req.get("action_id") and code:
         mcp_client.approve_action_via_mcp(
-            cleanup_req["action_id"], cleanup_req["challenge"][::-1]
+            cleanup_req["action_id"], code
         )
     check("Test file cleaned up", True)
 

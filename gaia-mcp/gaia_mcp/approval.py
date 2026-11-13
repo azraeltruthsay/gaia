@@ -4,8 +4,6 @@ Approval Store for MCP sensitive actions.
 Manages pending actions that require human approval before execution.
 """
 
-import random
-import string
 import threading
 import time
 import uuid
@@ -13,6 +11,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from gaia_common.utils import get_logger
+from gaia_common.utils.totp import load_totp_verifier
 
 logger = get_logger(__name__)
 
@@ -25,16 +24,19 @@ class ApprovalStore:
         action_id -> {
             "method": str,
             "params": dict,
-            "challenge": str,
             "created_at": float,
             "expiry": float,
             "proposal": str,
         }
 
-    The approval workflow:
-    1. Action is created with a challenge code (e.g., "ABCDE")
-    2. Human reviews the proposal and provides the reversed challenge ("EDCBA")
-    3. If challenge matches, action is approved and executed
+    The approval workflow (GAIA_Project-96xm):
+    1. Action is created (`create_pending`) and queued.
+    2. Human reviews the proposal and replies with their current 6-digit
+       authenticator (TOTP) code.
+    3. `approve` verifies that code against the enrolled secret -- a real
+       second factor, unlike the reversed-challenge string this replaced
+       (any approval-channel reader could reverse a 5-letter code, so it
+       was one factor dressed up as two).
     """
 
     def __init__(self, ttl_seconds: int = 900):
@@ -47,10 +49,10 @@ class ApprovalStore:
         self._store: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._ttl = ttl_seconds
-
-    def _gen_challenge(self) -> str:
-        """Generate a 5-character alphabetic challenge code."""
-        return ''.join(random.choice(string.ascii_uppercase) for _ in range(5))
+        self._totp_verifier = load_totp_verifier(
+            "/run/secrets/gaia_mcp_totp_secret",
+            env_var="GAIA_MCP_TOTP_SECRET_FILE",
+        )
 
     def validate_against_blast_shield(self, method: str, params: Dict[str, Any]):
         """
@@ -216,7 +218,7 @@ class ApprovalStore:
         params: Dict[str, Any],
         proposal: Optional[str] = None,
         allow_pending: bool = False
-    ) -> Tuple[str, str, float, float]:
+    ) -> Tuple[str, float, float]:
         """
         Create a pending action awaiting approval.
         """
@@ -225,7 +227,6 @@ class ApprovalStore:
 
         with self._lock:
             action_id = str(uuid.uuid4())
-            challenge = self._gen_challenge()
             now = time.time()
             expiry = now + self._ttl
 
@@ -240,7 +241,6 @@ class ApprovalStore:
             self._store[action_id] = {
                 "method": method,
                 "params": params,
-                "challenge": challenge,
                 "created_at": now,
                 "expiry": expiry,
                 "proposal": proposal,
@@ -249,10 +249,10 @@ class ApprovalStore:
 
             logger.info(
                 f"Created pending action {action_id} method={method} "
-                f"challenge={challenge} expiry={datetime.utcfromtimestamp(expiry).isoformat()}"
+                f"expiry={datetime.utcfromtimestamp(expiry).isoformat()}"
             )
 
-            return action_id, challenge, now, expiry
+            return action_id, now, expiry
 
     def list_pending(self) -> List[Dict[str, Any]]:
         """
@@ -286,20 +286,20 @@ class ApprovalStore:
 
             return result
 
-    def approve(self, action_id: str, provided_challenge: str) -> Dict[str, Any]:
+    def approve(self, action_id: str, totp_code: str) -> Dict[str, Any]:
         """
         Approve a pending action.
 
         Args:
             action_id: The action ID to approve
-            provided_challenge: The reversed challenge code
+            totp_code: The human's current 6-digit authenticator code
 
         Returns:
             The approved action details
 
         Raises:
             KeyError: If action not found or expired
-            ValueError: If challenge is invalid
+            ValueError: If no TOTP secret is enrolled, or the code is invalid
         """
         with self._lock:
             item = self._store.get(action_id)
@@ -310,10 +310,10 @@ class ApprovalStore:
                 del self._store[action_id]
                 raise KeyError("action expired")
 
-            # Expected: reversed challenge
-            expected = item["challenge"][::-1]
-            if provided_challenge != expected:
-                raise ValueError("invalid approval challenge")
+            # Fail closed: no enrolled secret means nothing can be approved,
+            # not that approval is skipped.
+            if not self._totp_verifier or not self._totp_verifier.verify(totp_code):
+                raise ValueError("invalid or expired authenticator code")
 
             # Remove from pending
             payload = {

@@ -972,7 +972,7 @@ def main():
     parser.add_argument("--reflect-packet", type=str, help="Path to packet for reflection")
     parser.add_argument("--set", nargs='*', help="Packet field updates in key=value format")
     parser.add_argument("--review", action="store_true", help="Run a self-review pass and request approval for any proposed dev_matrix updates")
-    parser.add_argument("--approve", type=str, help="Non-interactive approval string to submit (the reversed challenge) when using --review")
+    parser.add_argument("--approve", type=str, help="Non-interactive 6-digit authenticator code to submit when using --review")
     parser.add_argument("--nl-prompt", type=str, help="Natural-language prompt for dev_matrix review")
     parser.add_argument("--single-turn-prompt", type=str, help="Run a single prompt non-interactively and exit.")
     parser.add_argument("--discord", action="store_true", help="Start Discord bot listener (requires DISCORD_BOT_TOKEN)")
@@ -1230,11 +1230,10 @@ def main():
             sys.exit(0)
 
         action_id = res.get("action_id")
-        challenge = res.get("challenge")
         created_at = res.get("created_at")
         expiry = res.get("expiry")
         proposal = res.get("proposal") if isinstance(res, dict) else None
-        print(f"Pending action_id={action_id} challenge={challenge} created_at={created_at} expiry={expiry}")
+        print(f"Pending action_id={action_id} created_at={created_at} expiry={expiry}")
         if proposal:
             print("\n--- Proposal (for human review) ---\n")
             # Visual codeblock-like print for CLI; keep it simple and safe
@@ -1242,10 +1241,10 @@ def main():
             print(proposal)
             print("```")
 
-        # Determine approval string (reversed challenge expected)
+        # Determine the approval code (the human's current authenticator code)
         approval_input = args.approve
         if not approval_input:
-            print("Type the reversed challenge to approve the pending action, or press Enter to cancel:")
+            print("Type your current 6-digit authenticator code to approve the pending action, or press Enter to cancel:")
             user_in = input().strip()
             if not user_in:
                 print("Approval cancelled by user.")

@@ -45,7 +45,7 @@ def penpal_dir(tmp_path, monkeypatch):
 
     def request_approval(method, params):
         parked.append((method, params))
-        return {"ok": True, "action_id": f"a-{len(parked)}", "challenge": "EOKYC"}
+        return {"ok": True, "action_id": f"a-{len(parked)}"}
     import gaia_core.utils.mcp_client as mc
     monkeypatch.setattr(mc, "request_approval_via_mcp", request_approval)
     d = _Dir(tmp_path)
@@ -184,7 +184,7 @@ def _ready(penpal_dir):
 
 
 def test_letter_waits_for_azraels_approval_as_a_source(penpal_dir):
-    """The hosts read sources, not notes; adding one needs Azrael's code."""
+    """The hosts read sources, not notes; adding one needs Azrael's TOTP code."""
     _ready(penpal_dir)
     mcp = FakeMCP(EPISODES)
     with patch.object(pp, "_mcp_call", mcp), \
@@ -196,7 +196,7 @@ def test_letter_waits_for_azraels_approval_as_a_source(penpal_dir):
     assert method == "notebooklm_add_text_source"
     assert params["title"] == "GAIA's letter: reply to Episode e3" and params["content"] == "Dear hosts"
     (sid, text), = penpal_dir.pushed
-    assert sid == "discord_dm_596925786208993283" and "CYKOE" in text
+    assert sid == "discord_dm_596925786208993283" and "authenticator code" in text
     from gaia_core.cognition import approval_reply
     assert approval_reply._parked(sid)["action_id"] == "a-1"
     assert (penpal_dir / "letters" / "e3.txt").read_text() == "Dear hosts"

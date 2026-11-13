@@ -1,70 +1,79 @@
 """
-Approval Challenge — reverse-string human verification.
+Approval Challenge -- TOTP-based human verification (GAIA_Project-96xm).
 
-When GAIA needs human approval for a destructive or significant action
-(writing to candidates, promoting code, executing plans), she generates
-a random 5-character string and asks the human to provide the reverse.
+Used to generate a random string and ask the human to provide the reverse
+before approving a destructive or significant action (writing to
+candidates, promoting code, executing plans). That confirmed nothing
+beyond "can read this channel" -- one factor, not two, since anyone who
+can read the prompt can also reverse a 5-character string.
 
-This prevents rubber-stamping — the human must read the challenge string,
-which encourages them to review the proposed changes while working out
-the reversal. A simple "yes" or Enter won't satisfy it.
+The human now confirms with their own authenticator app's current code
+instead -- the same mechanism, and the same enrolled secret, as gaia-mcp's
+ApprovalStore (both protect GAIA's own sensitive actions; a separate,
+deliberately independent secret protects a different thing entirely --
+gaia-ops-broker's gate on Claude Code's own host privilege).
 
 Usage:
     from gaia_common.utils.approval_challenge import (
         create_challenge, verify_challenge, get_pending_challenge
     )
 
-    # Generate challenge
+    # Create a pending approval
     challenge = create_challenge(action="write_candidates", context="4 files")
-    # challenge = {"challenge_id": "abc12", "code": "xK9mQ", "reverse": "Qm9Kx", ...}
+    # challenge = {"challenge_id": "abc12", "action": ..., "context": ..., ...}
 
-    # Present to user: "To approve, reply with the reverse of: xK9mQ"
+    # Present to user: format_challenge_prompt(challenge)
 
-    # Verify user response
-    result = verify_challenge("abc12", user_input="Qm9Kx")
+    # Verify the human's current authenticator code
+    result = verify_challenge("abc12", user_input="482913")
     # result = {"approved": True, ...}
 """
 
 import json
 import logging
 import os
-import random
-import string
 import time
+import uuid
 from pathlib import Path
 from typing import Dict, Optional
+
+from gaia_common.utils.totp import load_totp_verifier
 
 logger = logging.getLogger("GAIA.ApprovalChallenge")
 
 _CHALLENGES_FILE = Path(os.environ.get("SHARED_DIR", "/shared")) / "approval_challenges.json"
 _CHALLENGE_TTL = 300  # 5 minutes
 
+_totp_verifier = None  # lazily loaded, module-level cache
+
+
+def _get_verifier():
+    global _totp_verifier
+    if _totp_verifier is None:
+        _totp_verifier = load_totp_verifier(
+            "/run/secrets/gaia_mcp_totp_secret",
+            env_var="GAIA_MCP_TOTP_SECRET_FILE",
+        )
+    return _totp_verifier
+
 
 def create_challenge(
     action: str,
     context: str = "",
-    code_length: int = 5,
 ) -> Dict:
     """
-    Generate a reverse-string approval challenge.
+    Create a pending approval awaiting the human's TOTP code.
 
     Args:
         action: What's being approved (e.g., "write_candidates", "promote")
         context: Additional context (e.g., "4 files to candidates/")
-        code_length: Length of the challenge string (default 5)
 
     Returns:
-        Challenge dict with code, reverse, and metadata
+        Challenge dict with metadata (no code/reverse -- there's nothing
+        server-generated to reveal anymore).
     """
-    # Generate a readable random string (mixed case + digits, no ambiguous chars)
-    charset = string.ascii_letters.replace("l", "").replace("I", "").replace("O", "") + string.digits
-    code = "".join(random.choices(charset, k=code_length))
-    reverse = code[::-1]
-
     challenge = {
-        "challenge_id": "".join(random.choices(string.ascii_lowercase + string.digits, k=5)),
-        "code": code,
-        "reverse": reverse,
+        "challenge_id": uuid.uuid4().hex[:10],
         "action": action,
         "context": context,
         "created_at": time.time(),
@@ -72,7 +81,6 @@ def create_challenge(
         "verified": False,
     }
 
-    # Persist
     _save_challenge(challenge)
     logger.info("Approval challenge created: %s for action=%s", challenge["challenge_id"], action)
 
@@ -81,11 +89,11 @@ def create_challenge(
 
 def verify_challenge(challenge_id: str, user_input: str) -> Dict:
     """
-    Verify a user's response to an approval challenge.
+    Verify the human's current TOTP code against a pending approval.
 
     Args:
         challenge_id: The challenge ID
-        user_input: The user's response (should be the reversed string)
+        user_input: The human's current 6-digit authenticator code
 
     Returns:
         {"approved": bool, "reason": str}
@@ -103,16 +111,16 @@ def verify_challenge(challenge_id: str, user_input: str) -> Dict:
     if challenge.get("verified"):
         return {"approved": False, "reason": "Challenge already used"}
 
-    # Compare (strip whitespace, exact match)
-    if user_input.strip() == challenge["reverse"]:
-        challenge["verified"] = True
-        _save_challenge(challenge)
-        logger.info("Approval challenge %s verified for action=%s", challenge_id, challenge["action"])
-        return {"approved": True, "action": challenge["action"], "context": challenge["context"]}
-    else:
-        logger.warning("Approval challenge %s failed: expected=%s got=%s",
-                       challenge_id, challenge["reverse"], user_input.strip())
-        return {"approved": False, "reason": f"Incorrect. Expected reverse of '{challenge['code']}'"}
+    verifier = _get_verifier()
+    if not verifier or not verifier.verify((user_input or "").strip()):
+        logger.warning("Approval challenge %s failed TOTP check for action=%s",
+                       challenge_id, challenge["action"])
+        return {"approved": False, "reason": "Invalid or expired authenticator code"}
+
+    challenge["verified"] = True
+    _save_challenge(challenge)
+    logger.info("Approval challenge %s verified for action=%s", challenge_id, challenge["action"])
+    return {"approved": True, "action": challenge["action"], "context": challenge["context"]}
 
 
 def get_pending_challenge(action: Optional[str] = None) -> Optional[Dict]:
@@ -129,8 +137,7 @@ def get_pending_challenge(action: Optional[str] = None) -> Optional[Dict]:
 
 
 def format_challenge_prompt(challenge: Dict) -> str:
-    """Format a challenge for display to the user."""
-    code = challenge["code"]
+    """Format a pending approval for display to the user."""
     action = challenge.get("action", "this action")
     context = challenge.get("context", "")
 
@@ -139,9 +146,9 @@ def format_challenge_prompt(challenge: Dict) -> str:
     ]
     if context:
         lines.append(f"*{context}*")
-    lines.append(f"")
-    lines.append(f"To approve, reply with the reverse of: **`{code}`**")
-    lines.append(f"(Challenge expires in 5 minutes)")
+    lines.append("")
+    lines.append("To approve, reply with your current 6-digit authenticator code.")
+    lines.append("(Request expires in 5 minutes)")
 
     return "\n".join(lines)
 
@@ -158,7 +165,7 @@ def cleanup_expired():
         logger.debug("Cleaned up %d expired approval challenges", len(expired))
 
 
-# ── Persistence ──
+# -- Persistence --
 
 def _load_challenges() -> Dict:
     try:

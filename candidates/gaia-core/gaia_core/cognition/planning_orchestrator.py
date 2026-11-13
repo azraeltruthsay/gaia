@@ -189,7 +189,7 @@ def run_planning_pipeline(
             ):
                 yield event
 
-            # Generate reverse-string approval challenge
+            # Create a pending TOTP-gated approval (GAIA_Project-96xm)
             try:
                 from gaia_common.utils.approval_challenge import create_challenge, format_challenge_prompt
                 challenge = create_challenge(

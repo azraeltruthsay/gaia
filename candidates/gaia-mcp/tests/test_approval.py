@@ -1,26 +1,28 @@
-"""Tests for the ApprovalStore challenge-response system."""
+"""Tests for the ApprovalStore human-approval queue (GAIA_Project-96xm:
+TOTP replaces the old reversed-challenge-string confirmation)."""
 
 import time
+
+import pyotp
 import pytest
 from gaia_mcp.approval import ApprovalStore
+
+from .conftest import totp_code
 
 
 class TestApprovalStoreCreate:
     """Test creating pending actions."""
 
     def test_create_pending_returns_tuple(self, approval_store):
-        action_id, challenge, created_at, expiry = approval_store.create_pending(
+        action_id, created_at, expiry = approval_store.create_pending(
             method="ai_write",
             params={"path": "/sandbox/test.txt", "content": "hello"},
         )
         assert isinstance(action_id, str)
-        assert len(challenge) == 5
-        assert challenge.isalpha()
-        assert challenge.isupper()
         assert expiry > created_at
 
     def test_create_pending_with_proposal(self, approval_store):
-        action_id, challenge, _, _ = approval_store.create_pending(
+        approval_store.create_pending(
             method="run_shell",
             params={"cmd": "ls"},
             proposal="List directory contents",
@@ -36,50 +38,66 @@ class TestApprovalStoreCreate:
 
 
 class TestApprovalStoreApprove:
-    """Test the approval challenge-response flow."""
+    """Test the TOTP-based approval flow."""
 
-    def test_approve_with_reversed_challenge(self, approval_store):
-        action_id, challenge, _, _ = approval_store.create_pending(
+    def test_approve_with_correct_totp_code(self, approval_store, totp_secret):
+        action_id, _, _ = approval_store.create_pending(
             method="ai_write", params={"path": "/sandbox/f.txt"}
         )
-        reversed_challenge = challenge[::-1]
-        result = approval_store.approve(action_id, reversed_challenge)
+        result = approval_store.approve(action_id, totp_code(totp_secret))
         assert result["method"] == "ai_write"
         assert result["params"]["path"] == "/sandbox/f.txt"
 
-    def test_approve_removes_from_pending(self, approval_store):
-        action_id, challenge, _, _ = approval_store.create_pending(
+    def test_approve_removes_from_pending(self, approval_store, totp_secret):
+        action_id, _, _ = approval_store.create_pending(
             method="test", params={}
         )
-        approval_store.approve(action_id, challenge[::-1])
+        approval_store.approve(action_id, totp_code(totp_secret))
         assert len(approval_store.list_pending()) == 0
 
-    def test_approve_wrong_challenge_raises(self, approval_store):
-        action_id, _, _, _ = approval_store.create_pending(
+    def test_approve_wrong_code_raises(self, approval_store):
+        action_id, _, _ = approval_store.create_pending(
             method="test", params={}
         )
-        with pytest.raises(ValueError, match="invalid approval challenge"):
-            approval_store.approve(action_id, "WRONG")
+        wrong_secret_code = pyotp.TOTP(pyotp.random_base32()).now()
+        with pytest.raises(ValueError, match="invalid or expired authenticator code"):
+            approval_store.approve(action_id, wrong_secret_code)
+
+    def test_approve_replayed_code_raises(self, approval_store, totp_secret):
+        action_id_1, _, _ = approval_store.create_pending(method="test1", params={})
+        action_id_2, _, _ = approval_store.create_pending(method="test2", params={})
+        code = totp_code(totp_secret)
+        approval_store.approve(action_id_1, code)
+        with pytest.raises(ValueError, match="invalid or expired authenticator code"):
+            approval_store.approve(action_id_2, code)
+
+    def test_approve_fails_closed_with_no_secret_enrolled(self, approval_store):
+        approval_store._totp_verifier = None
+        action_id, _, _ = approval_store.create_pending(method="test", params={})
+        with pytest.raises(ValueError, match="invalid or expired authenticator code"):
+            approval_store.approve(action_id, "123456")
 
     def test_approve_unknown_id_raises(self, approval_store):
         with pytest.raises(KeyError):
-            approval_store.approve("nonexistent-id", "ABCDE")
+            approval_store.approve("nonexistent-id", "123456")
 
-    def test_approve_expired_raises(self):
+    def test_approve_expired_raises(self, totp_secret):
+        from gaia_common.utils.totp import TotpVerifier
         store = ApprovalStore(ttl_seconds=0)  # Expire immediately
-        action_id, challenge, _, _ = store.create_pending(
+        store._totp_verifier = TotpVerifier(totp_secret)
+        action_id, _, _ = store.create_pending(
             method="test", params={}
         )
         time.sleep(0.01)
         with pytest.raises(KeyError, match="expired"):
-            store.approve(action_id, challenge[::-1])
+            store.approve(action_id, totp_code(totp_secret))
 
 
 class TestApprovalStoreCancel:
     """Test cancellation of pending actions."""
 
     def test_cancel_existing(self, approval_store):
-        action_id, _, _, _ = approval_store.create_pending(
+        action_id, _, _ = approval_store.create_pending(
             method="test", params={}
         )
         assert approval_store.cancel(action_id) is True

@@ -131,6 +131,9 @@ services:
       retries: 3
       start_period: 60s
 
+    secrets:
+      - gaia_mcp_totp_secret
+
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-web-candidate: The Face
   # ═══════════════════════════════════════════════════════════════════════════
@@ -234,6 +237,9 @@ services:
       interval: 15s
       timeout: 10s
       retries: 3
+
+    secrets:
+      - gaia_mcp_totp_secret
 
     command: ["python", "-m", "uvicorn", "gaia_mcp.main:app", "--host", "0.0.0.0", "--port", "8765"]
 
@@ -464,6 +470,12 @@ volumes:
   gaia-candidate-shared:
     name: gaia-candidate-shared
   gaia-candidate-sandbox:
+
+secrets:
+  # GAIA_Project-96xm: same enrolled secret as production's gaia_mcp_totp_secret
+  # (docker-compose.yml) -- one human approver either way, so one secret.
+  gaia_mcp_totp_secret:
+    file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/gaia_mcp_totp_secret
 
 networks:
   default:

@@ -1964,26 +1964,28 @@ async def process_packet(packet_data: Dict[str, Any]):
                             error="" if rpc_result.get("ok") else _ol.clip(rpc_result.get("error")),
                             empty=bool(rpc_result.get("ok")) and not (rpc_result.get("response") or {}).get("result", rpc_result.get("response")),
                             latency_ms=round((_time.time() - _tc_t0) * 1000, 1))
-                        # Parked behind the human gate (2026-11-10, Discord): the
-                        # model used to get "requires approval. Challenge X" back,
-                        # narrate it ("I just ran it — challenge DCKXL"), and the
-                        # person's reversed code then arrived as chat, which she
-                        # answered by inventing a command. Stop here instead: say
-                        # what needs approval, and put the pending action on the
-                        # packet so gaia-web's Discord bridge shows its approval
-                        # card and takes the reversed code straight to MCP.
+                        # Parked behind the human gate (2026-11-10, Discord;
+                        # TOTP since GAIA_Project-96xm): the model used to get
+                        # "requires approval. Challenge X" back, narrate it
+                        # ("I just ran it -- challenge DCKXL"), and the
+                        # person's reversed code then arrived as chat, which
+                        # she answered by inventing a command. Stop here
+                        # instead: say what needs approval, and put the
+                        # pending action on the packet so gaia-web's Discord
+                        # bridge shows its approval card and takes the
+                        # human's authenticator code straight to MCP.
                         if rpc_result.get("pending_approval"):
                             _shown = {k: v for k, v in (tc.tool_params or {}).items() if not str(k).startswith("_")}
                             _label = tc.tool_name + (f"({tc.tool_action})" if tc.tool_action else "")
                             _appr_msg = (f"That needs your approval first: `{_label}` {json.dumps(_shown)}. "
-                                         f"Challenge `{rpc_result.get('challenge')}`; reply with it reversed "
+                                         f"Reply with your current 6-digit authenticator code "
                                          f"to approve, or say cancel.")
                             response_pieces.append(_appr_msg)
                             yield json.dumps({"type": "token", "value": _appr_msg}) + "\n"
                             try:
                                 from gaia_core.cognition import approval_reply
                                 approval_reply.remember(_agent_core.session_manager, session_id,
-                                                        rpc_result.get("action_id"), rpc_result.get("challenge"), _label)
+                                                        rpc_result.get("action_id"), _label)
                             except Exception:
                                 logger.warning("Could not remember the pending approval", exc_info=True)
                             try:
@@ -1994,7 +1996,6 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 packet.tool_routing.execution_result = _TER(success=True, output={
                                     "pending_approval": True,
                                     "action_id": rpc_result.get("action_id"),
-                                    "challenge": rpc_result.get("challenge"),
                                     "proposal": rpc_result.get("proposal", ""),
                                     "tool_name": _label,
                                     "message": _appr_msg,

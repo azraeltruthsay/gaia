@@ -1,8 +1,9 @@
 """Self-review worker: reviews thought seeds and proposes dev_matrix updates.
 
 This worker runs in proposal-only mode: it will create a pending MCP action to
-update `knowledge/system_reference/dev_matrix.json` and return the approval challenge
-to the operator. The operator must respond with the reversed 5-char code to approve.
+update `knowledge/system_reference/dev_matrix.json` and return the pending
+action to the operator. The operator approves it with their current 6-digit
+authenticator code (GAIA_Project-96xm).
 """
 from __future__ import annotations
 import json
@@ -125,9 +126,8 @@ def run_review_once(config: Config = None):
                 if not req.get("ok"):
                     logger.error(f"Failed to request approval for dev_matrix update: {req}")
                     continue
-                # Present the challenge to operator (CLI or UI should surface this)
+                # Present the pending approval to the operator (CLI or UI should surface this)
                 action_id = req.get("action_id")
-                challenge = req.get("challenge")
                 created_at = req.get("created_at")
                 expiry = req.get("expiry")
                 proposal = req.get("proposal")
@@ -143,14 +143,14 @@ def run_review_once(config: Config = None):
                     except Exception as _exc:
                         logger.debug("SelfReview: MCP fetch failed for action %s: %s", action_id, _exc)
                 proposal = req.get("proposal")
-                logger.info(f"Pending dev_matrix update action created: action_id={action_id} challenge={challenge} created_at={created_at} expiry={expiry}")
+                logger.info(f"Pending dev_matrix update action created: action_id={action_id} created_at={created_at} expiry={expiry}")
                 # Mark seed as reviewed and record pending action
                 data["reviewed"] = True
                 data["reviewed_at"] = datetime.now(timezone.utc).isoformat()
                 data["pending_action"] = {"action_id": action_id, "created_at": created_at, "expiry": expiry}
                 thought_seed.update_seed(f.name, data)
-                # Return the challenge so the caller can present it to the human
-                return {"action_id": action_id, "challenge": challenge, "created_at": created_at, "expiry": expiry, "proposal": proposal}
+                # Return the pending action so the caller can present it to the human
+                return {"action_id": action_id, "created_at": created_at, "expiry": expiry, "proposal": proposal}
             else:
                 data["reviewed"] = True
                 data["reviewed_at"] = datetime.now(timezone.utc).isoformat()

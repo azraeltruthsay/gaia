@@ -315,17 +315,16 @@ def _ask_to_send(episode_id: str, title: str, source_title: str, letter: str, le
     from gaia_core.utils.mcp_client import request_approval_via_mcp
     params = {"notebook_id": NOTEBOOK_ID, "title": source_title, "content": letter}
     parked = request_approval_via_mcp("notebooklm_add_text_source", params)
-    if not (parked.get("ok") and parked.get("action_id") and parked.get("challenge")):
+    if not (parked.get("ok") and parked.get("action_id")):
         logger.warning("Penpal: could not park the letter for approval: %s", parked.get("error"))
         return
     label = f"send my letter about \"{title}\" to the notebook"
-    approval_reply.park_for(session, parked["action_id"], parked["challenge"], label)
+    approval_reply.park_for(session, parked["action_id"], label)
     opening = " ".join(letter.split())[:300]
-    code = parked["challenge"][::-1].upper()
     sent = _push(session, (
         f"I've written back to the podcast hosts about \"{title}\". It opens: \"{opening}…\" "
         f"(the whole letter is at {letter_path}). To add it to the notebook so they read it, "
-        f"reply here with {code} in the next 15 minutes, or say cancel."))
+        f"reply here with your current 6-digit authenticator code in the next 15 minutes, or say cancel."))
     state["awaiting_approval"][episode_id] = {"at": time.time(), "asks": asked.get("asks", 0) + 1,
                                               "action_id": parked["action_id"], "delivered": sent}
     _save_state(state)

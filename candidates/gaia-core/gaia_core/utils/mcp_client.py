@@ -93,12 +93,15 @@ def _call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int 
                 method=method,
                 params={**(params or {}), "_allow_pending": True}
             )
-            # /request_approval answers ok:true with an action_id and challenge
-            # when it PARKS the call: nothing ran. That used to be read as
+            # /request_approval answers ok:true with an action_id when it
+            # PARKS the call: nothing ran. That used to be read as
             # "auto-approved", so every gated call (shell, writes) looked like
             # it had run, its approval ticket became the "result", and the
-            # model narrated the challenge code (Discord, 2026-11-10). Only a
-            # real result means it ran.
+            # model narrated the (then server-generated) challenge code
+            # (Discord, 2026-11-10). Only a real result means it ran.
+            # GAIA_Project-96xm: there's no server-generated challenge to
+            # hand back anymore — approval is a human TOTP code, which GAIA
+            # never has, so a pending action is always a genuine human-gate.
             if approval_result.get("ok") and "result" in approval_result:
                 # Auto-approved (MCP_BYPASS=true) — result is in the response
                 return {"ok": True, "response": approval_result.get("result")}
@@ -108,9 +111,8 @@ def _call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int 
                     "ok": False,
                     "pending_approval": True,
                     "action_id": approval_result.get("action_id"),
-                    "challenge": approval_result.get("challenge"),
                     "proposal": approval_result.get("proposal", ""),
-                    "error": f"'{method}' requires approval. Challenge: {approval_result.get('challenge')}"
+                    "error": f"'{method}' requires human approval (action_id={approval_result.get('action_id')})"
                 }
             else:
                 return {"ok": False, "error": f"Approval request failed: {approval_result.get('error', 'unknown')}"}
@@ -238,7 +240,6 @@ def dispatch_sidecar_limbs(packet: "CognitionPacket", config: "Config") -> List[
                     "dispatched_at": ts,
                     "pending_approval": True,
                     "action_id": approval_result.get("action_id"),
-                    "challenge": approval_result.get("challenge"),
                     "proposal": approval_result.get("proposal"),
                 })
                 continue
@@ -377,7 +378,9 @@ def embedding_query(query: str, top_k: int = 5, knowledge_base_name: str = "syst
 def request_approval_via_mcp(method: str, params: Dict) -> Dict:
     """Ask the MCP server to create a pending action requiring human approval.
 
-    Returns: {"ok": True, "action_id": str, "challenge": str} or error dict
+    Returns: {"ok": True, "action_id": str, ...} or error dict. No challenge
+    is returned (GAIA_Project-96xm) -- confirmation is the human's own
+    6-digit TOTP code, not anything the server hands out.
     """
     # Prefer explicit environment override so containers can target the mcp sidecar by name
     endpoint = _normalize_endpoint(os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp"))
@@ -416,7 +419,6 @@ def request_approval_via_mcp(method: str, params: Dict) -> Dict:
         return {
             "ok": True,
             "action_id": data.get("action_id"),
-            "challenge": data.get("challenge"),
             "proposal": data.get("proposal"),
             "created_at": data.get("created_at"),
             "expiry": data.get("expiry"),
@@ -438,7 +440,9 @@ def _signed(method: str, path: str) -> Dict[str, str]:
 
 
 def approve_action_via_mcp(action_id: str, approval: str) -> Dict:
-    """Submit approval string to the MCP server to execute a pending action.
+    """Submit the human's current TOTP code to the MCP server to execute a
+    pending action (GAIA_Project-96xm; `approval` used to be a
+    server-generated challenge string reversed by hand).
 
     Returns the execution result dict on success.
     """

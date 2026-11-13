@@ -1040,7 +1040,6 @@ class DiscordInterface:
         if isinstance(output, dict) and output.get("pending_approval"):
             return {
                 "action_id": output.get("action_id"),
-                "challenge": output.get("challenge"),
                 "proposal": output.get("proposal", ""),
                 "tool_name": output.get("tool_name", "unknown"),
             }
@@ -1054,9 +1053,10 @@ class DiscordInterface:
         is_dm: bool,
         approval_info: dict,
     ):
-        """Send a challenge-response approval prompt to Discord and register a waiter."""
+        """Send a TOTP-code approval prompt to Discord and register a waiter
+        (GAIA_Project-96xm: no server-generated challenge to reveal anymore --
+        the human confirms with their own authenticator app's current code)."""
         tool_name = approval_info["tool_name"]
-        challenge = approval_info["challenge"]
         proposal = approval_info.get("proposal", "")
 
         # Truncate proposal for Discord display
@@ -1069,8 +1069,8 @@ class DiscordInterface:
         if proposal:
             prompt_text += f"```\n{proposal}\n```\n"
         prompt_text += (
-            f"**Challenge:** `{challenge}`\n"
-            f"Reply with the challenge **reversed** to approve, or say **cancel** to deny.\n"
+            f"Reply with your current 6-digit authenticator code to approve, "
+            f"or say **cancel** to deny.\n"
             f"_This request expires in 15 minutes._"
         )
 
@@ -1080,7 +1080,6 @@ class DiscordInterface:
         waiter_key = (channel_id, user_id)
         _pending_approvals[waiter_key] = {
             "action_id": approval_info["action_id"],
-            "challenge": challenge,
             "tool_name": tool_name,
             "registered_at": time.time(),
         }
@@ -1096,7 +1095,7 @@ class DiscordInterface:
         message_obj: Any,
         is_dm: bool,
     ):
-        """Handle a user's response to an approval challenge."""
+        """Handle a user's response to a pending approval."""
         waiter = _pending_approvals.get(waiter_key)
         if not waiter:
             return
@@ -1114,24 +1113,18 @@ class DiscordInterface:
             )
             return
 
-        # Check challenge (case-insensitive)
-        expected = waiter["challenge"][::-1]
-        if content.strip().upper() != expected:
-            # Wrong answer — re-register waiter for retry
-            logger.info(f"Discord: Wrong challenge response for {waiter.get('tool_name')}")
-            await self._send_response(
-                message_obj,
-                f"That's not right. The challenge is `{waiter['challenge']}` \u2014 reply with it **reversed** (e.g., `{expected}`), or say **cancel**.",
-                is_dm,
-            )
+        # GAIA_Project-96xm: no local check is possible anymore -- only
+        # gaia-mcp (holding the TOTP secret) can say whether a code is
+        # valid. Only gate on "looks like a 6-digit code" and let the
+        # server decide; anything else falls through as an ordinary
+        # message, same as before.
+        code = content.strip()
+        if not re.fullmatch(r"\d{6}", code):
             return
-
-        # Correct challenge — submit approval to MCP
-        del _pending_approvals[waiter_key]
         action_id = waiter["action_id"]
 
         try:
-            result = await self._submit_mcp_approval(action_id, content.strip().upper())
+            result = await self._submit_mcp_approval(action_id, code)
         except Exception as e:
             logger.error(f"Discord: MCP approval submission failed: {e}", exc_info=True)
             await self._send_response(
@@ -1142,6 +1135,7 @@ class DiscordInterface:
             return
 
         if result.get("ok"):
+            del _pending_approvals[waiter_key]
             summary = self._summarize_tool_result(result.get("result"))
             await self._send_response(
                 message_obj,
@@ -1149,15 +1143,19 @@ class DiscordInterface:
                 is_dm,
             )
         elif result.get("error") == "action not found or expired":
+            del _pending_approvals[waiter_key]
             await self._send_response(
                 message_obj,
                 "This approval has expired. Please trigger the action again.",
                 is_dm,
             )
         elif result.get("error") == "invalid approval string":
+            # Wrong or stale code -- leave the waiter registered so they
+            # can just try again with a fresh one.
+            logger.info(f"Discord: Wrong authenticator code for {waiter.get('tool_name')}")
             await self._send_response(
                 message_obj,
-                "The MCP server rejected the approval code. This shouldn't happen \u2014 please try again.",
+                "That code didn't work -- try again with your current authenticator code, or say **cancel**.",
                 is_dm,
             )
         else:

@@ -58,7 +58,7 @@ class ToolExecutionStatus(Enum):
     FAILED = "failed"                     # Tool execution failed
     SKIPPED = "skipped"                   # Low confidence, skipped
     USER_DENIED = "user_denied"           # User rejected tool use
-    AWAITING_APPROVAL = "awaiting_approval"  # Pending human approval via challenge-response
+    AWAITING_APPROVAL = "awaiting_approval"  # Pending human approval (TOTP code, GAIA_Project-96xm)
 
 class PacketState(Enum):
     INITIALIZED = "initialized"

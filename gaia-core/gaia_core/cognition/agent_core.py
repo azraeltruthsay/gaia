@@ -1513,8 +1513,9 @@ class AgentCore:
         except Exception:
             logger.warning("Inner voice switch failed, continuing", exc_info=True)
 
-        # The answer to an approval challenge (the reversed code, or "cancel"):
-        # not a message to her either; it approves the parked action.
+        # The answer to a pending approval (a 6-digit authenticator code, or
+        # "cancel"): not a message to her either; it approves the parked
+        # action.
         try:
             from gaia_core.cognition import approval_reply
             _appr_reply = approval_reply.handle(self.session_manager, session_id, user_input)
@@ -3480,9 +3481,9 @@ class AgentCore:
                         "kb_name": _exec_output.get("kb_name"),
                         "path": _exec_output.get("path"),
                     }, session_id, source=source, destination_context=_metadata)
-                    # The packet carries the parked action (action_id,
-                    # challenge): gaia-web's Discord bridge reads it to show
-                    # the approval card and take the reversed code.
+                    # The packet carries the parked action (action_id):
+                    # gaia-web's Discord bridge reads it to show the
+                    # approval card and take the human's authenticator code.
                     try:
                         from gaia_common.protocols.cognition_packet import PacketState as _PState
                         packet.status.state = _PState.COMPLETED
@@ -8893,8 +8894,16 @@ Assembled response:"""
         return "".join(assembled_parts)
 
     def _run_mcp_list_tree(self) -> str:
-        """Call MCP sidecar to list a bounded directory tree with approval."""
-        params = {"path": "/knowledge", "max_depth": 2, "max_entries": 120, "_allow_pending": True}
+        """Call MCP sidecar to list a bounded directory tree.
+
+        GAIA_Project-96xm: this used to request an approval and then
+        auto-approve it by reversing the challenge it was just handed --
+        never real security (GAIA could always compute that reversal
+        herself). list_tree isn't a SENSITIVE_TOOLS entry, so it never
+        needed gating at all; call it directly instead of performing an
+        empty approval ritual.
+        """
+        params = {"path": "/knowledge", "max_depth": 2, "max_entries": 120}
         bypass = os.getenv("GAIA_MCP_BYPASS", "false").lower() in ("1", "true", "yes")
 
         def _handle_tree_result(result_dict: dict) -> str:
@@ -8905,70 +8914,39 @@ Assembled response:"""
             # If the tree is long, persist it and return a short preview
             if len(tree) > 4000:
                 preview = "\n".join(tree.splitlines()[:20])
-                target_path = "/knowledge/system_reference/tree_latest.txt"
-                # Write via MCP so it is auditable/approved
-                write_req: Dict[str, Any] = mcp_client.request_approval_via_mcp("ai_write", {"path": target_path, "content": tree, "_allow_pending": True})
-                if write_req.get("ok") and write_req.get("action_id") and write_req.get("challenge"):
-                    approval = write_req["challenge"][::-1]
-                    write_appr: Dict[str, Any] = mcp_client.approve_action_via_mcp(write_req["action_id"], approval)
-                    if not write_appr.get("ok"):
-                        return f"(Saved tree skipped due to approval error: {write_appr.get('error')})\nPreview:\n{preview}"
-                    try:
-                        rescue_helper.sketch(
-                            "DirectoryTreeLatest",
-                            f"Saved full tree to: {target_path}\n\nPreview:\n{preview}"
-                        )
-                    except Exception:
-                        self.logger.debug("AgentCore: failed to write tree preview to sketchpad", exc_info=True)
-                elif bypass:
-                    # In bypass mode, attempt direct write
+                # ai_write IS a gated (SENSITIVE_TOOLS) action, and caching
+                # this listing used to "approve" itself the same way --
+                # never real security. Now that approval needs a human's
+                # own TOTP code, only cache it where GAIA_MCP_BYPASS says
+                # this environment doesn't expect a human to gate internal
+                # writes; otherwise skip the cache rather than leave an
+                # unresolved approval request nobody will answer.
+                suffix = ""
+                if bypass:
+                    target_path = "/knowledge/system_reference/tree_latest.txt"
                     mcp_client.call_jsonrpc("ai_write", {"path": target_path, "content": tree})
                     try:
                         rescue_helper.sketch(
                             "DirectoryTreeLatest",
                             f"Saved full tree to: {target_path}\n\nPreview:\n{preview}"
                         )
+                        suffix = f"\n\n(full tree saved to {target_path}, sketchpad: DirectoryTreeLatest)"
                     except Exception:
-                        self.logger.debug("AgentCore: failed to write tree preview to sketchpad (bypass)", exc_info=True)
-                else:
-                    return f"(Could not request approval to save tree: {write_req.get('error')})\nPreview:\n{preview}"
-                suffix = "\n\n(full tree saved to knowledge/system_reference/tree_latest.txt)"
+                        self.logger.debug("AgentCore: failed to write tree preview to sketchpad", exc_info=True)
+                        suffix = f"\n\n(full tree saved to {target_path})"
                 if truncated_flag:
                     suffix += " (truncated at source)"
-                return f"{preview}\n... [preview ends]{suffix}\n(sketchpad: DirectoryTreeLatest)"
+                return f"{preview}\n... [preview ends]{suffix}"
             # Short enough; return inline
             return tree + ("\n\n(truncated)" if truncated_flag else "")
 
-        if bypass:
-            resp = mcp_client.call_jsonrpc("list_tree", params)
-            if resp.get("ok") and isinstance(resp.get("response"), dict):
-                result = resp["response"].get("result") or {}
-                if result.get("ok"):
-                    return _handle_tree_result(result)
-                return f"list_tree error: {result}"
-            return f"list_tree failed: {resp.get('error') or resp}"
-
-        # Request approval then auto-approve using reversed challenge
-        req: Dict[str, Any] = mcp_client.request_approval_via_mcp("list_tree", params)
-        if not req.get("ok"):
-            return f"Could not request approval for list_tree: {req.get('error')}"
-        action_id = req.get("action_id")
-        challenge = req.get("challenge")
-        if not action_id or not challenge:
-            return "Approval request did not return action_id/challenge."
-        approval = challenge[::-1]
-        appr: Dict[str, Any] = mcp_client.approve_action_via_mcp(action_id, approval)
-        if not appr.get("ok"):
-            return f"Approval failed: {appr.get('error')}"
-        result = appr.get("result") or {}
-        if isinstance(result, dict) and result.get("ok") and "tree" in result:
-            return _handle_tree_result(result)
-        # If server wraps result under 'result' for JSON-RPC payload
-        if isinstance(result, dict) and "result" in result:
-            inner = result["result"]
-            if isinstance(inner, dict) and inner.get("ok") and "tree" in inner:
-                return _handle_tree_result(inner)
-        return f"list_tree execution returned unexpected payload: {result}"
+        resp = mcp_client.call_jsonrpc("list_tree", params)
+        if resp.get("ok") and isinstance(resp.get("response"), dict):
+            result = resp["response"].get("result") or {}
+            if result.get("ok"):
+                return _handle_tree_result(result)
+            return f"list_tree error: {result}"
+        return f"list_tree failed: {resp.get('error') or resp}"
 
     # The direct helpers report failure as text; these are its openings.
     _DIRECT_FAILURE_RE = re.compile(
@@ -8989,9 +8967,14 @@ Assembled response:"""
         return text
 
     def _run_mcp_list_files(self) -> str:
-        """Call MCP sidecar to list files in a directory with approval."""
-        params = {"path": "/knowledge", "_allow_pending": True}
-        bypass = os.getenv("GAIA_MCP_BYPASS", "false").lower() in ("1", "true", "yes")
+        """Call MCP sidecar to list files in a directory.
+
+        GAIA_Project-96xm: previously requested an approval and then
+        auto-approved it by reversing the challenge it was just handed --
+        never real security, and list_files isn't a SENSITIVE_TOOLS entry
+        anyway, so this just calls the tool directly.
+        """
+        params = {"path": "/knowledge"}
 
         def _handle_list_result(result_dict: dict) -> str:
             files = result_dict.get("files") or []
@@ -8999,36 +8982,13 @@ Assembled response:"""
                 return "No files found."
             return "\n".join(files)
 
-        if bypass:
-            resp = mcp_client.call_jsonrpc("list_files", params)
-            if resp.get("ok") and isinstance(resp.get("response"), dict):
-                result = resp["response"].get("result") or {}
-                if result.get("ok"):
-                    return _handle_list_result(result)
-                return f"list_files error: {result}"
-            return f"list_files failed: {resp.get('error') or resp}"
-
-        # Request approval then auto-approve using reversed challenge
-        req: Dict[str, Any] = mcp_client.request_approval_via_mcp("list_files", params)
-        if not req.get("ok"):
-            return f"Could not request approval for list_files: {req.get('error')}"
-        action_id = req.get("action_id")
-        challenge = req.get("challenge")
-        if not action_id or not challenge:
-            return "Approval request did not return action_id/challenge."
-        approval = challenge[::-1]
-        appr: Dict[str, Any] = mcp_client.approve_action_via_mcp(action_id, approval)
-        if not appr.get("ok"):
-            return f"Approval failed: {appr.get('error')}"
-        result = appr.get("result") or {}
-        if isinstance(result, dict) and result.get("ok") and "files" in result:
-            return _handle_list_result(result)
-        # If server wraps result under 'result' for JSON-RPC payload
-        if isinstance(result, dict) and "result" in result:
-            inner = result["result"]
-            if isinstance(inner, dict) and inner.get("ok") and "files" in inner:
-                return _handle_list_result(inner)
-        return f"list_files execution returned unexpected payload: {result}"
+        resp = mcp_client.call_jsonrpc("list_files", params)
+        if resp.get("ok") and isinstance(resp.get("response"), dict):
+            result = resp["response"].get("result") or {}
+            if result.get("ok"):
+                return _handle_list_result(result)
+            return f"list_files error: {result}"
+        return f"list_files failed: {resp.get('error') or resp}"
 
     # --- Response Fragmentation Helpers ---
 
@@ -10809,32 +10769,33 @@ Start your response with the first line of the file."""
                             execution_time_ms=elapsed_ms
                         )
                     elif rpc_result.get("pending_approval"):
+                        _tool_label = f"{canonical_name}({(tool.params or {}).get('action', '')})"
                         try:
                             from gaia_core.cognition import approval_reply
                             approval_reply.remember(
                                 self.session_manager, session_id, rpc_result.get("action_id"),
-                                rpc_result.get("challenge"),
-                                f"{canonical_name}({(tool.params or {}).get('action', '')})")
+                                _tool_label)
                         except Exception:
                             logger.warning("Could not remember the pending approval", exc_info=True)
-                        # Parked behind the human gate. Keep the action and its
-                        # challenge (they were dropped here, 2026-11-10): the
-                        # pipeline stops on pending_approval instead of letting
-                        # her narrate the code, and gaia-web's Discord bridge
-                        # shows the approval card and takes the reversed code.
-                        # Without it the reply went in as chat and she
-                        # improvised a command.
+                        # Parked behind the human gate. Keep the action
+                        # (its challenge was dropped here, 2026-11-10, now
+                        # removed entirely by GAIA_Project-96xm's move to
+                        # TOTP): the pipeline stops on pending_approval
+                        # instead of letting her narrate a code, and
+                        # gaia-web's Discord bridge shows the approval card
+                        # and takes the human's authenticator code. Without
+                        # it the reply went in as chat and she improvised a
+                        # command.
                         return ToolExecutionResult(
                             success=True,
                             output={
                                 "pending_approval": True,
                                 "action_id": rpc_result.get("action_id"),
-                                "challenge": rpc_result.get("challenge"),
                                 "proposal": rpc_result.get("proposal", ""),
-                                "tool_name": f"{canonical_name}({(tool.params or {}).get('action', '')})",
+                                "tool_name": _tool_label,
                                 "message": (f"That needs your approval first: `{canonical_name}` "
                                             f"{json.dumps({k: v for k, v in (tool.params or {}).items() if not k.startswith('_')})}. "
-                                            f"Challenge `{rpc_result.get('challenge')}`; reply with it reversed to approve, "
+                                            f"Reply with your current 6-digit authenticator code to approve, "
                                             f"or say cancel."),
                             },
                             error=None,

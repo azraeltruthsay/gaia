@@ -413,6 +413,7 @@ services:
 
     secrets:
       - groq_api_key
+      - gaia_mcp_totp_secret
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-web: The Face - UI and API gateway
@@ -735,6 +736,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
+    secrets:
+      - gaia_mcp_totp_secret
 
   # ═══════════════════════════════════════════════════════════════════════════
   # gaia-audio: The Ears & Mouth - Full-duplex STT/TTS sensory service
@@ -1208,3 +1212,10 @@ secrets:
     file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/discord_bot_token
   gaia_service_key:
     file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/gaia_service_key
+  gaia_mcp_totp_secret:
+    # GAIA_Project-96xm: real TOTP replacing ApprovalStore's reversed-string
+    # challenge. Read by gaia-mcp (ApprovalStore) and gaia-core
+    # (approval_challenge.py, used by planning_orchestrator/attachment_plan) --
+    # same secret, since both protect GAIA's own sensitive actions. Enroll
+    # with scripts/enroll_mcp_totp.py before first use.
+    file: ${GAIA_SECRETS_DIR:-${HOME}/.gaia/secrets}/gaia_mcp_totp_secret

@@ -105,6 +105,7 @@ def generate_attachment_code(
     yield {"type": "token", "value": f"\n**[Result: {results['passed']}/{results['total']} changes ready]**\n"}
     if results["passed"] > 0:
         try:
+            # Create a pending TOTP-gated approval (GAIA_Project-96xm)
             from gaia_common.utils.approval_challenge import create_challenge, format_challenge_prompt
             challenge = create_challenge(
                 action="write_attachment_code",

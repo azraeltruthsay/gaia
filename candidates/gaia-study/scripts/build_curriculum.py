@@ -611,7 +611,7 @@ def generate_dataset_d(dedup: DeduplicationTracker, run_id: str) -> list[dict]:
             ("How does gaia-core execute tools?",
              "gaia-core executes tools by calling gaia-mcp via JSON-RPC 2.0 at :8765/jsonrpc. The MCP server provides ~70+ tools with an approval workflow for sensitive operations."),
             ("What protocol does tool execution use?",
-             "Tool execution uses JSON-RPC 2.0, with gaia-mcp at port 8765. gaia-core sends tool requests to :8765/jsonrpc, and sensitive tools require human approval via challenge codes."),
+             "Tool execution uses JSON-RPC 2.0, with gaia-mcp at port 8765. gaia-core sends tool requests to :8765/jsonrpc, and sensitive tools require a human's current authenticator (TOTP) code to approve."),
         ]),
 
         # ── Blast Shield ───────────────────────────────────────────────

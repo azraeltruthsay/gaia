@@ -1063,9 +1063,11 @@ def generate_diagnostic_pairs() -> list[dict]:
         make_pair(
             "How does GAIA's approval workflow work for sensitive tools?",
             "When a sensitive tool (ai_write, write_file, run_shell, memory_rebuild_index) is invoked, "
-            "ApprovalStore generates a 5-character challenge code. The human must provide the reversed "
-            "code to approve. Codes expire after 900 seconds (configurable via MCP_APPROVAL_TTL). "
-            "This is the human-in-the-loop safety gate for destructive operations.",
+            "ApprovalStore parks it pending approval. The human approves with their current 6-digit "
+            "authenticator (TOTP) code, the same real second factor gaia-ops-broker uses for Claude "
+            "Code's host privilege, just a separate enrolled secret. Pending actions expire after 900 "
+            "seconds (configurable via MCP_APPROVAL_TTL). This is the human-in-the-loop safety gate for "
+            "destructive operations.",
             "factual_recall", "architecture", "hardcoded"
         ),
     ]
