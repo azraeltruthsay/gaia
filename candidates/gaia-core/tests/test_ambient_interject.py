@@ -33,6 +33,24 @@ def test_on_cooldown_skips_the_model_entirely(tmp_path):
     assert not called
 
 
+def test_a_question_still_gets_a_judgment_call_on_cooldown(tmp_path):
+    # Found same day: "What do you think, GAIA?" landed inside the cooldown
+    # window and got silently dropped before a judgment call ever ran.
+    mark_interjected("s1", base=tmp_path)
+    called = []
+    generate = lambda messages: called.append(1) or "YES"
+    assert should_interject("s1", [], "what do you think?", generate, cooldown_s=600, base=tmp_path) is True
+    assert called  # the model WAS asked, unlike a non-question on cooldown
+
+
+def test_a_question_on_cooldown_can_still_get_a_no(tmp_path):
+    mark_interjected("s1", base=tmp_path)
+    called = []
+    generate = lambda messages: called.append(1) or "NO"
+    assert should_interject("s1", [], "anyone know what time it is?", generate, cooldown_s=600, base=tmp_path) is False
+    assert called  # asked, but she still passed -- the cooldown didn't decide this on its own
+
+
 def test_recent_history_and_the_new_message_both_reach_the_model(tmp_path):
     seen = {}
     def generate(messages):

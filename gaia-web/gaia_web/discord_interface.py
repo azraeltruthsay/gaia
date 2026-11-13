@@ -1,5 +1,4 @@
 import json
-
 """
 Discord Interface for GAIA Web Gateway
 
@@ -8,58 +7,36 @@ Discord messages are received here, converted to CognitionPackets, sent to gaia-
 for processing, and responses are routed back to Discord.
 """
 
-import asyncio
-import logging
 import math
 import os
 import re
-import threading
 import time
 import uuid
-from collections.abc import Callable
+import asyncio
+import logging
+import threading
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Dict, Any, Callable, Tuple
 
 import httpx
-
+from gaia_web.security.middleware import SecurityScanMiddleware
+from gaia_web.attachment_handler import process_attachments
 # Import all necessary dataclasses for CognitionPacket
 from gaia_common.protocols.cognition_packet import (
     COGPACKET_VERSION,
-    Attachment,
-    CognitionPacket,
-    Constraints,
-    Content,
-    Context,
-    DataField,
-    DestinationTarget,
-    Governance,
-    Header,
-    Intent,
-    Metrics,
-    Model,
-    OperationalStatus,
-    Origin,
-    OutputDestination,
-    OutputRouting,
-    PacketState,
-    Persona,
-    PersonaRole,
-    Reasoning,
-    Response,
-    Routing,
-    Safety,
-    SessionHistoryRef,
-    Status,
-    SystemTask,
-    TargetEngine,
-    TokenUsage,
-    ToolRoutingState,
+    CognitionPacket, Header, Persona, Origin, OutputRouting, DestinationTarget, Content, DataField,
+    Attachment, OutputDestination, PersonaRole, Routing, Model, OperationalStatus, SystemTask, Intent, Context,
+    SessionHistoryRef, Constraints, Reasoning, ToolRoutingState, Response, Safety, Governance, TokenUsage, Metrics, Status,
+    PacketState, TargetEngine
 )
 
-from gaia_web.attachment_handler import process_attachments
-from gaia_web.security.middleware import SecurityScanMiddleware
-
 logger = logging.getLogger("GAIA.Web.Discord")
+
+# A message that names her anywhere is addressed, not just one that opens
+# with "@gaia"/"gaia,"/"gaia:" -- "What do you think, GAIA?" names her at
+# the end and used to fall through as ambient instead of getting a
+# guaranteed reply (found 2026-11-12, GAIA's Grotto).
+_NAME_RE = re.compile(r"\bgaia\b", re.IGNORECASE)
 
 try:
     from gaia_common.utils.error_logging import log_gaia_error
@@ -72,8 +49,8 @@ _security_middleware = SecurityScanMiddleware()
 
 # Discord bot instance (module-level for access from main.py)
 _bot = None
-_client_session: httpx.AsyncClient | None = None  # Persistent HTTP session
-_bot_loop: asyncio.AbstractEventLoop | None = None  # The bot's own event loop
+_client_session: Optional[httpx.AsyncClient] = None  # Persistent HTTP session
+_bot_loop: Optional[asyncio.AbstractEventLoop] = None  # The bot's own event loop
 
 
 async def get_core_client() -> httpx.AsyncClient:
@@ -91,15 +68,15 @@ async def close_core_client():
     if _client_session is not None:
         await _client_session.aclose()
         _client_session = None
-_message_handler: Callable | None = None
+_message_handler: Optional[Callable] = None
 _voice_manager = None  # VoiceManager instance (set by start_discord_bot)
 _dm_blocklist = None   # DMBlocklist instance (set by start_discord_bot)
 _core_endpoint = ""    # Core endpoint URL (set by start_discord_bot)
-_typing_wake_sent: dict[str, float] = {}  # user_id -> last wake signal timestamp
-_wake_config_cache: dict[str, Any] = {}   # {"config": {...}, "fetched_at": float}
+_typing_wake_sent: Dict[str, float] = {}  # user_id -> last wake signal timestamp
+_wake_config_cache: Dict[str, Any] = {}   # {"config": {...}, "fetched_at": float}
 
 # Pending approval waiters: (channel_id, user_id) -> waiter context dict
-_pending_approvals: dict[tuple[str, str], dict] = {}
+_pending_approvals: Dict[Tuple[str, str], dict] = {}
 _MCP_BASE_URL = os.getenv("MCP_ENDPOINT", "http://gaia-mcp:8765/jsonrpc").rsplit("/", 1)[0]
 _APPROVAL_STALE_SECONDS = 960  # 16 minutes (MCP TTL is 15 min)
 
@@ -145,7 +122,7 @@ class DiscordInterface:
     """
 
     def __init__(self, bot_token: str, core_endpoint: str, message_queue=None, core_fallback_endpoint: str = "",
-                 ambient_channel_ids: set | None = None):
+                 ambient_channel_ids: Optional[set] = None):
         self.bot_token = bot_token
         self.core_endpoint = core_endpoint
         self.core_fallback_endpoint = core_fallback_endpoint
@@ -285,7 +262,7 @@ class DiscordInterface:
                 should_respond = True
             else:
                 mentioned = bot.user in message.mentions
-                addressed = message.content.lower().startswith(("@gaia", "gaia,", "gaia:"))
+                addressed = bool(_NAME_RE.search(message.content or ""))
                 should_respond = mentioned or addressed
 
             # Ambient channels: every message reaches her as context, not just
@@ -486,8 +463,7 @@ class DiscordInterface:
                 return
 
             try:
-                from gaia_web.translation import LANG_NAMES, detect_language
-                from gaia_web.translation import translate as do_translate
+                from gaia_web.translation import detect_language, translate as do_translate, LANG_NAMES
 
                 detection = await detect_language(text_to_translate)
                 if detection is None:
@@ -593,7 +569,7 @@ class DiscordInterface:
 
             try:
                 await bot.wait_for("reaction_add", timeout=60.0, check=_confirmed)
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 await ctx.send("Timed out — nothing deleted.")
                 return
 
@@ -631,12 +607,12 @@ class DiscordInterface:
         content: str,
         channel_id: str,
         user_id: str,
-        guild_id: str | None,
+        guild_id: Optional[str],
         author_name: str,
         message_id: str,
         is_dm: bool,
         message_obj: Any,
-        attachments: list | None = None,
+        attachments: Optional[list] = None,
         addressed_to_gaia: bool = True,
     ):
         """Handle incoming Discord message by forwarding to gaia-core as a CognitionPacket.
@@ -1055,7 +1031,7 @@ class DiscordInterface:
 
     # --- Approval Flow ---
 
-    def _extract_pending_approval(self, packet: CognitionPacket) -> dict | None:
+    def _extract_pending_approval(self, packet: CognitionPacket) -> Optional[dict]:
         """Check if a completed packet contains a pending approval request."""
         if not packet.tool_routing or not packet.tool_routing.execution_result:
             return None
@@ -1116,7 +1092,7 @@ class DiscordInterface:
     async def _handle_approval_response(
         self,
         content: str,
-        waiter_key: tuple[str, str],
+        waiter_key: Tuple[str, str],
         message_obj: Any,
         is_dm: bool,
     ):
@@ -1243,7 +1219,7 @@ class DiscordInterface:
         return ""
 
 
-async def send_to_channel(channel_id: str, content: str, reply_to_message_id: str | None = None) -> bool:
+async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Optional[str] = None) -> bool:
     """Send a message to a specific Discord channel (for autonomous messages).
 
     Safe to call from any event loop — schedules work on the bot's own loop.
@@ -1388,7 +1364,7 @@ def is_bot_ready() -> bool:
     return _bot is not None and _bot.is_ready()
 
 
-def get_discord_status() -> dict[str, Any]:
+def get_discord_status() -> Dict[str, Any]:
     """Return Discord bot connectivity status for the dashboard."""
     global _bot, _bot_loop
     if _bot is None:

@@ -32,6 +32,12 @@ from gaia_common.protocols.cognition_packet import (
 
 logger = logging.getLogger("GAIA.Web.Discord")
 
+# A message that names her anywhere is addressed, not just one that opens
+# with "@gaia"/"gaia,"/"gaia:" -- "What do you think, GAIA?" names her at
+# the end and used to fall through as ambient instead of getting a
+# guaranteed reply (found 2026-11-12, GAIA's Grotto).
+_NAME_RE = re.compile(r"\bgaia\b", re.IGNORECASE)
+
 try:
     from gaia_common.utils.error_logging import log_gaia_error
 except ImportError:
@@ -256,7 +262,7 @@ class DiscordInterface:
                 should_respond = True
             else:
                 mentioned = bot.user in message.mentions
-                addressed = message.content.lower().startswith(("@gaia", "gaia,", "gaia:"))
+                addressed = bool(_NAME_RE.search(message.content or ""))
                 should_respond = mentioned or addressed
 
             # Ambient channels: every message reaches her as context, not just

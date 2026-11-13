@@ -11,6 +11,20 @@ import pytest
 from gaia_web import discord_interface as di
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("What do you think, GAIA?", True),       # named at the end -- the Grotto case
+    ("gaia, can you help", True),             # the old startswith path still matches
+    ("GAIA:", True),
+    ("Let's ask Gaia about this", True),      # new: named mid-sentence
+    ("gaia?", True),
+    ("hey everyone, what's up", False),
+    ("megaia is not a word but check anyway", False),  # no word boundary
+    ("", False),
+])
+def test_name_mention_detected_anywhere(text, expected):
+    assert bool(di._NAME_RE.search(text)) is expected
+
+
 @pytest.fixture(autouse=True)
 def fast_sleep(monkeypatch):
     async def _sleep(_):

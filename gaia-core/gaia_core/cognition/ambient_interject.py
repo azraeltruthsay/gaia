@@ -8,6 +8,13 @@ she's spoken recently) then, only past it, a genuine first-person judgment
 call — "would I naturally want to say something here" — not a keyword
 trigger. On NO, the turn stays silent; the caller still records the message,
 so context keeps accumulating through quiet stretches too.
+
+A question still gets a judgment call even on cooldown (found same day:
+Nick's "What do you think, GAIA?" landed inside the cooldown window and
+got silently dropped by the cheap gate before a judgment call could even
+consider it). This doesn't skip the judgment itself — a question on
+cooldown can still get a NO — it only stops the cooldown from deciding
+that on its own, content-blind.
 """
 from __future__ import annotations
 
@@ -17,6 +24,8 @@ import re
 import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
+
+from gaia_core.cognition.told_facts import is_question
 
 DEFAULT_COOLDOWN_S = 600
 _STATE_FILE = "ambient_interject.json"
@@ -76,8 +85,11 @@ def should_interject(key: str, history: List[Dict], user_input: str,
                      cooldown_s: float = DEFAULT_COOLDOWN_S, base: Optional[Path] = None) -> bool:
     """Whether to let this ambient turn fall through to a real reply. The
     cooldown is checked first and costs nothing — no model call happens at
-    all once she's spoken too recently in this session."""
-    if on_cooldown(key, cooldown_s, base):
+    all once she's spoken too recently in this session, unless the new
+    message is a question (is_question): the cooldown can't tell a genuine
+    question from idle chatter, so it no longer gets the last word on its
+    own -- the judgment call still can, and often will, still say no."""
+    if on_cooldown(key, cooldown_s, base) and not is_question(user_input):
         return False
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": _conversation(history, user_input)}]
