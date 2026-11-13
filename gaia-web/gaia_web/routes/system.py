@@ -63,13 +63,17 @@ async def system_services():
                     }
                     services.append(entry)
 
-                # Add doctor itself as healthy (if we got here, it's up)
-                services.append({
-                    "id": "gaia-doctor",
-                    "status": "online",
-                    "latency_ms": None,
-                    "candidate": False,
-                })
+                # Add doctor itself as healthy (if we got here, it's up) -- but
+                # only if doctor isn't already self-reporting in its own
+                # services{} (it does now), or the duplicate "gaia-doctor" id
+                # breaks Alpine's x-for :key reconciliation on the frontend.
+                if not any(s["id"] == "gaia-doctor" for s in services):
+                    services.append({
+                        "id": "gaia-doctor",
+                        "status": "online",
+                        "latency_ms": None,
+                        "candidate": False,
+                    })
 
     except Exception as e:
         logger.debug("Failed to fetch doctor status: %s", e)
