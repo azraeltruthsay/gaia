@@ -304,9 +304,11 @@ DOMAIN_TOOLS: Dict[str, dict] = {
 
     # ── Issue ledger (a0aw.1) ──────────────────────────────────────────
     # Its own domain: asked to record a bug, she reached for issue(action=file)
-    # twice before it existed (ycx7, 2026-11-08).
+    # twice before it existed (ycx7, 2026-11-08). Still reached for file/write
+    # instead afterward when asked to "note" or "file" something (6839) — the
+    # description now says explicitly not to use file/write for this.
     "issue": {
-        "description": "Your issue ledger — bugs you find in yourself; each becomes a bead. file needs evidence: the lines introspect showed you",
+        "description": "Your issue ledger — bugs you find in yourself; each becomes a bead. Use this, not file/write, when asked to note, log, track, or file something as a bug or issue. file needs evidence: the lines introspect showed you",
         "actions": {
             "file": {
                 "params": {"title": "string", "symptom": "string", "evidence": "string",

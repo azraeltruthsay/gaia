@@ -469,6 +469,32 @@ def needs_tool_routing(packet: CognitionPacket, user_input: str) -> bool:
     return False
 
 
+_HISTORY_TURNS = 4
+_HISTORY_CHARS = 350
+
+
+def _recent_conversation(packet: CognitionPacket) -> str:
+    """The last few turns as plain text (GAIA_Project-6839): select_tool()
+    used to see only the bare instruction — "please file that as an issue"
+    carries no title/symptom/evidence of its own, so there was nothing to
+    put in issue(file)'s params and she reached for file(write) instead,
+    something generic enough to call with no context at all. The packet
+    already carries this history (packet_builder.py), just not into this
+    prompt."""
+    try:
+        snippets = getattr(getattr(packet, "context", None), "relevant_history_snippet", None) or []
+    except Exception:
+        return ""
+    lines = []
+    for snip in snippets[-_HISTORY_TURNS:]:
+        role = getattr(snip, "role", "") or ""
+        text = (getattr(snip, "summary", "") or "").strip()
+        if role not in ("user", "assistant") or not text:
+            continue
+        lines.append(f"{role}: {text[:_HISTORY_CHARS]}")
+    return "\n".join(lines)
+
+
 def select_tool(
     packet: CognitionPacket,
     user_input: str,
@@ -502,6 +528,16 @@ def select_tool(
     # Build tool catalog for prompt
     tool_catalog = _build_tool_catalog()
 
+    # 6839: without recent turns, a request like "please file that" or "note
+    # this issue" gives the selector nothing to resolve "that"/"this" against
+    # and no evidence to put in issue(file)'s params — omitted entirely when
+    # there's no history, so plain tool requests ("read /foo") don't pay for it.
+    history_text = _recent_conversation(packet)
+    history_block = (
+        f"\nRECENT CONVERSATION (resolve \"it\"/\"that\"/\"this\" in the request against this):\n{history_text}\n"
+        if history_text else ""
+    )
+
     # Build selection prompt — schema uses string params (not object) to avoid
     # llama-cpp grammar hangs with unconstrained objects.
     prompt = f"""You are a tool selector for GAIA. Given the user's request, select the most appropriate tool.
@@ -509,8 +545,11 @@ def select_tool(
 AVAILABLE TOOLS:
 {tool_catalog}
 
-IMPORTANT: Select a domain tool and specify the action. For example: selected_tool="file", params='{{"action": "read", "path": "/foo"}}'. If you need to discover available actions, use introspect with action="tools".
-
+IMPORTANT: Select a domain tool and specify the action. Examples:
+  selected_tool="file", params='{{"action": "read", "path": "/foo"}}'
+  selected_tool="issue", params='{{"action": "note", "id": "<id>", "text": "<what you found>"}}'
+If you need to discover available actions, use introspect with action="tools".
+{history_block}
 USER REQUEST: {user_input}
 
 CONTEXT FROM PACKET:
