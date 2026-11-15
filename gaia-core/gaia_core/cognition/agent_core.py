@@ -10913,9 +10913,18 @@ Start your response with the first line of the file."""
             "/gaia", "/knowledge", "/app", "/docs"
         ]
         file_indicators = [
-            "read ", "open ", "show ", "view ",
+            "read ", "open ",
             "save ", "create file",
         ] + file_signals
+        # if7j: "show " / "view " alone are conversation ("asked me to show
+        # you this week's journal", "show me how", "my view is"); 2026-11-15
+        # a chat turn paid a ~1.7 s tool-selection call for "show you". Like
+        # yn31's "write " and mjcg's "cat ", they count only beside something
+        # a tool can show.
+        if any(v in lowered for v in ("show ", "view ")) and (
+                any(s in lowered for s in file_signals)
+                or any(w in lowered for w in ("file", "log", "folder", "director"))):
+            return True
         # yn31: "write " alone is a creative verb ("Write a two-line poem")
         # far more often than a file op; it routed a poem to palace(work),
         # whose not-found result then stood in for the poem. It counts only
