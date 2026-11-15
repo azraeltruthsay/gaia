@@ -96,3 +96,35 @@ async def test_maintenance_keeps_her_parked(monkeypatch):
     m, lm = _matrix("focusing", core=S, prime=U)
     await m._verify_boot_lifecycle_label()
     lm.transition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stale_transitioning_relabeled_and_woken(monkeypatch):
+    """bbfw: 'transitioning' saved mid-shift before shutdown accepts no
+    triggers; she sat parked and /gpu/wake answered 'Valid: []'."""
+    import gaia_common.utils.maintenance as mt
+    monkeypatch.setattr(mt, "is_maintenance_active", lambda: False)
+    m, lm = _matrix("transitioning", core=S, prime=U)
+    lm.transition_in_flight = False
+    await m._verify_boot_lifecycle_label()
+    assert lm.set_state_external.await_args.kwargs["target"] == LifecycleState.PARKED
+    from gaia_common.lifecycle.states import TransitionTrigger
+    assert lm.transition.await_args.args[0] == TransitionTrigger.WAKE_SIGNAL
+
+
+@pytest.mark.asyncio
+async def test_stale_transitioning_with_core_gpu_relabeled_to_awake():
+    m, lm = _matrix("transitioning", core=C, prime=S)
+    lm.transition_in_flight = False
+    await m._verify_boot_lifecycle_label()
+    assert lm.set_state_external.await_args.kwargs["target"] == LifecycleState.AWAKE
+    lm.transition.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_live_transition_left_alone_and_checked_after():
+    m, lm = _matrix("transitioning", core=S, prime=U)
+    lm.transition_in_flight = True
+    await m._verify_boot_lifecycle_label()
+    lm.set_state_external.assert_not_awaited()
+    assert not m._boot_label_verified

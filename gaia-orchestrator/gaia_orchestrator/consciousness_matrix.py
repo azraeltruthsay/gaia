@@ -1028,20 +1028,31 @@ class ConsciousnessMatrix:
             current = self._lifecycle_machine._snapshot.state
             if isinstance(current, str):
                 current = LifecycleState(current)
-            if current in (LifecycleState.MEDITATION, LifecycleState.TRANSITIONING):
+            if current == LifecycleState.MEDITATION:
                 return
-            violated = [
-                tier for tier, exp in TIER_EXPECTATIONS.get(current, {}).items()
-                if exp.required and tier in self._tiers
-                and self._LEVEL_TO_DEVICE[self._tiers[tier].actual] != exp.device
-            ]
+            if current == LifecycleState.TRANSITIONING:
+                # bbfw: a shift saved mid-clutch before shutdown. No transition
+                # runs in this new process, and TRANSITIONING accepts no
+                # triggers, so the label would hold her parked for good
+                # (2026-11-15: /gpu/wake -> "Valid: []").
+                if getattr(self._lifecycle_machine, "transition_in_flight", False):
+                    self._boot_label_verified = False  # a real shift; check after it
+                    return
+                violated = ["transition"]
+                detail = "no transition in flight"
+            else:
+                violated = [
+                    tier for tier, exp in TIER_EXPECTATIONS.get(current, {}).items()
+                    if exp.required and tier in self._tiers
+                    and self._LEVEL_TO_DEVICE[self._tiers[tier].actual] != exp.device
+                ]
+                detail = ", ".join(f"{t}={self._tiers[t].actual.name}" for t in violated)
             if not violated:
                 return
             inferred = self._infer_lifecycle_from_placement()
             logger.warning(
                 "Boot check: persisted lifecycle '%s' contradicts placement (%s) — relabeling to '%s'",
-                current.value, ", ".join(f"{t}={self._tiers[t].actual.name}" for t in violated),
-                inferred.value,
+                current.value, detail, inferred.value,
             )
             await self._lifecycle_machine.set_state_external(
                 target=inferred,
@@ -1051,8 +1062,10 @@ class ConsciousnessMatrix:
             # into the resting gear as a wake would; 2026-11-10 she sat parked
             # until an explicit /consciousness/awake. (gaia-core's startup wake
             # had run while the label still read 'focusing', so it did nothing.)
+            # A shift saved mid-clutch means she was up and running too.
             if inferred == LifecycleState.PARKED and current in (
-                    LifecycleState.AWAKE, LifecycleState.FOCUSING, LifecycleState.LISTENING):
+                    LifecycleState.AWAKE, LifecycleState.FOCUSING, LifecycleState.LISTENING,
+                    LifecycleState.TRANSITIONING):
                 from gaia_common.utils.maintenance import is_maintenance_active
                 if is_maintenance_active():
                     logger.info("Boot check: maintenance mode, staying parked")
