@@ -72,3 +72,29 @@ def ungrounded_specifics(reflection: str, context: str) -> List[str]:
             continue
         found.append(ident)
     return found
+
+
+# A file path: absolute, ./relative or ../relative, or a bare name with a
+# script/file extension ("run_incidents_list.sh").
+_PATH = re.compile(
+    r"(?<![\w/.])(?:\.{1,2})?/[\w.\-]+(?:/[\w.\-]+)*"
+    r"|(?<![\w/.])[\w\-]+\.(?:sh|py|md|json|ya?ml|txt|toml|cfg|ini|log)\b"
+)
+
+
+def ungrounded_paths(text: str, context: str, exists=None) -> List[str]:
+    """File paths in ``text`` that appear neither in ``context`` nor on disk
+    (duzp: a seed expansion ran 'cd /gaia/maintenance && python3
+    /gaia/scripts/docs_maintenance.py'; neither exists)."""
+    import os
+    exists = exists or os.path.exists
+    ctx = (context or "")
+    found: List[str] = []
+    for m in _PATH.finditer(text or ""):
+        path = m.group(0).rstrip(".,;:")
+        if len(path) < 3 or path in ctx:
+            continue
+        if path.startswith("/") and exists(path):
+            continue
+        found.append(path)
+    return found

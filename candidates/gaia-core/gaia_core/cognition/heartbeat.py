@@ -77,7 +77,8 @@ _EXPAND_SYSTEM_PROMPT = """\
 You are GAIA's thought seed expansion system. Given a thought seed and its \
 context, expand it into a clear, actionable prompt that GAIA can process \
 through her cognitive loop. The prompt should be specific, grounded, and \
-self-contained — it will be fed directly into GAIA's reasoning engine.
+self-contained — it will be fed directly into GAIA's reasoning engine. \
+Name only the files, paths and tools that appear in the seed and its context.
 
 Write ONLY the expanded prompt, nothing else."""
 
@@ -553,10 +554,24 @@ class ThoughtSeedHeartbeat:
                 max_tokens=512,
                 stream=False,
             )
-            return result["choices"][0]["message"]["content"].strip()
+            expanded = result["choices"][0]["message"]["content"].strip()
         except Exception:
             logger.warning("Seed expansion LLM call failed", exc_info=True)
             return ""
+        # duzp: the expansion runs as a real turn under the heartbeat session.
+        # 2026-10-14 one invented /gaia/maintenance, docs_maintenance.py and
+        # run_incidents_list.sh, and the turns tried to run them. An expansion
+        # naming a path or identifier its seed didn't give is treated as a
+        # failed expansion (deferred, archived after the second try).
+        from gaia_core.cognition.reflection_grounding import (
+            ungrounded_paths, ungrounded_specifics)
+        invented = ungrounded_paths(expanded, user_prompt) + [
+            w for w in ungrounded_specifics(expanded, user_prompt) if "_" in w or "." in w]
+        if invented:
+            logger.warning("Heartbeat: seed expansion names what the seed didn't give %s, dropped: %s",
+                           sorted(set(invented)), expanded[:200])
+            return ""
+        return expanded
 
     def _ensure_active(self, seed_filename: str, force_archive: bool = False) -> bool:
         """Ensure GAIA is in an ACTIVE state for running a turn.
