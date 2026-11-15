@@ -689,6 +689,19 @@ class LifecycleMachine:
                 "skipped": "meditation_active",
             }
 
+        # uxfh: a tier mid-load reads as unloaded; inferring a gear from it,
+        # or "repairing" it with a load of our own, killed the load in flight.
+        loading = [t for t, s in probed.items() if getattr(s, "loading", False)]
+        if loading:
+            logger.info("LIFECYCLE: reconcile deferred — %s loading", ", ".join(loading))
+            return {
+                "ok": True,
+                "old_state": current_state.value,
+                "new_state": current_state.value,
+                "tiers": {k: v.model_dump() for k, v in probed.items()},
+                "skipped": "tier_loading",
+            }
+
         # Determine actual state from what's loaded
         core_gpu = probed.get("core", TierLiveStatus()).model_loaded and probed["core"].device == "gpu"
         nano_gpu = probed.get("nano", TierLiveStatus()).model_loaded and probed["nano"].device == "gpu"
@@ -1060,6 +1073,13 @@ class LifecycleMachine:
                     data = resp.json()
                     model_loaded = data.get("model_loaded", False)
                     managed = data.get("managed", False)
+                    if data.get("mode") == "loading":
+                        # uxfh: a load in progress is in transition, not unloaded.
+                        return TierLiveStatus(
+                            device="unloaded", model_loaded=False, loading=True,
+                            model_path=data.get("loading_model", ""),
+                            managed=managed, healthy=True, endpoint=endpoint,
+                        )
 
                     # Get VRAM and model info — try /status first (proxied to
                     # worker, has real data), fall back to /model/info

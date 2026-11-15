@@ -49,11 +49,13 @@ class TierState:
     healthy: bool = False
     last_probe: float = 0.0
     transitioning: bool = False
+    loading: bool = False  # uxfh: the engine reports a load in progress
     error: str = ""
 
     @property
     def ok(self) -> bool:
-        return self.target == self.actual and self.healthy and not self.transitioning
+        return (self.target == self.actual and self.healthy
+                and not self.transitioning and not self.loading)
 
     def to_dict(self) -> dict:
         return {
@@ -67,6 +69,7 @@ class TierState:
             "healthy": self.healthy,
             "ok": self.ok,
             "transitioning": self.transitioning,
+            "loading": self.loading,
             "error": self.error,
         }
 
@@ -475,6 +478,9 @@ class ConsciousnessMatrix:
                     worker_pid = data.get("worker_pid")
 
                     device = data.get("device", "unknown")
+                    # uxfh: mode=loading is a load in progress (actual stays
+                    # unconscious until it lands); reconcile must wait for it.
+                    state.loading = managed and mode == "loading"
 
                     if managed:
                         # Managed engine — check if worker is active
@@ -515,9 +521,11 @@ class ConsciousnessMatrix:
                     state.error = ""
                 else:
                     state.healthy = False
+                    state.loading = False
                     state.actual = ConsciousnessLevel.UNCONSCIOUS
                     state.error = f"HTTP {resp.status_code}"
         except Exception as e:
+            state.loading = False
             state.healthy = False
             state.actual = ConsciousnessLevel.UNCONSCIOUS
             state.error = str(e)[:100]
@@ -1119,6 +1127,11 @@ class ConsciousnessMatrix:
                     if tier == "nano":
                         continue
                     if state.ok or state.transitioning:
+                        continue
+                    if state.loading:
+                        # uxfh: 2026-11-10 this poll swapped in its own model
+                        # mid-load and the first load's timeout then killed it.
+                        logger.info("Consciousness poll: %s is loading — waiting", tier)
                         continue
                     if state.target != state.actual and state.healthy:
                         if state.actual > state.target:

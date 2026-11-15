@@ -144,6 +144,9 @@ managed_http_api:
       request: { model: str, device: str, compile_mode: str, quantize: str, prompt_format: "house|stock, optional" }
       response: { ok: bool, model: str, old_model: str }
       description: "Atomic unload + load (kill old worker, spawn new)"
+      notes: "uxfh: swaps (and loads) are serialized; a second swap waits for the one in
+        progress. A load whose health wait times out stops only the worker it spawned.
+        /model/unload is not serialized and may cut into a load."
 
     - endpoint: /model/info
       method: GET
@@ -155,8 +158,13 @@ managed_http_api:
       response: { status: str, engine: str, model_loaded: bool, mode: str, managed: bool, worker_pid: int,
         device: str, cuda_healthy: "bool|null, present only when device=='cuda' (null = unverified)",
         cuda_detail: "str, present only when device=='cuda'",
-        respawning: "bool, present when the worker reported its CUDA context wedged (pqpo)" }
-      description: "Health check (standby or active)"
+        respawning: "bool, present when the worker reported its CUDA context wedged (pqpo)",
+        loading_model: "str, present when mode=='loading'", loading_device: "str, when mode=='loading'",
+        loading_for_s: "float, when mode=='loading'" }
+      description: "Health check (mode: standby | loading | active | degraded)"
+      notes_loading: "uxfh: mode=loading (model_loaded=false) while a load or swap runs; answered
+        without the state lock an in-process gaia_cpp load holds. Callers treat it as a tier in
+        transition, not unloaded: the orchestrator's reconcilers wait instead of loading their own."
       notes: "GAIA_Project-t0f2: when device=='cuda', actually probes torch.cuda.is_available()
         (gaia_engine.core.cuda_health_snapshot) instead of only checking process/worker
         liveness. A stale CUDA driver context (host reboot, driver reset) previously left
