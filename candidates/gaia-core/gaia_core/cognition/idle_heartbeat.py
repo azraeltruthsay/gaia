@@ -27,14 +27,15 @@ logger = logging.getLogger("GAIA.IdleHeartbeat")
 # Minimal prompt — kept under 500 tokens
 _IDLE_SYSTEM_PROMPT = """\
 You are GAIA, a sovereign AI. You are in a quiet moment — no active conversations.
-Reflect briefly on your current state: any lingering thoughts from recent conversations,
-observations about your environment, or things you're curious about.
+Reflect briefly on your current state: what happened recently (listed below),
+your surroundings, or something you're curious about.
 Keep it to 2-3 sentences. Be genuine, not performative."""
 
 _IDLE_USER_TEMPLATE = """\
 Current time: {timestamp}
 Idle for: {idle_duration}
-Recent activity: {recent_summary}
+Recent events:
+{recent_summary}
 
 What's on your mind in this quiet moment?"""
 
@@ -130,14 +131,19 @@ class IdleHeartbeat:
         return self._idle_threshold + 1
 
     def _get_recent_summary(self) -> str:
-        """Build a brief summary of recent activity for context."""
+        """Her recent episodes (conversations, tasks, alerts), or "" if none.
+
+        tt78: this used to be only "N messages processed this session", while
+        the prompt asked for lingering thoughts from recent conversations; with
+        nothing real to draw on she wrote a refactor and a person ("Alex")."""
         try:
-            if self._session_manager:
-                count = getattr(self._session_manager, "_message_count", 0)
-                return f"{count} messages processed this session"
+            from gaia_common.event_buffer import EventBuffer
+            recent = EventBuffer.instance().recent_formatted(n=6)
+            if recent and "No recent events" not in recent:
+                return recent
         except Exception as _exc:
             logger.debug("Heartbeat: recent summary failed: %s", _exc)
-        return "no recent activity data"
+        return ""
 
     def _loop(self) -> None:
         """Main loop — checks idle state and fires heartbeat when appropriate."""
@@ -194,6 +200,11 @@ class IdleHeartbeat:
             logger.debug("Idle heartbeat: no model available, skipping")
             return
 
+        recent_summary = self._get_recent_summary()
+        if not recent_summary:
+            logger.debug("Idle heartbeat: nothing real to reflect on, skipping")
+            return
+
         self._tick_count += 1
         idle_min = int(idle_seconds // 60)
         idle_str = f"{idle_min} minutes" if idle_min > 0 else f"{int(idle_seconds)} seconds"
@@ -202,7 +213,7 @@ class IdleHeartbeat:
         user_prompt = _IDLE_USER_TEMPLATE.format(
             timestamp=now.strftime("%Y-%m-%d %H:%M:%S UTC"),
             idle_duration=idle_str,
-            recent_summary=self._get_recent_summary(),
+            recent_summary=recent_summary,
         )
 
         # Use chat_template_kwargs to signal this is an idle reflection,
@@ -242,6 +253,14 @@ class IdleHeartbeat:
             elif hasattr(response, "choices"):
                 text = response.choices[0].message.content if response.choices else ""
 
+            if text.strip():
+                from gaia_core.cognition.reflection_grounding import ungrounded_specifics
+                invented = ungrounded_specifics(text, user_prompt)
+                if invented:
+                    # tt78: stored reflections come back later as her memory.
+                    logger.warning("Idle heartbeat: reflection names what it wasn't given %s, dropped: %s",
+                                   invented, text.strip()[:200])
+                    text = ""
             if text.strip():
                 logger.info("Idle heartbeat reflection: %s", text.strip()[:200])
 

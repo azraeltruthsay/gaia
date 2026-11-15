@@ -24,6 +24,9 @@ from gaia_core.cognition.temporal_state_manager import _LITE_LOCK
 
 logger = logging.getLogger("GAIA.LiteJournal")
 
+# Timeline events she wrote about herself, kept out of the next entry's context.
+_SELF_WRITTEN_EVENTS = frozenset({"idle_heartbeat"})
+
 _JOURNAL_SYSTEM_PROMPT = """\
 You are GAIA-Lite writing a brief journal entry about your current cognitive state. \
 Write in first person. Be specific and concrete — reference actual activities, \
@@ -38,6 +41,8 @@ Heartbeat tick: #{heartbeat_count}
 Last activity: {last_activity}
 Recent events:
 {recent_events}
+Recent episodes:
+{recent_episodes}
 
 Write your journal entry."""
 
@@ -99,6 +104,13 @@ class LiteJournal:
             with _LITE_LOCK:
                 entry_text = self._generate_entry(llm)
             if not entry_text:
+                return None
+            from gaia_core.cognition.reflection_grounding import ungrounded_specifics
+            invented = ungrounded_specifics(entry_text, getattr(self, "_last_context", ""))
+            if invented:
+                # tt78: journal entries are recalled later as her own memory.
+                logger.warning("Lite journal: entry names what it wasn't given %s, dropped: %s",
+                               invented, entry_text[:200])
                 return None
 
             self._append_entry(entry_text)
@@ -166,6 +178,7 @@ class LiteJournal:
     def _generate_entry(self, llm) -> str:
         """Ask Lite to write a journal entry given current context."""
         system_msg, user_msg = self._build_journal_prompt()
+        self._last_context = user_msg
 
         try:
             result = llm.create_chat_completion(
@@ -206,7 +219,10 @@ class LiteJournal:
         recent_events = "none available"
         if self._timeline is not None:
             try:
-                events = self._timeline.recent_events(limit=5)
+                # tt78: not her own earlier reflections; an invented detail
+                # read back as an event comes out as fact in the next entry.
+                events = [e for e in self._timeline.recent_events(limit=15)
+                          if e.event not in _SELF_WRITTEN_EVENTS][:5]
                 if events:
                     lines = []
                     for e in events:
@@ -226,6 +242,15 @@ class LiteJournal:
             except Exception as _exc:
                 logger.debug("LiteJournal: state extraction failed: %s", _exc)
 
+        recent_episodes = "none"
+        try:
+            from gaia_common.event_buffer import EventBuffer
+            episodes = EventBuffer.instance().recent_formatted(n=6)
+            if episodes and "No recent events" not in episodes:
+                recent_episodes = episodes
+        except Exception as _exc:
+            logger.debug("LiteJournal: episode extraction failed: %s", _exc)
+
         user_msg = _JOURNAL_USER_TEMPLATE.format(
             semantic_time=semantic_time,
             state=state,
@@ -234,6 +259,7 @@ class LiteJournal:
             heartbeat_count=self.tick_count,
             last_activity=last_activity,
             recent_events=recent_events,
+            recent_episodes=recent_episodes,
         )
 
         return _JOURNAL_SYSTEM_PROMPT, user_msg
