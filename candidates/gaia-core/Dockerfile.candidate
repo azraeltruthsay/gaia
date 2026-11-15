@@ -31,6 +31,13 @@ RUN git clone --depth 1 --branch ${LLAMA_CPP_TAG} https://github.com/ggml-org/ll
         -DGGML_CPU_AARCH64=OFF \
     && cmake --build build --target llama-server llama-quantize -j$(nproc)
 
+# Stage the CUDA runtime libs in a plain directory: /usr/local/cuda/lib64 is a
+# symlink, and the legacy builder (no BuildKit, e.g. Docker on WSL) can't glob
+# through it in COPY --from ("no source files were specified").
+RUN mkdir -p /cuda-libs \
+    && cp -a /usr/local/cuda/lib64/libcudart.so* /usr/local/cuda/lib64/libcublas.so* \
+             /usr/local/cuda/lib64/libcublasLt.so* /cuda-libs/
+
 # ── Main image ───────────────────────────────────────────────────────────────
 FROM python:3.11-slim AS base
 
@@ -45,9 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install CUDA runtime (needed for GPU llama-server at runtime)
-COPY --from=llama-builder /usr/local/cuda/lib64/libcudart.so* /usr/local/lib/
-COPY --from=llama-builder /usr/local/cuda/lib64/libcublas.so* /usr/local/lib/
-COPY --from=llama-builder /usr/local/cuda/lib64/libcublasLt.so* /usr/local/lib/
+COPY --from=llama-builder /cuda-libs/ /usr/local/lib/
 
 # Install llama-server + llama-quantize binaries and shared libs
 COPY --from=llama-builder /build/llama.cpp/build/bin/llama-server /usr/local/bin/llama-server
