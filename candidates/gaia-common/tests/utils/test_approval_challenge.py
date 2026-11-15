@@ -14,6 +14,11 @@ from gaia_common.utils import approval_challenge as ac
 def _isolated_store(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(ac, "_CHALLENGES_FILE", tmp_path / "approval_challenges.json")
     monkeypatch.setattr(ac, "_totp_verifier", None)
+    # Only the secret a test enrolls: an enrolled host's real
+    # /run/secrets/gaia_mcp_totp_secret is checked first and would win.
+    real_loader = ac.load_totp_verifier
+    monkeypatch.setattr(ac, "load_totp_verifier",
+                        lambda *paths, env_var="": real_loader(env_var=env_var))
     yield
     monkeypatch.setattr(ac, "_totp_verifier", None)
 
