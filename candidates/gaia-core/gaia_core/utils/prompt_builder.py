@@ -499,7 +499,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
             *_slim_history(packet),
             {"role": "user", "content": packet.content.original_prompt}
         ]
-    logger.info(packet)
+    logger.debug("%s", packet)  # full packet: history, world state, conversation text
     config = Config() # Assumes a singleton or default config is acceptable
     
     processed_data_field_keys = set() # Track keys already explicitly added to the prompt
