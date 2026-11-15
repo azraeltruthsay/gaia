@@ -6,9 +6,12 @@ This module contains the logic for dynamically switching GAIA's persona based on
 import json
 import logging
 import os
+import re
 import unicodedata
 from pathlib import Path
 from typing import Any, Dict, Tuple, Optional
+
+from gaia_common.utils.message_shape import asking_text
 
 logger = logging.getLogger("GAIA.PersonaSwitcher")
 
@@ -36,6 +39,13 @@ PERSONA_KEYWORDS = {
         "brænēage", "brǣnēage", "braenēage", "brænage",
     ],
 }
+
+def _has_keyword(input_lower: str, input_normalized: str, keyword: str) -> bool:
+    """A keyword as a whole word or phrase: "spell" in "spelling" put a dev
+    journal into the D&D persona (5qv4)."""
+    pattern = r"(?<!\w)" + re.escape(keyword) + r"s?(?!\w)"  # "spells" still counts
+    return bool(re.search(pattern, input_lower) or re.search(pattern, input_normalized))
+
 
 # Default personas directory - matches GAIA configuration
 PERSONAS_DIR = os.environ.get("GAIA_PERSONAS_DIR", "/knowledge/personas")
@@ -183,13 +193,15 @@ def get_persona_for_request(
     Returns:
         A tuple of (persona_name, knowledge_base_name).
     """
+    # The person's own words, not a document they pasted (5qv4).
+    user_input = asking_text(user_input)
     input_lower = user_input.lower()
     # Normalize special characters for matching (æ→ae, ē→e)
     input_normalized = _normalize_text(input_lower)
 
     # Layer 1: keyword match
     for persona_name, keywords in PERSONA_KEYWORDS.items():
-        if any(keyword in input_lower or keyword in input_normalized for keyword in keywords):
+        if any(_has_keyword(input_lower, input_normalized, kw) for kw in keywords):
             logger.info(f"Persona keyword match: '{persona_name}'")
             knowledge_base_name = get_knowledge_base_for_persona(persona_name)
             return persona_name, knowledge_base_name
@@ -215,7 +227,7 @@ def get_persona_for_request(
                         # Guard against false-positive embed matches for roleplay personas
                         if persona_label == "dnd_player_assistant":
                             dnd_kws = PERSONA_KEYWORDS.get("dnd_player_assistant", [])
-                            has_kw = any(kw in input_lower or kw in input_normalized for kw in dnd_kws)
+                            has_kw = any(_has_keyword(input_lower, input_normalized, kw) for kw in dnd_kws)
                             if not has_kw and score < 0.75:
                                 logger.info(
                                     "Persona embed matched 'dnd_player_assistant' (score=%.3f) but query lacks D&D keywords — ignoring false positive",

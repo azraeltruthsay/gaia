@@ -115,8 +115,12 @@ _ASKS_RE = re.compile(
 
 
 def asks_about_host(text: str) -> bool:
-    """Whether a message asks what she runs on or what she has to work with."""
-    return bool(_ASKS_RE.search(text or ""))
+    """Whether a message asks what she runs on or what she has to work with.
+
+    Only the person's own words: 2026-11-15 "the GPU" inside a pasted 17 KB dev
+    journal got the hardware answer, capped at 160 tokens, instead of a reply (5qv4)."""
+    from gaia_common.utils.message_shape import asking_text
+    return bool(_ASKS_RE.search(asking_text(text)))
 
 
 def machine_description(facts: Optional[dict] = None) -> str:

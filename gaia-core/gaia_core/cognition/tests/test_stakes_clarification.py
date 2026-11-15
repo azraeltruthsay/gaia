@@ -214,6 +214,8 @@ class TestClassifyReply:
         "this is real",
         "for real",
         "actually my real leg",
+        "Real-world. It's a dev journal about you, not a game.",
+        "not in character, real life",
     ])
     def test_real_phrases(self, text):
         assert _classify_reply(text) == "real_world"
@@ -286,3 +288,24 @@ class TestDecisionShape:
         d = decide_clarification(stakes, session_id="d2")
         assert d.ask is False
         assert d.question is None
+
+
+class TestPastedDocument5qv4:
+    def test_no_ask_for_a_pasted_document(self):
+        """5qv4: a dev journal matched broke/re-rolled/back/by hand."""
+        doc = ("The wake path broke after a restart; each section is re-rolled twice. "
+               "mjcg was fixed by hand, and gaia-web waits with backoff.\n\n") * 6
+        msg = "Here's the journal. What do you think?\n\n----- JOURNAL -----\n" + doc
+        stakes = classify_stakes(msg, role_play_active=False)
+        assert not stakes.requires_clarification
+        assert decide_clarification(stakes, session_id="s_doc", user_input=msg).ask is False
+        assert pending_clarification("s_doc") is None
+
+    def test_own_words_after_pasted_material_still_ask(self):
+        msg = "```\n" + "a quoted log line\n" * 50 + "```\nI broke my leg"
+        stakes = classify_stakes(msg, role_play_active=True)
+        assert decide_clarification(stakes, session_id="s_after", user_input=msg).ask is True
+
+    def test_short_utterance_still_asks(self):
+        stakes = classify_stakes("I broke my leg", role_play_active=True)
+        assert decide_clarification(stakes, session_id="s_short", user_input="I broke my leg").ask is True

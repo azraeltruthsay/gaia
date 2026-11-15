@@ -63,6 +63,7 @@ from gaia_common.utils.doc_sections import excerpt_for
 from gaia_common.utils.doc_sections import asked_articles
 from gaia_common.utils.founding_docs import asks_opinion, named_document, refers_back, wants_whole
 from gaia_common.utils.host_facts import asks_about_host, host_facts_text
+from gaia_common.utils.message_shape import asking_text
 from gaia_core.cognition.knowledge_router import weakest_last
 from gaia_core.cognition.second_mind import keeps_to_text, states_something, unbacked
 from gaia_core.cognition.told_facts import (
@@ -10903,7 +10904,8 @@ Start your response with the first line of the file."""
 
         # Create a minimal packet for the check
         # We don't have a full packet yet, so we check against the raw input
-        lowered = (user_input or "").lower()
+        # The person's ask, not words in a document they pasted (5qv4).
+        lowered = asking_text(user_input or "").lower()
 
         # File operation indicators
         file_signals = [

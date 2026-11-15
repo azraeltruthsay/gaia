@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Any
 
+from gaia_common.utils.message_shape import asking_text
 from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
 from gaia_core.cognition.nlu.intent_detection import (
     Plan,
@@ -201,13 +202,13 @@ class NeuralRouter:
                 escalation_reason=reason,
             )
 
-        # Truncate excessively long inputs (pasted content)
-        original_text = text
-        if len(text) > 2000:
-            text = text[:1500] + "\n...\n" + text[-500:]
+        # Route on the person's own words, not pasted content: the first 1500
+        # characters of a pasted dev journal (the old truncation) still made it
+        # read_file ("reads" + a path) in the reflex and in triage (5qv4).
+        ask = text = asking_text(text)
 
         # ── Stage 1: Reflex Path (autonomic, zero-cost) ──
-        reflex = fast_intent_check(text)
+        reflex = fast_intent_check(ask)
         if reflex:
             return self._build_result(
                 target=TargetEngine.NANO,
@@ -218,7 +219,7 @@ class NeuralRouter:
             )
 
         # Fast-track conversational patterns
-        fast_track = _fast_track_intent_detection(text)
+        fast_track = _fast_track_intent_detection(ask)
         if fast_track:
             return self._build_result(
                 target=TargetEngine.NANO,

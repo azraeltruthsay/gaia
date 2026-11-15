@@ -14,6 +14,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from gaia_common.utils.message_shape import asking_text
+
 logger = logging.getLogger("GAIA.SemanticProbe")
 
 
@@ -1025,6 +1027,9 @@ def run_semantic_probe(
     """
     stats = _get_session_stats(session_id) if session_id else None
 
+    # Phrases from the person's own words: a pasted dev journal had its quoted
+    # lines ("X is a friend of mine named Y") looked up on the web (5qv4).
+    user_input = asking_text(user_input)
     if should_skip_probe(user_input):
         logger.debug("SemanticProbe: skipped (short-circuit)")
         result = SemanticProbeResult()

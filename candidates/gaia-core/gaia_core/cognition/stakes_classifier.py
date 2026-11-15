@@ -34,6 +34,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from gaia_common.utils.message_shape import asking_text
+
 
 # ── Vocabularies ────────────────────────────────────────────────────
 #
@@ -292,6 +294,9 @@ def classify_stakes(
         ``requires_clarification``: True means caller should ASK before
         proceeding.
     """
+    # One utterance: the person's own words, not a pasted document whose
+    # "broke" / "re-rolled" / "by hand" read as an injury in a game (5qv4).
+    text = asking_text(text or "")
     if not text or not text.strip():
         return StakesResult(stakes=STAKES_NONE, identity=IDENTITY_UNKNOWN,
                             proprioceptive=PROP_UNCLEAR)

@@ -16,6 +16,7 @@ from typing import List, Optional
 from urllib.request import Request, urlopen
 
 from gaia_core.cognition.nlu.embed_intent_classifier import EmbedIntentClassifier
+from gaia_common.utils.message_shape import asking_text
 
 logger = logging.getLogger("GAIA.IntentDetection")
 
@@ -545,8 +546,11 @@ def _detect_fragmentation_request(text: str) -> bool:
         logger.debug("Fragmentation detected: known work reference")
         return True
 
-    # Additional pattern: "recite [title]" without explicit work type
-    if has_recitation_verb and has_named_work:
+    # Additional pattern: "recite [title]" without explicit work type. Only a
+    # real recitation verb: "just say so" + names (GAIA, Claude, Azrael) read
+    # as reciting a work, and her answer to a dev journal was a web search for
+    # the whole message as a title (5qv4).
+    if any(v in lowered for v in ("recite", "perform", "declaim", "read aloud")) and has_named_work:
         logger.debug("Fragmentation detected: recite + named work signal")
         return True
 
@@ -1385,6 +1389,10 @@ def detect_intent(text, config, lite_llm=None, full_llm=None, fallback_llm=None,
         logger.debug("[DEBUG] Intent detect start len=%d", len(text or ""))
     except Exception:
         logger.debug("[DEBUG] Intent detect start")
+
+    # The intent is the person's ask, not a keyword in a document they pasted:
+    # "reads" + a path in a dev journal made it read_file (5qv4).
+    text = asking_text(text)
 
     # ── Gather embed signals (cheap — singleton classifier, cached matrix) ──
     embed_intent = None

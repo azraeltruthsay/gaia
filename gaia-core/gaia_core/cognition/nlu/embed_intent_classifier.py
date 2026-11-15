@@ -25,6 +25,8 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+from gaia_common.utils.message_shape import asking_text
+
 logger = logging.getLogger("GAIA.EmbedIntentClassifier")
 
 _EXEMPLARS_FILE = Path(__file__).parent / "intent_exemplars.json"
@@ -136,6 +138,7 @@ class EmbedIntentClassifier:
         """
         if not self._ready or self._embed_model is None or self._exemplar_matrix is None or getattr(self._exemplar_matrix, 'ndim', 0) < 2:
             return ("other", 0.0)
+        text = asking_text(text)  # the ask, not a pasted document (5qv4)
 
         try:
             query_vec = self._embed_model.encode(

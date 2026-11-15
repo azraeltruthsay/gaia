@@ -260,6 +260,13 @@ _REAL_PHRASES = (
     "not a game", "not in-game", "not in game",
 )
 
+# A negated game word is a real-world answer: "Real-world, not a game" read
+# as both and was dropped as unresolved (5qv4). Removed before the game check.
+_NEGATED_GAME_PHRASES = (
+    "not a game", "not in-game", "not in game", "not the game", "not in the game",
+    "not in character", "not in-character",
+)
+
 # Reply phrases that signal in-game resolution.
 _GAME_PHRASES = (
     "in character", "in-character", "[ic]",
@@ -301,9 +308,12 @@ def _classify_reply(reply: str) -> str:
         any(p in rl for p in _REAL_PHRASES)
         or bool(tokens & _REAL_TOKENS)
     )
+    rl_game = rl
+    for p in _NEGATED_GAME_PHRASES:
+        rl_game = rl_game.replace(p, " ")
     has_game = (
-        any(p in rl for p in _GAME_PHRASES)
-        or bool(tokens & _GAME_TOKENS)
+        any(p in rl_game for p in _GAME_PHRASES)
+        or bool(_tokenize(rl_game) & _GAME_TOKENS)
     )
     if has_real and not has_game:
         return "real_world"

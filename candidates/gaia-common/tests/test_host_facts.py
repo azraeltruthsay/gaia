@@ -71,3 +71,16 @@ def test_questions_about_the_machine(text):
                                   "Who are you?", "How do I fix my computer?", "What do you think about rain?"])
 def test_other_questions(text):
     assert not hf.asks_about_host(text)
+
+
+def test_a_pasted_document_is_not_a_question_about_the_machine():
+    """5qv4: a dev journal mentioning "on the GPU" got the hardware answer."""
+    msg = ("Here is this week's journal. What do you think of it?\n\n----- JOURNAL -----\n"
+           + "Gear 1 now runs Core on the GPU at 70 tok/s.\n\n" * 30)
+    assert not hf.asks_about_host(msg)
+
+
+def test_a_question_after_pasted_material_still_counts():
+    msg = ("```\n" + "log line about nothing in particular\n" * 40 + "```\n"
+           "What GPU are you running on right now?")
+    assert hf.asks_about_host(msg)
