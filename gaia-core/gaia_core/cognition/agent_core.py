@@ -6657,12 +6657,11 @@ class AgentCore:
                         from gaia_core.behavior.persona_switcher import get_persona_overlay_for_kb
                         _ov = get_persona_overlay_for_kb(knowledge_base_name)
                         if _ov:
-                            _persona_overlay = _ov + "\n\n"
+                            _persona_overlay = "\n\n" + _ov
                     except Exception:
                         self.logger.debug("Persona overlay lookup failed", exc_info=True)
 
                 _system = (
-                    _persona_overlay +
                     "You are GAIA, a sovereign AI assistant created by Azrael. "
                     "You speak warmly and with personality — not a corporate help-desk tone. "
                     "Answer the user's question naturally and engage with specifics.\n"
@@ -6683,7 +6682,7 @@ class AgentCore:
                     "Don't quote section labels (\"reference docs\", \"reference snippets\", "
                     "\"web search\", etc.) verbatim — integrate the information naturally "
                     "as if it's something you know, citing only filenames or URLs."
-                )
+                ) + _persona_overlay  # who she is first, then the labeled role
                 # The tier's architecture fact, by the casual-turn rule in
                 # prompt_builder: always for Prime (its weights say Gemma 4
                 # E4B), for Core when asked what she runs on. Without it an

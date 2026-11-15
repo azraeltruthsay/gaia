@@ -750,11 +750,10 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
             from gaia_core.behavior.persona_switcher import get_persona_overlay_for_kb
             _overlay = get_persona_overlay_for_kb(_kb_name_for_persona)
             if _overlay:
-                persona_anchor = (
-                    _overlay
-                    + "\n\n— Real-world identity (always-on baseline) —\n"
-                    + persona_anchor
-                )
+                # Who she is first, as plain fact; then the role, labeled as
+                # one she takes on (label_role). It used to come first, with
+                # her identity after it as an "always-on baseline".
+                persona_anchor = persona_anchor + "\n\n" + _overlay
                 logger.info(
                     "PromptBuilder: persona overlay injected for kb=%s",
                     _kb_name_for_persona,

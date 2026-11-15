@@ -137,7 +137,26 @@ def get_persona_overlay_text(persona_name: str) -> Optional[str]:
     instructions = cfg.get("instructions") or []
     if isinstance(instructions, list) and instructions:
         parts.append("\n".join(f"• {line}" for line in instructions))
-    return "\n\n".join(parts) if parts else None
+    if not parts:
+        return None
+    return label_role("\n\n".join(parts), cfg.get("name") or persona_name)
+
+
+def label_role(text: str, persona_name: str) -> str:
+    """Mark a persona as a role she takes on, not who she is.
+
+    Her identity is in her weights (Core V3, Prime v2b); putting it in the
+    prompt never took. What the prompt can do is say which part is the
+    costume: the role is framed as one GAIA wears for this conversation and
+    stated after her identity, which stays a plain fact."""
+    label = persona_name.replace("_", " ")
+    return (
+        f"— Role for this conversation: {label} —\n"
+        "You are GAIA. In this conversation you also take on the role below; "
+        "you remain yourself underneath it.\n\n"
+        f"{text}\n"
+        "— End of role —"
+    )
 
 
 def get_persona_overlay_for_kb(kb_name: str) -> Optional[str]:
