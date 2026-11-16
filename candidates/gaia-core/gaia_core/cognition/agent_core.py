@@ -1538,6 +1538,19 @@ class AgentCore:
         except Exception:
             logger.warning("Gear switch failed, continuing", exc_info=True)
 
+        # Asked to nap or sleep: she reads the request, sees what is running,
+        # and decides (rest_request.py). None = not a request; the turn goes on.
+        if (source or "").lower() not in _INTERNAL_TURN_SOURCES:
+            try:
+                _rest = self._rest_request(user_input, session_id, source, metadata)
+                if _rest:
+                    self.session_manager.add_message(session_id, "user", user_input)
+                    self.session_manager.add_message(session_id, "assistant", _rest["reply"])
+                    yield {"type": "token", "value": _rest["reply"]}
+                    return
+            except Exception:
+                logger.warning("Rest request check failed, continuing", exc_info=True)
+
         # Facts she was told, kept and recalled. Ahead of research and the
         # old save-to-file route, which get these turns otherwise (1zbx).
         # A cheap, under-threshold-tolerant intent guess so told_fact() can
@@ -7952,6 +7965,38 @@ RESULT: COMPLEX (reason: <brief reason>)
         title = document.get("title") or "the requested text"
         body = (document.get("content") or "").strip()
         return f"Here is **{title}**:\n\n{excerpt(body, requested_part(user_input)) or body}"
+
+    def _rest_request(self, user_input: str, session_id: str, source: str, metadata: dict = None):
+        """A request to nap or sleep, read and decided by her (rest_request.py)."""
+        from gaia_core.cognition import rest_request
+        from gaia_core.cognition.told_facts import speaker
+
+        embed = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
+        if embed is None:
+            return None
+        _role: list = []
+
+        def generate(messages):
+            # the mind on the GPU; asked only once a request is noticed
+            if not _role:
+                _role.append("prime" if self._is_prime_available else "core")
+            res = self.model_pool.forward_to_model(_role[0], messages=messages, max_tokens=200, temperature=0.2)
+            return (res["choices"][0]["message"]["content"] or "") if isinstance(res, dict) else str(res)
+
+        history = []
+        for m in (self.session_manager.get_history(session_id) or [])[-4:]:
+            if m.get("role") in ("user", "assistant") and m.get("content"):
+                history.append(f"{m['role']}: {str(m['content'])[:300]}")
+
+        def on_failure(kind, why):
+            self.session_manager.add_message(session_id, "assistant", rest_request.failure_note(kind, why))
+
+        who = speaker(source, session_id, metadata).get("who") or "someone"
+        return rest_request.handle(
+            user_input, kind_hint_model=embed, history=history, who=who, generate=generate,
+            hud=lambda kind: rest_request.live_hud(kind, self.session_manager, session_id,
+                                                   self._lifecycle_client),
+            on_failure=on_failure)
 
     def _told_fact_reply(self, user_input: str, session_id: str, source: str = "", metadata: dict = None,
                           soft_intent: str = "") -> Optional[str]:
