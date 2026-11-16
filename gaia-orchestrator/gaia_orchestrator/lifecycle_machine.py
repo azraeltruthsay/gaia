@@ -59,6 +59,13 @@ class LifecycleMachine:
     # doctor-visible guard file, restoring it on downshift. Azrael's call
     # 2026-07-17: full negotiation (LMCache warmth yields to gear shifts).
     VRAM_SAFETY_MARGIN_MB = int(os.environ.get("VRAM_SAFETY_MARGIN_MB", "600"))
+    # hii8: after a gear shift the old GPU worker's memory drains for up to a
+    # minute. Within VRAM_SETTLE_WINDOW_S of a transition, a gear that doesn't
+    # fit waits (up to VRAM_SETTLE_MAX_S) while that memory is still falling.
+    VRAM_SETTLE_WINDOW_S = float(os.environ.get("VRAM_SETTLE_WINDOW_S", "180"))
+    VRAM_SETTLE_MAX_S = float(os.environ.get("VRAM_SETTLE_MAX_S", "60"))
+    VRAM_SETTLE_POLL_S = 3.0
+    VRAM_SETTLE_STALL_S = 15.0
     VRAM_TENANT_GUARD_TTL = int(os.environ.get("VRAM_TENANT_GUARD_TTL", "14400"))
     VRAM_TENANT_CONTAINER = os.environ.get("VRAM_TENANT_CONTAINER", "gaia-prime-candidate")
     TENANT_GUARD_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "vram_tenant_guard.json"
@@ -301,6 +308,40 @@ class LifecycleMachine:
                                name, reason, e)
         return any_ok
 
+    async def _settle_after_shift(self, need: int, external: int, total: int):
+        """hii8: 25 s after a park, a wake was refused because the exiting GPU
+        worker still held 4 GB, counted as an outside tenant; a minute later
+        the card was at baseline. Shortly after a transition, wait while that
+        memory is still being freed. Gives up after VRAM_SETTLE_MAX_S, or
+        sooner when nothing has dropped for VRAM_SETTLE_STALL_S (a real
+        tenant). Returns the latest (external, total)."""
+        last = self._snapshot.last_transition_at
+        if last is None:
+            return external, total
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - last).total_seconds() > self.VRAM_SETTLE_WINDOW_S:
+            return external, total
+        logger.info("VRAM preflight: %d MB not GAIA's right after a gear shift — "
+                    "waiting up to %.0f s for it to be freed", external, self.VRAM_SETTLE_MAX_S)
+        start = time.monotonic()
+        lowest, last_drop = external, start
+        while time.monotonic() - start < self.VRAM_SETTLE_MAX_S:
+            await asyncio.sleep(self.VRAM_SETTLE_POLL_S)
+            e, t = await self._external_vram_mb()
+            if e is None:
+                break
+            external, total = e, t
+            if need <= total - external - self.VRAM_SAFETY_MARGIN_MB:
+                logger.info("VRAM preflight: settled after %.0f s — %d MB external, gear fits",
+                            time.monotonic() - start, external)
+                break
+            if external < lowest - 64:
+                lowest, last_drop = external, time.monotonic()
+            elif time.monotonic() - last_drop >= self.VRAM_SETTLE_STALL_S:
+                break
+        return external, total
+
     async def _vram_preflight(self, target: "LifecycleState") -> Optional[str]:
         """None when the target gear fits (negotiating the known tenant away
         if needed); an error string when it cannot fit. Never grinds into OOM."""
@@ -313,6 +354,10 @@ class LifecycleMachine:
             return None
         budget = total - external - self.VRAM_SAFETY_MARGIN_MB
         if need <= budget:
+            return None
+
+        external, total = await self._settle_after_shift(need, external, total)
+        if need <= total - external - self.VRAM_SAFETY_MARGIN_MB:
             return None
 
         # Negotiate: stop every running GPU-holding registry tenant behind
