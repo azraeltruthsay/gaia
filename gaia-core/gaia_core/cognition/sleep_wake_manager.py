@@ -247,15 +247,30 @@ class SleepWakeManager:
                 action = "sleep"
                 timeout = self.config.get_timeout("HTTP_DEFAULT", 15.0)
             elif to_state == "active":
-                action = "wake"
+                # Unmute only. /wake also reloads the 1.8 GB speech recognizer
+                # onto the GPU; every chat after a sleep did that, nobody was
+                # speaking, and gear 1 no longer fit beside it (2026-11-16:
+                # four wakes refused, "external tenants hold 3671 MB"). Voice
+                # loads it when a channel is joined, or on first use.
+                action = "unmute"
                 timeout = self.config.get_timeout("HTTP_QUICK", 5.0)
             else:
                 return
 
             import httpx
+            try:
+                from gaia_common.utils.service_auth import auth_headers
+                headers = auth_headers("POST", f"/{action}")
+            except Exception:
+                headers = {}
+            # Signed: /unmute isn't on gaia-audio's unsigned list, and an
+            # unsigned call left her muted after a sleep (2026-11-16, 401).
             with httpx.Client(timeout=timeout) as client:
-                client.post(f"{audio_endpoint}/{action}")
-            logger.debug("Audio %s signal sent", action)
+                r = client.post(f"{audio_endpoint}/{action}", headers=headers)
+            if getattr(r, "status_code", 200) >= 400:
+                logger.warning("Audio %s signal refused: HTTP %s", action, r.status_code)
+            else:
+                logger.debug("Audio %s signal sent", action)
         except Exception:
             logger.debug("Audio state notification failed (non-fatal)", exc_info=True)
 

@@ -57,6 +57,20 @@ def test_noticing_alone_does_nothing_when_she_reads_it_as_no_request():
     assert acted == [] and len(gen.calls) == 1   # asked once, no consent step
 
 
+def test_a_greeting_misread_as_a_nap_stops_at_the_quote_check():
+    # 2026-11-16, gear 2: Prime read "hey GAIA, how's your morning going?" as
+    # a nap request, agreed, and parked her.
+    acted = []
+    gen = _gen('{"who_rests": "gaia", "kind": "nap", "words": "how\'s your morning going"}')
+    assert rr.understand("hey GAIA, how's your morning going?", [], gen, FakeEmbed()) is None
+    assert acted == [] and len(gen.calls) == 1
+
+
+def test_words_not_in_the_message_are_not_a_request():
+    gen = _gen('{"who_rests": "gaia", "kind": "nap", "words": "go take a nap"}')
+    assert rr.understand("hey GAIA, how's it going?", [], gen, FakeEmbed()) is None
+
+
 def test_unrelated_message_never_reaches_the_model():
     acted = []
     gen = _gen()
@@ -66,7 +80,7 @@ def test_unrelated_message_never_reaches_the_model():
 
 def test_she_agrees_and_it_acts_with_her_own_reply():
     acted = []
-    gen = _gen('{"who_rests": "gaia", "kind": "nap"}', json.dumps({"rest": True, "reply": "Nothing's running, so yes, a nap sounds good."}))
+    gen = _gen('{"who_rests": "gaia", "kind": "nap", "words": "go take a nap"}', json.dumps({"rest": True, "reply": "Nothing's running, so yes, a nap sounds good."}))
     out = _handle("go take a nap", gen, acted)
     assert out == {"reply": "Nothing's running, so yes, a nap sounds good.", "kind": "nap", "rest": True}
     assert acted == ["nap"]
@@ -77,7 +91,7 @@ def test_she_agrees_and_it_acts_with_her_own_reply():
 def test_she_declines_and_nothing_acts():
     acted = []
     hud = HUD + ["Prime is generating for someone right now (1)."]
-    gen = _gen('{"who_rests": "gaia", "kind": "sleep"}', '{"rest": false, "reply": "Prime is still generating for someone, so not yet."}')
+    gen = _gen('{"who_rests": "gaia", "kind": "sleep", "words": "go to sleep"}', '{"rest": false, "reply": "Prime is still generating for someone, so not yet."}')
     out = _handle("go to sleep", gen, acted, hud)
     assert out["rest"] is False and acted == []
     assert "Prime is still generating" in out["reply"]
@@ -85,14 +99,14 @@ def test_she_declines_and_nothing_acts():
 
 def test_unusable_answer_means_no_action_and_an_ordinary_turn():
     acted = []
-    gen = _gen('{"who_rests": "gaia", "kind": "nap"}', "sure thing!")
+    gen = _gen('{"who_rests": "gaia", "kind": "nap", "words": "take a nap"}', "sure thing!")
     assert _handle("take a nap", gen, acted) is None
     assert acted == []
 
 
 def test_reply_naming_work_not_on_the_hud_is_replaced():
     acted = []
-    gen = _gen('{"who_rests": "gaia", "kind": "nap"}', json.dumps(
+    gen = _gen('{"who_rests": "gaia", "kind": "nap", "words": "take a nap"}', json.dumps(
         {"rest": True, "reply": "Let me finish the knowledge_graph refactor with Alex first, then nap."}))
     out = _handle("take a nap", gen, acted)
     assert "Alex" not in out["reply"] and "knowledge_graph" not in out["reply"]
@@ -101,7 +115,7 @@ def test_reply_naming_work_not_on_the_hud_is_replaced():
 
 def test_thinking_is_stripped_before_reading_json():
     acted = []
-    gen = _gen('<think>is this for me? {"kind": "none"}</think>{"who_rests": "gaia", "kind": "sleep"}',
+    gen = _gen('<think>is this for me? {"kind": "none"}</think>{"who_rests": "gaia", "kind": "sleep", "words": "go to sleep"}',
                '{"rest": true, "reply": "Okay, going to sleep now."}')
     assert _handle("go to sleep", gen, acted)["kind"] == "sleep"
 

@@ -48,6 +48,8 @@ ASKING = [
     "park yourself for a while", "sleep for a bit", "you've earned some sleep, go sleep",
     "nap time for you", "go have a lie down", "rest up, I'll talk to you later",
     "you should get some rest", "head to sleep, GAIA",
+    # Requests asked as questions sit near questions about her sleep.
+    "can you go to sleep for the night?", "could you take a nap?", "would you go get some sleep?",
 ]
 # About sleep, and not asking her to.
 NOT_ASKING = [
@@ -57,6 +59,10 @@ NOT_ASKING = [
     "I slept badly last night", "my cat is napping", "sleep is important for memory",
     "can you wake up", "are you awake", "the computer went to sleep", "good night, talk tomorrow",
     "what does parked mean", "why were you asleep earlier", "set a sleep timer",
+    # Greetings that name her: "head to sleep, GAIA" made these look like
+    # requests (2026-11-16: "hey GAIA, how's your morning going?" parked her).
+    "good morning GAIA", "hey GAIA, how are you?", "hey GAIA, how's your day going?",
+    "good night GAIA", "morning! how did you sleep?",
 ]
 # A notice: the nearest example is a request and at least NOTICE_MIN close, or
 # a request example is NOTICE_STRONG close whatever else is near. Generous on
@@ -124,12 +130,51 @@ else: a question about her sleep, talk about sleep, a joke.
 Then, if GAIA: "nap" for a short rest (a nap, rest for a bit, a break) or \
 "sleep" for a full sleep (go to sleep, go to bed, sleep for the night).
 
-Answer with JSON only: {{"who_rests": "gaia" | "speaker" | "nobody", "kind": "nap" | "sleep" | "none"}}"""
+Last, "words": copy exactly the words of the message that ask GAIA to rest, \
+or "" if none do.
+
+Answer with JSON only: {{"who_rests": "gaia" | "speaker" | "nobody", "kind": "nap" | "sleep" | "none", "words": "..."}}"""
 
 
-def understand(text: str, history: Sequence[str], generate: Callable[[list], str]) -> Optional[str]:
+def _norm(t: str) -> str:
+    return " ".join(re.sub(r"[^\w\s']", " ", (t or "").lower()).split())
+
+
+def _reads_as_request(text: str, embed_model) -> bool:
+    ask, other = _matrices(embed_model)
+    v = embed_model.encode([text], normalize_embeddings=True)[0]
+    best_ask, best_other = float((ask @ v).max()), float((other @ v).max())
+    logger.debug("rest check %r: ask=%.3f other=%.3f", text, best_ask, best_other)
+    return best_ask >= NOTICE_MIN and best_ask > best_other
+
+
+_NAME = re.compile(r"\bgaia\b[,!.]?", re.I)
+
+
+def asks_to_rest(words: str, message: str, embed_model) -> bool:
+    """Her quote of the asking words must be in the message, and the quote or
+    the message without her name must sit nearer a request than anything
+    else. 2026-11-16: Prime read "hey GAIA, how's your morning going?" as a
+    nap request (quoting "rest for a bit", which isn't in it) and agreed;
+    nothing checked what in the message had asked. Without her name: the
+    examples include "head to sleep, GAIA", so any greeting naming her looked
+    close to a request."""
+    w = _norm(words)
+    if not w or w not in _norm(message) or embed_model is None:
+        return False
+    try:
+        return (_reads_as_request(words, embed_model)
+                or _reads_as_request(_NAME.sub("", message).strip(" ,"), embed_model))
+    except Exception:
+        logger.debug("rest quote check failed", exc_info=True)
+        return False
+
+
+def understand(text: str, history: Sequence[str], generate: Callable[[list], str],
+               embed_model=None) -> Optional[str]:
     """NAP, SLEEP, or None. Who rests is asked first: "night GAIA, talk
-    tomorrow" read as a request when the question was only which kind."""
+    tomorrow" read as a request when the question was only which kind. Then
+    the words she says asked are checked against the message."""
     prompt = _UNDERSTAND.format(
         history=("Conversation:\n" + "\n".join(history) + "\n") if history else "",
         message=text.strip()[:400])
@@ -137,7 +182,12 @@ def understand(text: str, history: Sequence[str], generate: Callable[[list], str
     if str(out.get("who_rests", "")).lower() != "gaia":
         return None
     kind = out.get("kind")
-    return kind if kind in (NAP, SLEEP) else None
+    if kind not in (NAP, SLEEP):
+        return None
+    if not asks_to_rest(str(out.get("words") or ""), text, embed_model):
+        logger.info("Rest: read as %s, but %r doesn't ask her to rest", kind, out.get("words"))
+        return None
+    return kind
 
 
 WHAT_IT_MEANS = {
@@ -402,7 +452,7 @@ def handle(text: str, *, kind_hint_model, history: Sequence[str], who: str,
     else {"reply", "kind", "rest"}."""
     if not noticed(text, kind_hint_model):
         return None
-    kind = understand(text, history, generate)
+    kind = understand(text, history, generate, kind_hint_model)
     logger.info("Rest: noticed %r, understood as %s", text[:80], kind)
     if kind is None:
         return None
