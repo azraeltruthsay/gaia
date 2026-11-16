@@ -29,6 +29,11 @@ logger = logging.getLogger("GAIA.SleepTask.DocsMaintenance")
 SHARED_DIR = Path(os.getenv("SHARED_DIR", "/shared"))
 DRAFTS_DIR = SHARED_DIR / "docs_drafts"
 
+# lkqj: the same stale set is drafted again at most this often. It ran every
+# ~10 min (16,147 bundles by 2026-11-15), a model call per target each time,
+# and planted a fresh review seed each time.
+DRAFT_REPEAT_AFTER_S = 24 * 3600
+
 # Doctor dissonance endpoint
 DOCTOR_URL = os.getenv("DOCTOR_ENDPOINT", "http://gaia-doctor:6419")
 
@@ -137,6 +142,14 @@ def run_docs_maintenance(
             seen_targets.add(target)
             unique_stale.append(entry)
 
+    stale_targets = sorted(e.get("target", "unknown") for e in unique_stale)
+    recent = _recent_bundle_with(stale_targets)
+    if recent:
+        logger.info("DocsMaint: same %d stale docs as %s, not drafting again",
+                    len(stale_targets), recent)
+        return {"stale_files": stale_targets, "drafts": [], "skipped": "unchanged",
+                "summary": f"Same {len(stale_targets)} stale docs as {recent}"}
+
     for entry in unique_stale:
         if check_interrupted:
             check_interrupted()
@@ -163,6 +176,24 @@ def run_docs_maintenance(
     _plant_thought_seed(unique_stale, drafts)
 
     return bundle
+
+
+def _recent_bundle_with(stale_targets: List[str]) -> Optional[str]:
+    """Name of the latest draft bundle if it covers the same stale docs and is
+    younger than DRAFT_REPEAT_AFTER_S, else None (lkqj)."""
+    try:
+        bundles = sorted(DRAFTS_DIR.glob("docs_draft_*.json"))
+        if not bundles:
+            return None
+        latest = bundles[-1]
+        if time.time() - latest.stat().st_mtime > DRAFT_REPEAT_AFTER_S:
+            return None
+        prior = json.loads(latest.read_text(encoding="utf-8"))
+        if sorted(prior.get("stale_files", [])) == stale_targets:
+            return latest.name
+    except (OSError, ValueError):
+        pass
+    return None
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -497,8 +528,8 @@ def _plant_thought_seed(
     seed_text = (
         f"Documentation maintenance: {len(stale_entries)} stale docs detected. "
         f"Targets: {targets_text}. "
-        f"{len(drafts)} draft updates saved to /shared/docs_drafts/. "
-        f"Review and apply during next session."
+        f"{len(drafts)} draft updates saved to /shared/docs_drafts/ "
+        f"as suggestions for Azrael to review; the docs themselves are unchanged."
     )
 
     fname = f"seed_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S%f')}.json"

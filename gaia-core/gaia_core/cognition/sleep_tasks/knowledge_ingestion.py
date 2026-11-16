@@ -136,6 +136,7 @@ def run_knowledge_ingestion(
         _plant_thought_seed(
             total_pairs=total_pairs,
             pages_fetched=total_pages_fetched,
+            pages_read=sum(r.get("pages_read", 0) for r in results),
             course_titles=course_titles,
             results=results,
         )
@@ -271,6 +272,10 @@ def _process_course(
 
     # Deduplicate against existing training data
     all_pairs = deduplicate_against_existing(all_pairs, EXISTING_TRAIN_PATH)
+    # 8awy: and against pairs already queued for review, and table fragments.
+    # Re-reading the same cached pages queued the same 2 pairs hourly (367
+    # candidate files by 2026-11-15), each with a fresh review seed.
+    all_pairs = _drop_queued_and_fragments(all_pairs, candidate_dir)
 
     if check_interrupted:
         check_interrupted()
@@ -289,8 +294,9 @@ def _process_course(
         "course_id": course_id,
         "course_title": course_title,
         "pages_fetched": pages_fetched,
+        "pages_read": len(raw_texts),
         "pair_count": pair_count,
-        "status": "completed",
+        "status": "completed" if pair_count else "nothing_new",
     }
 
 
@@ -346,6 +352,40 @@ def _try_cfr_compression(
     return sections
 
 
+# ── Phase 4b: Already queued / fragment filter (8awy) ────────────────────────
+
+def _norm_instruction(pair: dict) -> str:
+    return " ".join(str(pair.get("instruction", "")).lower().split())
+
+
+def _drop_queued_and_fragments(pairs: List[dict], candidate_dir: Path) -> List[dict]:
+    """Pairs not already waiting in a candidate bundle, and whose question is
+    not a markdown table fragment ("What are the key concepts covered in
+    | LEC # | TOPICS AND NOTES |?")."""
+    queued = set()
+    try:
+        for bundle_path in candidate_dir.glob("*.json"):
+            try:
+                bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            for p in bundle.get("pairs", []):
+                queued.add(_norm_instruction(p))
+    except OSError:
+        pass
+    kept = []
+    for p in pairs:
+        key = _norm_instruction(p)
+        if "|" in key or key in queued:
+            continue
+        queued.add(key)
+        kept.append(p)
+    if len(kept) < len(pairs):
+        logger.info("KnowledgeIngestion: %d of %d pairs already queued or table fragments",
+                    len(pairs) - len(kept), len(pairs))
+    return kept
+
+
 # ── Phase 5: Candidate queuing ────────────────────────────────────────────────
 
 def _queue_candidates(
@@ -380,6 +420,7 @@ def _queue_candidates(
 def _plant_thought_seed(
     total_pairs: int,
     pages_fetched: int,
+    pages_read: int,
     course_titles: List[str],
     results: List[dict],
 ) -> None:
@@ -406,7 +447,7 @@ def _plant_thought_seed(
 
     seed_text = (
         f"Ingested {total_pairs} curriculum pairs from MIT OCW: {courses_text}. "
-        f"Fetched {pages_fetched} pages. "
+        f"Read {pages_read} pages ({pages_fetched} newly fetched). "
         f"Candidate pairs saved to {CANDIDATE_DIR}/. "
         f"Review and approve for next QLoRA training cycle."
     )
