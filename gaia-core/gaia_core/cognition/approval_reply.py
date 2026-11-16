@@ -110,4 +110,9 @@ def handle(session_manager, session_id: str, text: str, approve=None) -> Optiona
         # Wrong or stale code -- leave it parked so they can just retry.
         return f"That code didn't approve `{label}`: {r.get('error') or 'unknown error'}. Try again, or say cancel."
     _forget(session_manager, session_id)
-    return f"Approved. `{label}` ran:\n{_show(r.get('result'))}"
+    res = r.get("result")
+    if isinstance(res, dict) and res.get("approved") and res.get("ok") is False:
+        # The code was right; the tool itself failed. Retrying the code
+        # can't help: the approval is spent (96xm, 2026-11-16).
+        return f"Approved, but `{label}` failed: {res.get('error') or 'unknown error'}"
+    return f"Approved. `{label}` ran:\n{_show(res)}"

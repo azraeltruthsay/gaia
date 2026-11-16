@@ -413,6 +413,10 @@ def request_approval_via_mcp(method: str, params: Dict) -> Dict:
         except Exception:
             _hdrs = {}
         r = requests.post(url, json=payload, headers=_hdrs, timeout=10)
+        if r.status_code == 422:
+            # 96xm: the call couldn't run even if approved (a path outside the
+            # writable volumes, a blast-shield block); no human is asked.
+            return {"ok": False, "error": _body_error(r)}
         r.raise_for_status()
         data = r.json()
         # Include any human-friendly proposal text and timestamps if provided by server
@@ -439,6 +443,13 @@ def _signed(method: str, path: str) -> Dict[str, str]:
         return {}
 
 
+def _body_error(r) -> str:
+    try:
+        return str(r.json().get("error") or r.text)[:500]
+    except Exception:
+        return (r.text or f"HTTP {r.status_code}")[:500]
+
+
 def approve_action_via_mcp(action_id: str, approval: str) -> Dict:
     """Submit the human's current TOTP code to the MCP server to execute a
     pending action (GAIA_Project-96xm; `approval` used to be a
@@ -458,6 +469,8 @@ def approve_action_via_mcp(action_id: str, approval: str) -> Dict:
         # (the reflex list_files/list_tree, ai_write) failed with 401.
         r = requests.post(url, json={"action_id": action_id, "approval": approval},
                           headers=_signed("POST", "/approve_action"), timeout=10)
+        if r.status_code == 403:
+            return {"ok": False, "error": _body_error(r)}
         r.raise_for_status()
         return {"ok": True, "result": r.json()}
     except Exception as e:

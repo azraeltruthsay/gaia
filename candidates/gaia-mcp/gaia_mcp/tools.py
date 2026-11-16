@@ -519,14 +519,13 @@ def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict:
         raise
 
 
-def _write_file_impl(params: dict) -> dict:
-    """Write content to a file, restricted to writable data volumes and enforces Production Lock."""
-    path = params.get("path")
-    content = params.get("content", "")
+def _checked_write_path(path) -> Path:
+    """The resolved path `write_file` may write, or raises: Production Lock
+    and the writable-volume allowlist. Also run before asking a human to
+    approve a write (96xm), so an approval is never spent on a call that
+    can't run."""
     if not path:
         raise ValueError("path is required")
-
-    # Resolve to absolute path
     p = Path(path)
     if not p.is_absolute():
         p = Path("/sandbox") / p
@@ -538,7 +537,7 @@ def _write_file_impl(params: dict) -> dict:
     path_str = str(p)
     is_live_code = any(segment in path_str for segment in ["/gaia-core/", "/gaia-web/", "/gaia-mcp/", "/gaia-common/"])
     is_candidate = "/candidates/" in path_str
-    
+
     if is_live_code and not is_candidate:
         if os.getenv("BREAKGLASS_EMERGENCY") != "1":
             log_gaia_error(logger, "GAIA-MCP-030", f"Attempted write to live code path: {p}")
@@ -549,7 +548,7 @@ def _write_file_impl(params: dict) -> dict:
 
     # Allowlist: only the writable data volumes from docker-compose.yml
     allow_roots = [
-        Path("/knowledge").resolve(), 
+        Path("/knowledge").resolve(),
         Path("/sandbox").resolve(),
         Path("/gaia/GAIA_Project").resolve()
     ]
@@ -560,6 +559,34 @@ def _write_file_impl(params: dict) -> dict:
     real = p.resolve()
     if not any(str(real).startswith(str(a) + "/") or str(real) == str(a) for a in allow_roots):
         raise ValueError("Path not allowed after symlink resolution")
+    return real
+
+
+def preflight(method: str, params: Dict, approval_store: "ApprovalStore" = None):
+    """Why this call could not run even if approved, or None (96xm,
+    2026-11-16: a write to /approval_test.txt was approved with a real code,
+    then refused by the path allowlist, and the approval was spent)."""
+    params = dict(params or {})
+    try:
+        if method in DOMAIN_TOOLS and not DOMAIN_TOOLS[method].get("dynamic"):
+            action = params.pop("action", None)
+            if not action:
+                return f"Domain tool '{method}' requires an 'action' parameter."
+            method = validate_domain_call(method, action)
+        if approval_store is not None:
+            approval_store.validate_against_blast_shield(method, params)
+        if method == "write_file":
+            _checked_write_path(params.get("path"))
+    except (ValueError, PermissionError) as e:
+        return str(e)
+    return None
+
+
+def _write_file_impl(params: dict) -> dict:
+    """Write content to a file, restricted to writable data volumes and enforces Production Lock."""
+    path = params.get("path")
+    content = params.get("content", "")
+    real = _checked_write_path(path)
 
     # Create parent directories
     real.parent.mkdir(parents=True, exist_ok=True)

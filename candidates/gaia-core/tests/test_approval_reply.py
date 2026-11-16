@@ -113,3 +113,17 @@ def test_a_parked_file_from_another_process_is_answered(tmp_path, monkeypatch):
     assert seen == [("a-9", "482913")] and reply.startswith("Approved.")
     assert not list(tmp_path.iterdir())                       # used up
     assert ar.handle(s, "discord_dm_2", "482913") is None       # only for its session
+
+
+def test_approved_but_the_tool_failed_says_so_and_is_spent():
+    # 2026-11-16: the code was right, the write was refused by the path
+    # allowlist; that used to read as "That code didn't approve".
+    s = _parked()
+
+    def approve(action_id, code):
+        return {"ok": True, "result": {"ok": False, "approved": True, "method": "file",
+                                       "error": "Path not allowed"}}
+
+    reply = ar.handle(s, "dm1", "482913", approve=approve)
+    assert reply.startswith("Approved, but `shell(run)` failed: Path not allowed")
+    assert ar.handle(s, "dm1", "482913", approve=approve) is None

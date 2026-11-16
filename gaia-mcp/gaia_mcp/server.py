@@ -14,7 +14,7 @@ from gaia_common.config import Config
 from gaia_common.utils.gaia_rescue_helper import GAIARescueHelper
 from .approval import ApprovalStore
 from .notebooklm_tools import _close_client as _close_notebooklm_client
-from .tools import execute_limb, TOOLS, SENSITIVE_TOOLS
+from .tools import execute_limb, preflight, TOOLS, SENSITIVE_TOOLS
 from gaia_common.utils.domain_tools import DOMAIN_TOOLS
 
 import os
@@ -207,6 +207,13 @@ async def request_approval_endpoint(request: Request):
         if not method:
             raise HTTPException(status_code=400, detail="method is required")
 
+        # 0. Never ask a human to approve a call that couldn't run (96xm).
+        problem = preflight(method, params, approval_store)
+        if problem:
+            logger.info("Approval not requested for '%s': %s", method, problem)
+            return JSONResponse(content={"ok": False, "error": f"'{method}' can't run: {problem}"},
+                                status_code=422)
+
         # 1. Create a pending action
         allow_pending = bool(body.get("allow_pending", False))
         action_id, created_at, expiry = approval_store.create_pending(
@@ -264,12 +271,18 @@ async def approve_action_endpoint(request: Request):
 
         logger.info(f"✅ ACTION APPROVED: '{method}' (ID: {action_id})")
 
-        result = await execute_limb(
-            method=method,
-            params=params,
-            approval_store=approval_store,
-            pre_approved=True # Explicitly approved
-        )
+        # The code was right and the approval is spent: a failure from here
+        # on is the tool's, and must not read as a rejected code (96xm).
+        try:
+            result = await execute_limb(
+                method=method,
+                params=params,
+                approval_store=approval_store,
+                pre_approved=True # Explicitly approved
+            )
+        except Exception as e:
+            logger.warning(f"Approved action '{method}' (ID: {action_id}) failed: {e}")
+            return {"ok": False, "approved": True, "method": method, "error": str(e)}
 
         return {
             "ok": True,
