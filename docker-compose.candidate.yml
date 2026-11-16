@@ -85,6 +85,9 @@ services:
       - GAIA_CPP_MMPROJ=/models/core-mmproj.gguf
       - GAIA_CPP_IMAGE_TOKENS=280
       - GAIA_CPP_KV_TYPE_GPU=q8_0
+      # ojwf: a turn makes ~6 different Core calls; 2 LRU slots thrashed
+      # (1.5% reuse). ~180 KB/token on the 12B, so 6 slots stay well under 2 GB of RAM.
+      - GAIA_CPP_KV_SNAPSHOTS=6
       - GGUF_CTX_SIZE_GPU=8192
       - CORE_CPU_SLOT_SAVE_PATH=/shared/kvcache/core
       - SHARED_DIR=/shared
