@@ -529,6 +529,11 @@ def _checked_write_path(path) -> Path:
     p = Path(path)
     if not p.is_absolute():
         p = Path("/sandbox") / p
+    elif p.parent == Path("/"):
+        # diq7: "approval_test.txt in your sandbox" came through as
+        # /approval_test.txt. Nothing is writable at the root; a file named
+        # directly there means her sandbox.
+        p = Path("/sandbox") / p.name
     p = p.resolve()
 
     # --- PRODUCTION LOCK (Sovereign Shield) ---
@@ -553,7 +558,8 @@ def _checked_write_path(path) -> Path:
         Path("/gaia/GAIA_Project").resolve()
     ]
     if not any(str(p).startswith(str(a) + "/") or str(p) == str(a) for a in allow_roots):
-        raise ValueError(f"Path not allowed — write_file is restricted to: {[str(a) for a in allow_roots]}")
+        raise ValueError(f"Path not allowed — write_file is restricted to: {[str(a) for a in allow_roots]}"
+                         " (a bare file name goes in /sandbox)")
 
     # Re-check after resolve to prevent symlink traversal
     real = p.resolve()

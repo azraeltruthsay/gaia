@@ -10739,59 +10739,17 @@ Start your response with the first line of the file."""
             # Normalize tool names for SOA schema alignment
             canonical_name = tool.tool_name
 
-            # Short-circuit: domain file.write goes through the local writer.
-            # Going via MCP /jsonrpc would hit execute_limb's is_sensitive gate
-            # and 403, but mcp_client.ai_write() writes locally with the same
-            # path allowlist (/knowledge, /sandbox, /tmp, /shared, /logs) and
-            # auto-reindexes via _auto_reindex_kb_write — equivalent safety,
-            # works without the approval round-trip.
+            # diq7 (2026-11-16): file.write goes to gaia-mcp like every other
+            # domain tool and waits for the human's authenticator code. It used
+            # to write locally here with no approval, by different path rules
+            # (and /sandbox isn't mounted in this container), so the same
+            # request was approved in one path and silently refused in the other.
             if canonical_name == "file" and (tool.params or {}).get("action") == "write":
                 if not allow_write:
                     return ToolExecutionResult(
                         success=False,
                         error="Write operations are disabled. Set TOOL_ROUTING.ALLOW_WRITE_TOOLS=true to enable.",
                     )
-                target_path = (tool.params or {}).get("path", "")
-                content = (tool.params or {}).get("content", "")
-                kb_name = kb_approval.resolve_kb_name(target_path)
-
-                # KB writes require user trust — first write per session per KB
-                # parks a pending state and emits an approval prompt instead of
-                # executing. Confirmation arrives on the next user turn and is
-                # handled in _handle_pending_write_response.
-                if kb_name and session_id:
-                    session = self.session_manager.get_or_create_session(session_id)
-                    if not kb_approval.is_kb_trusted(session, kb_name):
-                        kb_approval.set_pending_write(
-                            session, "file", tool.params or {}, kb_name
-                        )
-                        self.session_manager._save_state()
-                        elapsed_ms = int((time.time() - start_time) * 1000)
-                        return ToolExecutionResult(
-                            success=True,
-                            output={
-                                "ok": True,
-                                "pending_approval": True,
-                                "kb_name": kb_name,
-                                "path": target_path,
-                                "bytes": len((content or "").encode("utf-8")),
-                                "message": kb_approval.build_approval_prompt(
-                                    kb_name, target_path, content
-                                ),
-                            },
-                            error=None,
-                            execution_time_ms=elapsed_ms,
-                        )
-
-                # mcp_client.ai_write is sync — no asyncio.run wrapper.
-                result = mcp_client.ai_write(target_path, content)
-                elapsed_ms = int((time.time() - start_time) * 1000)
-                return ToolExecutionResult(
-                    success=result.get("ok", False),
-                    output=result,
-                    error=result.get("error"),
-                    execution_time_ms=elapsed_ms,
-                )
 
             # Domain tools (file, shell, web, etc.) go directly through MCP
             # The MCP server's execute_limb handles domain→legacy routing

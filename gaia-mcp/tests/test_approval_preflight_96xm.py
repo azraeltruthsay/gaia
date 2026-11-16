@@ -13,9 +13,16 @@ from .conftest import totp_code
 
 
 def test_write_outside_the_volumes_fails_preflight(approval_store):
-    problem = preflight("file", {"action": "write", "path": "/approval_test.txt", "content": "hi"},
+    problem = preflight("file", {"action": "write", "path": "/opt/approval_test.txt", "content": "hi"},
                         approval_store)
-    assert problem and "restricted to" in problem
+    assert problem and "restricted to" in problem and "/sandbox" in problem
+
+
+def test_a_file_named_at_the_root_means_the_sandbox(approval_store):
+    # diq7: "approval_test.txt in your sandbox" came through as /approval_test.txt
+    from gaia_mcp.tools import _checked_write_path
+    assert str(_checked_write_path("/approval_test.txt")).endswith("/sandbox/approval_test.txt")
+    assert preflight("file", {"action": "write", "path": "/approval_test.txt"}, approval_store) is None
 
 
 def test_write_in_the_sandbox_passes_preflight(approval_store):
