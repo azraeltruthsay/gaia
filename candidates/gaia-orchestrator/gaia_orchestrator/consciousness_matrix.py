@@ -159,7 +159,8 @@ class ConsciousnessMatrix:
     def get_tier(self, tier: str) -> Optional[TierState]:
         return self._tiers.get(tier)
 
-    async def set_target(self, tier: str, level: ConsciousnessLevel) -> dict:
+    async def set_target(self, tier: str, level: ConsciousnessLevel,
+                         gpu_freed: Optional[asyncio.Event] = None) -> dict:
         """Set the target consciousness level for a tier.
 
         This doesn't immediately change the state — it sets the target
@@ -174,6 +175,8 @@ class ConsciousnessMatrix:
 
         # Only skip if target matches AND actual matches (truly at target)
         if old_target == level and state.actual == level:
+            if gpu_freed is not None:
+                gpu_freed.set()
             return {"ok": True, "message": "already at target", "tier": tier, "level": level.name}
 
         logger.info("Consciousness target: %s %s → %s (actual=%s)",
@@ -181,7 +184,7 @@ class ConsciousnessMatrix:
 
         # Execute the transition using ACTUAL state, not old target.
         # The old target may not reflect reality (e.g., load failed, worker crashed).
-        result = await self._transition_tier(tier, state.actual, level)
+        result = await self._transition_tier(tier, state.actual, level, gpu_freed=gpu_freed)
         return result
 
     async def probe_all(self) -> Dict[str, dict]:
@@ -348,13 +351,11 @@ class ConsciousnessMatrix:
         if sync_lifecycle:
             self._explicit_config_in_flight = config_name
         try:
-            for tier, level in targets.items():
-                # r2kn: nano is deprecated (socat alias → gaia-core:8092). Acting on
-                # it here posts /model/unload to Core's live engine mid-use — the
-                # same trap training() already sidesteps. Skip it everywhere.
-                if tier == "nano":
-                    continue
-                results[tier] = await self.set_target(tier, level)
+            # r2kn: nano is deprecated (socat alias → gaia-core:8092). Acting on
+            # it here posts /model/unload to Core's live engine mid-use — the
+            # same trap training() already sidesteps. Skip it everywhere.
+            todo = {t: lv for t, lv in targets.items() if t != "nano"}
+            results.update(await self._apply_targets(todo))
         finally:
             if sync_lifecycle and self._explicit_config_in_flight == config_name:
                 self._explicit_config_in_flight = None
@@ -380,6 +381,49 @@ class ConsciousnessMatrix:
         await self._notify_core_refresh_pool()
 
         return result
+
+    async def _apply_targets(self, todo: Dict[str, ConsciousnessLevel]) -> Dict[str, dict]:
+        """Move the tiers to their targets, the GPU handed over as soon as it's free.
+
+        Azrael, 2026-11-17: the gear 1 -> 2 shift took ~52 s before Prime could
+        answer, because it ran in order: Core off the GPU (1 s), Core's CPU
+        load (33 s), then Prime onto the GPU (15 s). Prime only needs the VRAM
+        Core frees in the first second. So a tier leaving the GPU unloads
+        first; once its VRAM is free, the tier taking the GPU loads while the
+        one leaving finishes loading on the CPU, in parallel (they're
+        separate engines). Prime answers in ~17 s; Core, the observer in
+        gear 2, finishes behind it. Shifts with no GPU handover run in order.
+        """
+        leaving = [t for t, lv in todo.items()
+                   if lv != ConsciousnessLevel.CONSCIOUS
+                   and self._tiers[t].actual == ConsciousnessLevel.CONSCIOUS]
+        taking = [t for t, lv in todo.items()
+                  if lv == ConsciousnessLevel.CONSCIOUS
+                  and self._tiers[t].actual != ConsciousnessLevel.CONSCIOUS]
+        if not leaving or not taking:
+            return {t: await self.set_target(t, lv) for t, lv in todo.items()}
+
+        results: Dict[str, dict] = {}
+        freed = {t: asyncio.Event() for t in leaving}
+        tasks = {t: asyncio.create_task(self.set_target(t, todo[t], gpu_freed=freed[t]))
+                 for t in leaving}
+        for t in leaving:
+            await freed[t].wait()
+        stalled = [t for t in leaving if self._tiers[t].actual == ConsciousnessLevel.CONSCIOUS]
+        for t in todo:
+            if t in leaving:
+                continue
+            if t in taking and stalled:
+                # The GPU wasn't given up (a busy drain, a failed unload): loading
+                # another mind onto it now would break the single-holder rule.
+                results[t] = {"ok": False, "tier": t,
+                              "error": f"GPU still held by {', '.join(stalled)}; not loading {t}"}
+                continue
+            logger.info("Consciousness: %s takes the GPU while %s loads on CPU", t, ", ".join(leaving))
+            results[t] = await self.set_target(t, todo[t])
+        for t in leaving:
+            results[t] = await tasks[t]
+        return results
 
     @property
     def explicit_config_in_flight(self) -> Optional[str]:
@@ -533,7 +577,8 @@ class ConsciousnessMatrix:
     # ── Internal: State Transitions ───────────────────────────────────
 
     async def _transition_tier(
-        self, tier: str, from_level: ConsciousnessLevel, to_level: ConsciousnessLevel
+        self, tier: str, from_level: ConsciousnessLevel, to_level: ConsciousnessLevel,
+        gpu_freed: Optional[asyncio.Event] = None,
     ) -> dict:
         """Execute a consciousness state transition for a single tier, one at a
         time per tier.
@@ -553,13 +598,19 @@ class ConsciousnessMatrix:
         lock = self._tier_locks.setdefault(tier, asyncio.Lock())
         if lock.locked():
             logger.info("Consciousness: %s transition already in flight — waiting for it", tier)
-        async with lock:
-            return await self._run_transition(tier, from_level, to_level)
+        try:
+            async with lock:
+                return await self._run_transition(tier, from_level, to_level, gpu_freed)
+        finally:
+            if gpu_freed is not None:
+                gpu_freed.set()   # however it ended, nobody waits on it forever
 
     async def _run_transition(
-        self, tier: str, from_level: ConsciousnessLevel, to_level: ConsciousnessLevel
+        self, tier: str, from_level: ConsciousnessLevel, to_level: ConsciousnessLevel,
+        gpu_freed: Optional[asyncio.Event] = None,
     ) -> dict:
-        """The transition itself; callers go through _transition_tier."""
+        """The transition itself; callers go through _transition_tier.
+        gpu_freed is set once this tier has given up the GPU (_apply_targets)."""
         state = self._tiers[tier]
         endpoint = self._endpoints[tier]
         state.transitioning = True
@@ -587,6 +638,10 @@ class ConsciousnessMatrix:
                             return unload_result
                         logger.warning("Unload %s before CPU load returned: %s", tier, unload_result)
                     await self._wait_for_manager_ready(tier, endpoint)
+                if gpu_freed is not None and state.actual != ConsciousnessLevel.CONSCIOUS:
+                    # Off the GPU. (If the unload failed, the swap below still
+                    # replaces the GPU worker; the waiter is released after it.)
+                    gpu_freed.set()
                 result = await self._load_tier_cpu(tier, endpoint, state)
                 # Neural Handoff: replay captured context into the CPU backend
                 if result.get("ok") and handoff_context is not None:

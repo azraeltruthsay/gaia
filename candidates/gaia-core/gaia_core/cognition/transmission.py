@@ -7,8 +7,9 @@ correction — shift up so Prime speaks. Shift back after Prime has gone five
 turns without a correction, but not before it has had ten minutes. The intent
 trigger stays for the obvious cases (deep focus).
 
-Measured 2026-11-17: gear 1 -> 2 takes ~52 s until Prime answers from the GPU,
-2 -> 1 ~30 s. The shift starts right after the reply that drew the second
+Measured 2026-11-17: gear 1 -> 2 took ~52 s until Prime answered from the GPU;
+with the GPU handed over as soon as it's free (consciousness_matrix
+_apply_targets) it's ~24 s, and 2 -> 1 puts Core on the GPU in ~15 s. The shift starts right after the reply that drew the second
 correction, so it happens while the person reads and writes back.
 
 Only acts when the resting gear is gear 1 (awake), and only shifts down what
