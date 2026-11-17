@@ -267,3 +267,41 @@ def get_persona_for_request(
     default_persona = "dev"
     default_kb = get_knowledge_base_for_persona(default_persona)
     return default_persona, default_kb
+
+
+# 2026-11-17: in a campaign conversation, "There are native humanoids all over
+# the place... the nation is called Llasak" names no D&D keyword and scores
+# under the classifier's threshold, so the persona fell back to "dev" one turn
+# after "D&D" picked the campaign one. Once a knowledge-base persona is chosen
+# in a session it stays for STICKY_PERSONA_MINUTES on any message whose top
+# label (at any score) is still that persona. A miss doesn't end it; time does.
+STICKY_PERSONA_MINUTES = 120
+
+
+def sticky_persona(prev, user_input: str, embed_model=None, config=None, now=None):
+    """(persona, kb) to keep from ``prev`` = {"persona", "kb", "at"}, or None."""
+    from datetime import datetime, timezone
+    if not prev or not prev.get("persona") or not prev.get("kb") or embed_model is None:
+        return None
+    now = now or datetime.now(timezone.utc)
+    try:
+        at = datetime.fromisoformat(prev["at"])
+    except Exception:
+        return None
+    if (now - at).total_seconds() > STICKY_PERSONA_MINUTES * 60:
+        return None
+    try:
+        from gaia_core.cognition.nlu.embed_persona_classifier import EmbedPersonaClassifier
+        clf = EmbedPersonaClassifier.instance()
+        if not clf.ready:
+            cfg = {}
+            if config is not None:
+                cfg = (config.constants if hasattr(config, "constants") else config).get("EMBED_PERSONA", {}) or {}
+            clf.initialise(embed_model, config=cfg)
+        if not clf.ready:
+            return None
+        label, _score = clf.classify(asking_text(user_input), confidence_threshold=0.0)
+    except Exception:
+        logger.debug("sticky persona check failed", exc_info=True)
+        return None
+    return (prev["persona"], prev["kb"]) if label == prev["persona"] else None

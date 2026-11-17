@@ -1020,6 +1020,67 @@ def is_recent_recall(text: str) -> bool:
     return bool(stripped) and len(stripped) <= 200 and bool(_RECENT_RECALL_RE.search(stripped))
 
 
+# 2026-11-17: names the person made up are theirs, not the web's. "The nation
+# is called Llasak and the capital city is called Leshen. The ruling family
+# are the Neraly family." searched the web for all three; "Leshen" is a
+# monster in The Witcher.
+_NAME_WORD = r"[A-Z][A-Za-z'\-]+"
+_INTRODUCED_RES = (
+    re.compile(rf"\b(?:called|named|known as|name is|named it)\s+(?:the\s+)?({_NAME_WORD}(?:\s+{_NAME_WORD})*)"),
+    re.compile(rf"\b(?:the\s+)?({_NAME_WORD})\s+(?:family|house|clan|dynasty|tribe|kingdom|empire|"
+               rf"family's|order|guild|cult|bloodline)\b"),
+    re.compile(rf"\b(?:House|Clan|Lord|Lady|King|Queen|Count|Countess|Baron|Duke)\s+({_NAME_WORD})"),
+)
+_NOT_OWN = frozenset({"The", "A", "An", "I", "GAIA", "Gaia", "My", "Our", "This", "That"})
+
+
+def names_introduced(text: str) -> List[str]:
+    """Names the speaker introduces as theirs: "is called Llasak", "the Neraly
+    family", "House Neraly"."""
+    names: List[str] = []
+    for rx in _INTRODUCED_RES:
+        for m in rx.finditer(text or ""):
+            for word in m.group(1).split():
+                if word not in _NOT_OWN and word not in names:
+                    names.append(word)
+    return names
+
+
+def own_names(history, text: str = "") -> List[str]:
+    """Every name the person introduced in this conversation, and in ``text``."""
+    names: List[str] = []
+    turns = [h.get("content") or "" for h in history or []
+             if isinstance(h, dict) and h.get("role") == "user"] + [text]
+    for turn in turns:
+        for n in names_introduced(turn):
+            if n not in names:
+                names.append(n)
+    return names
+
+
+def _name_key(name: str) -> str:
+    k = (name or "").strip().lower()
+    for suffix in ("'s", "s'", "es", "s"):
+        if k.endswith(suffix) and len(k) - len(suffix) >= 3:
+            return k[: -len(suffix)]
+    return k
+
+
+def is_own_name(phrase: str, names) -> bool:
+    """True when every capitalized word of ``phrase`` is one of ``names``
+    (plural and possessive forms count: "Neralys" is "Neraly")."""
+    keys = {_name_key(n) for n in names or ()}
+    words = [w for w in re.findall(r"[A-Za-z'\-]+", phrase or "")
+             if w[:1].isupper() and w not in _NOT_OWN]   # "The Neralys" is theirs
+    return bool(words) and bool(keys) and all(_name_key(w) in keys for w in words)
+
+
+def mentions_own_name(text: str, names) -> bool:
+    keys = {_name_key(n) for n in names or ()}
+    return bool(keys) and any(_name_key(w) in keys for w in re.findall(r"[A-Za-z'\-]+", text or "")
+                              if w[:1].isupper())
+
+
 def conversation_topic(text: str) -> str:
     """What a conversation-recall question asks about, with the recall
     phrasing removed: "What did we talk about regarding the memory palace?"

@@ -1009,6 +1009,7 @@ def run_semantic_probe(
     knowledge_bases: Dict[str, dict],
     session_id: str = "",
     top_k_per_phrase: int = _PROBE_CFG.get("top_k_per_phrase", 3),
+    own_names=(),
 ) -> SemanticProbeResult:
     """
     Top-level entry point: extract phrases, probe collections, return results.
@@ -1080,6 +1081,14 @@ def run_semantic_probe(
     # no vector hits), trigger a lightweight web search to surface candidates.
     # Only fires for proper-noun-like phrases that look like specific concepts.
     ungrounded = _find_ungrounded_entities(phrases, cil_hits, result)
+    # Names the person made up in this conversation ("the nation is called
+    # Llasak") aren't on the web; searching found other things by that name.
+    if ungrounded and own_names:
+        from gaia_core.cognition.nlu.intent_detection import is_own_name
+        _theirs = [e for e in ungrounded if is_own_name(e, own_names)]
+        if _theirs:
+            logger.info("SemanticProbe: not searching the web for their own names: %s", _theirs)
+            ungrounded = [e for e in ungrounded if e not in _theirs]
     if ungrounded:
         web_results = _web_search_fallback(ungrounded)
         if web_results:

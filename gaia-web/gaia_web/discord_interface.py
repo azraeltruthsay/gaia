@@ -840,8 +840,13 @@ class DiscordInterface:
                                         # Accumulate Operator/Thinker tokens to send as a block
                                         full_response += val
                             
-                            elif event_type == "flush":
-                                # Flush current buffer immediately
+                            elif event_type in ("flush", "reply_done"):
+                                # Flush current buffer immediately. reply_done:
+                                # her reply is complete and the other mind now
+                                # reads it (up to ~30 s on the CPU); its
+                                # follow-up, if any, comes as its own message.
+                                # Waiting for the stream to close held every
+                                # Discord reply until then (2026-11-17).
                                 if full_response.strip():
                                     _sent_responses.add(full_response.strip())
                                     _voiced = await self._apply_voice_gate(full_response.strip())

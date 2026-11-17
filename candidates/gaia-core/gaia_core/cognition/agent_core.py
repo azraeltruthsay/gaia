@@ -1721,12 +1721,19 @@ class AgentCore:
             # user input, probes all vector collections, and uses hits to drive
             # persona/KB selection (context-driven rather than keyword-gated).
             probe_result = None
+            _own_names: List[str] = []
             try:
                 kb_config = self.config.constants.get("KNOWLEDGE_BASES", {})
+                try:
+                    from gaia_core.cognition.nlu.intent_detection import own_names as _own_names_of
+                    _own_names = _own_names_of(self.session_manager.get_history(session_id), user_input)
+                except Exception:
+                    _own_names = []
                 probe_result = run_semantic_probe(
                     user_input=user_input,
                     knowledge_bases=kb_config,
                     session_id=session_id,
+                    own_names=_own_names,
                 )
                 if probe_result and probe_result.has_hits:
                     logger.info(
@@ -1929,8 +1936,12 @@ class AgentCore:
                     entities = extract_entities_neural(user_input, max_entities=_max_ents)
                     if entities:
                         from gaia_core.cognition.knowledge_router import _about_the_user
+                        # Their own made-up names: KG and vector, never the web.
+                        from gaia_core.cognition.nlu.intent_detection import is_own_name
+                        _external = not _about_the_user(user_input) and not all(
+                            is_own_name(str(e), _own_names) for e in entities)
                         _grounding_context = self._run_grounding_probes(
-                            entities, session_id, external=not _about_the_user(user_input))
+                            entities, session_id, external=_external)
                         _g_elapsed = (_gt.perf_counter() - _g0) * 1000
                         logger.info("Stage 0 Grounding: %d entities → %d grounded (%.0fms)",
                                     len(entities), len(_grounding_context), _g_elapsed)
@@ -1978,6 +1989,26 @@ class AgentCore:
                     "Persona selection (keyword/embed fallback): persona=%s, kb=%s",
                     persona_name, knowledge_base_name,
                 )
+                if not knowledge_base_name:
+                    try:
+                        from gaia_core.behavior.persona_switcher import sticky_persona
+                        _kept = sticky_persona(
+                            self.session_manager.get_session_meta(session_id, "kb_persona"),
+                            user_input, embed_model=_persona_embed, config=self.config)
+                        if _kept:
+                            persona_name, knowledge_base_name = _kept
+                            logger.info("Persona kept from this conversation: persona=%s, kb=%s",
+                                        persona_name, knowledge_base_name)
+                    except Exception:
+                        logger.debug("sticky persona lookup failed", exc_info=True)
+            if knowledge_base_name and persona_name and persona_name != "dev":
+                try:
+                    from datetime import datetime as _dt_p, timezone as _tz_p
+                    self.session_manager.set_session_meta(session_id, "kb_persona", {
+                        "persona": persona_name, "kb": knowledge_base_name,
+                        "at": _dt_p.now(_tz_p.utc).isoformat()})
+                except Exception:
+                    logger.debug("could not note the kb persona", exc_info=True)
     
             # 0. Emergency Healing Mode (The "Immune Response")
             # If the Immune System detects a CRITICAL failure (like a SyntaxError), 
@@ -2287,6 +2318,16 @@ class AgentCore:
             _force_escalate = (
                 (knowledge_base_name and not is_trivial) or _is_roleplay_invite
             )
+            # 2026-11-17: the escalation was for the 4B Core, which couldn't
+            # follow a persona + knowledge-base prompt. The 12B Core on the GPU
+            # can, and Prime on the CPU read the D&D persona's 8.5k-token
+            # prompt in 61 s. Only send it to Prime when Prime holds the GPU.
+            if _force_escalate and _gpu_sleeping:
+                logger.info(
+                    "[MODEL_SELECT] persona/kb turn stays with the mind on the GPU "
+                    "(kb=%s, roleplay_invite=%s): Prime is on the CPU",
+                    knowledge_base_name, _is_roleplay_invite)
+                _force_escalate = False
             if not selected_model_name and _force_escalate:
                 _reason = "RAG-enabled persona" if knowledge_base_name else "explicit role-play invitation"
                 logger.info(
@@ -3741,12 +3782,27 @@ class AgentCore:
                     _memory_answer = _grounding_ctx is not None
                 else:
                     from gaia_core.cognition.knowledge_router import ground_query
+                    # 2026-11-17: their own world isn't on the web. A message
+                    # naming what they made up ("Llasak", "the Neraly family"),
+                    # or telling (not asking) inside a knowledge-base persona
+                    # ("it's set in a wasteland ruled by vampires"), searches
+                    # their knowledge base and her memory, not the web.
+                    _theirs_not_the_webs = False
+                    try:
+                        from gaia_core.cognition.nlu.intent_detection import mentions_own_name, own_names
+                        _theirs_not_the_webs = (
+                            mentions_own_name(user_input, own_names(history, user_input))
+                            or (bool(knowledge_base_name) and "?" not in (user_input or "")))
+                        if _theirs_not_the_webs:
+                            logger.info("KnowledgeRouter: no web — their own world (kb=%s)", knowledge_base_name)
+                    except Exception:
+                        logger.debug("own-world check failed", exc_info=True)
                     logger.info("KnowledgeRouter: calling ground_query for '%s' (intent=%s)", user_input[:50], plan.intent if plan else "?")
                     _grounding_ctx = ground_query(
                         query=user_input,
                         intent=plan.intent if plan else "other",
                         # gwrg: a third search of the same question added nothing
-                        skip_web=_web_pre_executed,
+                        skip_web=_web_pre_executed or _theirs_not_the_webs,
                     )
                 outcome_ledger.record_lookup(
                     session_id, packet.header.packet_id,
@@ -8124,8 +8180,8 @@ RESULT: COMPLEX (reason: <brief reason>)
         opinion = asks_opinion(user_input)
         whole = wants_whole(user_input) or (opinion and not asked_articles(user_input))
         part = content[:WHOLE_DOC_CHARS] if whole else excerpt_for(content, user_input, limit=7000)
-        from gaia_common.utils.founding_docs import AUTHORSHIP
-        part = f"{AUTHORSHIP}\n\n{part}"
+        from gaia_common.utils.founding_docs import authorship_for
+        part = f"{authorship_for(path)}\n\n{part}"
         if not hasattr(self, "_docs_read"):
             self._docs_read = {}
         self._docs_read[session_id] = named
@@ -10366,10 +10422,17 @@ Start your response with the first line of the file."""
         else:
             logger.info(f"Tool routing: reviewing selection {primary_tool.tool_name}")
 
-            # Use Prime model for review if available
+            # The mind on the GPU reviews. Prime on the CPU queues behind the
+            # second mind's audits of earlier turns: a 70-token review waited
+            # 30 s (2026-11-17).
             review_model = None
             review_model_name = None
-            for cand in ["prime", "core", "cpu_prime"]:
+            try:
+                _review_order = (["prime", "core", "cpu_prime"] if self._is_prime_available
+                                 else ["core", "prime", "cpu_prime"])
+            except Exception:
+                _review_order = ["core", "prime", "cpu_prime"]
+            for cand in _review_order:
                 try:
                     review_model = self.model_pool.acquire_model(cand)
                     if review_model is not None:
@@ -10997,8 +11060,16 @@ Start your response with the first line of the file."""
             "save the following to",
         ]
 
+        # 2026-11-17: "stories of ghouls in the hills" matched "ls " and sent a
+        # campaign note through tool selection (worldbuild, an approval prompt,
+        # 36 s). An indicator that starts with a letter must start a word.
+        def _has(ind: str) -> bool:
+            if not ind[:1].isalpha():
+                return ind in lowered
+            return re.search(r"(?<![a-z0-9_'])" + re.escape(ind), lowered) is not None
+
         for indicator in file_indicators + exec_indicators + search_indicators + web_indicators + explicit_tool_indicators + knowledge_save_indicators:
-            if indicator in lowered:
+            if _has(indicator):
                 logger.debug(f"Tool routing triggered by indicator: '{indicator}'")
                 return True
 

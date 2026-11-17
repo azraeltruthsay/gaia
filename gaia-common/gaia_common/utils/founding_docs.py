@@ -1,4 +1,5 @@
 """Her founding documents, by the names she'd be asked about them (g47g)."""
+import os
 import re
 from typing import Optional, Tuple
 
@@ -70,9 +71,37 @@ def named_document(text: str) -> Optional[Tuple[str, str]]:
     return _named_in(text)
 
 
+# 2026-11-17: "What do you think of your recent dev journal?" was answered
+# from nothing ("Sometimes I describe a cycle as 'successful'..."): the
+# journals were never read, and her /knowledge/Dev_Notebook is an April copy.
+DEV_NOTEBOOK_DIR = os.environ.get("DEV_NOTEBOOK_DIR", "/gaia/GAIA_Project/knowledge/Dev_Notebook")
+_DEV_JOURNAL_RE = re.compile(r"\bdev(?:elopment)?\s+(?:journal|notebook|notes|log)s?\b", re.IGNORECASE)
+DEV_JOURNAL_AUTHORSHIP = ("(Written by Claude, the engineer who works on your code with Azrael, "
+                          "about the changes made to you since the journal before it.)")
+
+
+def latest_dev_journal(directory: str = "") -> Optional[Tuple[str, str]]:
+    """(path, title) of the newest dev journal, by the date its name starts with."""
+    d = directory or DEV_NOTEBOOK_DIR
+    try:
+        names = sorted(n for n in os.listdir(d)
+                       if re.match(r"\d{4}-\d{2}-\d{2}_.*dev_journal.*\.md$", n))
+    except OSError:
+        return None
+    if not names:
+        return None
+    return f"{d}/{names[-1]}", f"your latest dev journal ({names[-1][:10]})"
+
+
+def authorship_for(path: str) -> str:
+    return DEV_JOURNAL_AUTHORSHIP if "/Dev_Notebook/" in (path or "") else AUTHORSHIP
+
+
 def _named_in(text: str) -> Optional[Tuple[str, str]]:
     if _SOMEONE_ELSES_RE.search(text):
         return None
+    if _DEV_JOURNAL_RE.search(text) and (_HERS_RE.search(text) or "gaia" in text.lower()):
+        return latest_dev_journal()
     for pattern, filename, title in _NAMED:
         if re.search(pattern, text, re.IGNORECASE) and (_HERS_RE.search(text) or "gaia" in text.lower()):
             return f"{DOCS_DIR}/{filename}", title
