@@ -1985,10 +1985,15 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 tool_params["_asker"] = _who["id"]
                                 tool_params["_told_by"] = {**_who, "why": "she chose to keep it"}
                                 tool_params.pop("_by", None)
-                            rpc_result = await loop.run_in_executor(None, lambda: call_jsonrpc(
-                                method=tc.tool_name,
-                                params=tool_params,
-                            ))
+                            # The executor thread has no turn set; what's decided from the
+                            # session (campaign_scope's DM view) needs it there.
+                            def _call_in_turn():
+                                set_turn(session_id, _turn_id)
+                                try:
+                                    return call_jsonrpc(method=tc.tool_name, params=tool_params)
+                                finally:
+                                    clear_turn()
+                            rpc_result = await loop.run_in_executor(None, _call_in_turn)
                         # The allowlist above only works when the packet carries
                         # one (Discord's don't); MCP saying the tool doesn't exist
                         # is the same finding, and her reply then goes out as she

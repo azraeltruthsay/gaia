@@ -83,6 +83,8 @@ def _call_jsonrpc(method: str, params: Dict, endpoint: str = None, timeout: int 
     ep = _normalize_endpoint(ep_raw)
     if not ep:
         return {"ok": False, "error": "MCP endpoint not configured"}
+    from gaia_core.cognition.campaign_scope import scope as _campaign_scope
+    params = _campaign_scope(method, params)   # DM-only campaign entries: decided by code
     payload = {"jsonrpc": "2.0", "method": method, "params": params or {}, "id": datetime.now(timezone.utc).isoformat()}
     try:
         r = requests.post(ep, json=payload, timeout=timeout)
@@ -215,6 +217,9 @@ def dispatch_sidecar_limbs(packet: "CognitionPacket", config: "Config") -> List[
                 rpc_params["token_options"] = token_opts
             else:
                 logger.warning(f"[{datetime.now(timezone.utc).isoformat()}] Ignoring non-dict token_options for request {request_id}")
+        from gaia_core.cognition.campaign_scope import scope as _campaign_scope
+        rpc_params = _campaign_scope(action.action_type, rpc_params,
+                                     getattr(getattr(packet, "header", None), "session_id", None) or None)
 
         payload = {
             "jsonrpc": "2.0",

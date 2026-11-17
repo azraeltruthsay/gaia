@@ -724,7 +724,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                 "and hands you the result next turn. Worked example:\n"
                 "  User: What's in my D&D campaign?\n"
                 "  You: Let me pull that from the campaign knowledge base.\n"
-                "  <tool_call>{\"tool\": \"kanka\", \"action\": \"kanka_list_campaigns\"}</tool_call>\n"
+                "  <tool_call>{\"tool\": \"worldbuild\", \"action\": \"search\", \"query\": \"Leshen\"}</tool_call>\n"
                 "Never invent file contents, campaign details, or search results — "
                 "call the tool instead. Use only actions from the tool catalog."
             )

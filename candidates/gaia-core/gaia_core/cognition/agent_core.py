@@ -1748,6 +1748,12 @@ class AgentCore:
                     _own_names = _own_names_of(self.session_manager.get_history(session_id), user_input)
                 except Exception:
                     _own_names = []
+                try:
+                    # Names of entries in the D&D campaign are theirs too: not the web's.
+                    from gaia_core.cognition.campaign_scope import campaign_names_in
+                    _own_names += [n for n in campaign_names_in(user_input) if n not in _own_names]
+                except Exception:
+                    logger.debug("campaign names skipped", exc_info=True)
                 probe_result = run_semantic_probe(
                     user_input=user_input,
                     knowledge_bases=kb_config,
@@ -3534,20 +3540,77 @@ class AgentCore:
                 except Exception as _web_err:
                     logger.warning("Deterministic web search failed: %s", _web_err)
 
+            # A campaign entry named in the message is looked up in the campaign
+            # (Kanka), not left to tool choice: asked "What is Leshen, in the
+            # campaign?" no tool was chosen and she invented a Fey Pact familiar
+            # (2026-11-17). Requests to change an entry still go to routing.
+            _campaign_pre_executed = False
+            _campaign_change = False   # names an entry and asks to change it: routing, always
+            if not _web_pre_executed and not _lookup_recalled:
+                try:
+                    from gaia_core.cognition import campaign_scope as _cs
+                    _entries = _cs.campaign_entries_in(user_input)
+                    _campaign_change = bool(_entries) and _cs.asks_for_change(user_input)
+                    if _entries and not _campaign_change:
+                        _wb_params = {"action": "search", "query": _entries[0]}
+                        _wb = mcp_client.call_jsonrpc("worldbuild", dict(_wb_params))
+                        _wb_out = ((_wb.get("response") or {}).get("result") if _wb.get("ok") else None)
+                        packet.content.data_fields.append(DataField(
+                            key="tool_result",
+                            value={"tool": "worldbuild", "params": _wb_params, "success": bool(_wb_out),
+                                   "output": _wb_out, "error": None if _wb_out else _wb.get("error")},
+                            type="tool_execution_result", source="campaign_lookup"))
+                        _campaign_pre_executed = True
+                        logger.info("Campaign lookup pre-executed for %r (ok=%s)", _entries[0], bool(_wb_out))
+                        outcome_ledger.record(
+                            "tool_execution", session_id, packet.header.packet_id,
+                            path="pre", tool="worldbuild", action="search", param_keys=["query"],
+                            ok=bool(_wb_out))
+                except Exception:
+                    logger.warning("Campaign lookup failed (non-blocking)", exc_info=True)
+
             # gwrg: the pre-executed search already answered the tool need; a
             # routing pass would run the same search a second time.
-            if _web_pre_executed:
+            if _campaign_pre_executed:
+                logger.info("Tool routing skipped: campaign entry already looked up")
+            elif _web_pre_executed:
                 logger.info("Tool routing skipped: web search already pre-executed this turn")
             elif _lookup_recalled:
                 logger.info("Tool routing skipped: answering from the earlier search")
-            elif self._should_use_tool_routing(plan, user_input):
-                logger.info(f"Tool routing triggered for intent: {plan.intent}")
+            elif _campaign_change or self._should_use_tool_routing(plan, user_input):
+                # A change to a campaign entry, asked in "chat" intent, got a
+                # prompt with no tools and she copied her last reply (2026-11-17).
+                logger.info(f"Tool routing triggered for intent: {plan.intent}"
+                            + (" (campaign change)" if _campaign_change else ""))
+                _forced = None
+                if _campaign_change:
+                    _cm_name = None
+                    try:
+                        for _cand in ("core", "prime", "cpu_prime"):
+                            _cm = self.model_pool.acquire_model(_cand)
+                            if _cm is not None:
+                                _cm_name = _cand
+                                break
+                        _cp = _cs.change_params(_cm if _cm_name else None, user_input, _entries)
+                        if _cp:
+                            _forced = SelectedTool(tool_name="worldbuild", params=_cp,
+                                                   selection_reasoning="campaign change named in the request",
+                                                   selection_confidence=0.95)
+                    except Exception:
+                        logger.debug("campaign change params failed", exc_info=True)
+                    finally:
+                        if _cm_name:
+                            try:
+                                self.model_pool.release_model(_cm_name)
+                            except Exception:
+                                pass
                 packet = self._run_tool_routing_loop(
                     packet=packet,
                     user_input=user_input,
                     session_id=session_id,
                     source=source,
-                    metadata=_metadata
+                    metadata=_metadata,
+                    forced_tool=_forced,
                 )
 
                 # KB write parked for approval — yield the prompt verbatim and
@@ -3627,9 +3690,12 @@ class AgentCore:
             # planning/reflector stack. Uses minimal identity + MCP summary + user input.
             # Skip slim prompt when tool routing already executed — tool results need the
             # full ExternalVoice pipeline to be properly incorporated into the response.
-            tool_already_executed = (
-                packet.tool_routing
-                and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED
+            tool_already_executed = bool(
+                (packet.tool_routing
+                 and packet.tool_routing.execution_status == ToolExecutionStatus.EXECUTED)
+                # The campaign lookup's result lives in the packet the same way;
+                # the slim path never reads it (she invented Leshen, 2026-11-17).
+                or _campaign_pre_executed
             )
 
             # ── Knowledge Router: unified retrieval BEFORE any generation ──
@@ -10347,7 +10413,8 @@ Start your response with the first line of the file."""
         user_input: str,
         session_id: str = "",
         source: str = "cli",
-        metadata: dict = None
+        metadata: dict = None,
+        forced_tool: Optional[SelectedTool] = None,
     ) -> CognitionPacket:
         """
         Execute the tool routing loop for packets that need MCP tools.
@@ -10413,12 +10480,18 @@ Start your response with the first line of the file."""
             return packet
 
         try:
-            primary_tool, alternatives = select_tool(
-                packet=packet,
-                user_input=user_input,
-                model=selection_model,
-                temperature=selection_temp
-            )
+            if forced_tool is not None:
+                # Chosen by code (a campaign change): no general selection.
+                primary_tool, alternatives = forced_tool, []
+                logger.info("Tool routing: %s chosen by code, params=%s", forced_tool.tool_name,
+                            json.dumps(forced_tool.params, default=str)[:300])
+            else:
+                primary_tool, alternatives = select_tool(
+                    packet=packet,
+                    user_input=user_input,
+                    model=selection_model,
+                    temperature=selection_temp
+                )
         finally:
             if selection_model_name:
                 try:

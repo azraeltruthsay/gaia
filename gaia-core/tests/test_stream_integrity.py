@@ -2,6 +2,14 @@ import pytest
 from unittest.mock import MagicMock, patch
 from gaia_core.cognition.agent_core import AgentCore
 
+
+@pytest.fixture(autouse=True)
+def _pin_backend(monkeypatch):
+    """The mock pool holds gpu_prime. Production runs GAIA_BACKEND=auto, which
+    follows the live gear: parked or awake, it picked Core, absent from the
+    mock pool, and the test failed or passed with GAIA's state (2026-11-17)."""
+    monkeypatch.setenv("GAIA_BACKEND", "gpu_prime")
+
 @pytest.fixture
 def mock_agent_core():
     class MockConfig:

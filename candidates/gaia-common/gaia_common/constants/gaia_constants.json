@@ -551,23 +551,7 @@
     },
     "fetch_timeout_seconds": 15,
     "fetch_max_bytes": 512000,
-    "authenticated_domains": {
-      "kanka.io": {
-        "api_key_env": "KANKA_API_KEY",
-        "auth_header": "Authorization",
-        "auth_format": "Bearer {key}",
-        "url_rewrites": [
-          {
-            "match": "^https://app\\.kanka\\.io/w/(\\d+)/([\\w-]+)/(\\d+)",
-            "replace": "https://api.kanka.io/1.0/campaigns/{1}/{2}/{3}"
-          }
-        ],
-        "extra_headers": {
-          "Accept": "application/json"
-        },
-        "description": "Kanka.io world-building API"
-      }
-    }
+    "authenticated_domains": {}
   },
   "AUDIO_COMMENTARY": {
     "enabled": true,

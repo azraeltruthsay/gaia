@@ -678,7 +678,8 @@ If NO tool is appropriate, set selected_tool to empty string:
                 selection_confidence=0.0
             ))
 
-        logger.info(f"Tool selected: {primary.tool_name} (confidence={primary.selection_confidence})")
+        logger.info(f"Tool selected: {primary.tool_name} (confidence={primary.selection_confidence}) "
+                    f"params={json.dumps(primary.params, default=str)[:300]}")
         _ledger(packet, path="llm", parsed=True, valid=True, tool=primary.tool_name,
                 param_keys=outcome_ledger.param_keys(raw_params),
                 confidence=primary.selection_confidence,
@@ -782,7 +783,8 @@ Respond with JSON:
         if not review.get("approved", False):
             confidence = min(confidence, 0.5)  # Cap confidence if not approved
 
-        logger.info(f"Tool review: approved={review.get('approved')}, confidence={confidence}")
+        logger.info(f"Tool review: approved={review.get('approved')}, confidence={confidence} "
+                    f"why={str(review.get('reasoning') or review.get('reason') or '')[:200]!r}")
         return confidence, reasoning
 
     except Exception as e:

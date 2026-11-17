@@ -437,11 +437,11 @@ TOOLS = {
         }
     },
     "web_fetch": {
-        "description": "Fetch and extract text content from a URL. Works for allowlisted domains (trusted/reliable sources) and authenticated API domains (e.g., Kanka.io). Authenticated domains have URLs auto-rewritten to API endpoints with auth headers injected. Use web_search to discover public URLs, or pass authenticated domain URLs directly.",
+        "description": "Fetch and extract text content from a URL on an allowlisted (trusted/reliable) domain. Use web_search to discover public URLs. For the Kanka campaign use the worldbuild tool, not a URL.",
         "params": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "The URL to fetch. Supports trusted/reliable domains and authenticated API domains (e.g., app.kanka.io URLs are auto-rewritten to the Kanka API)."}
+                "url": {"type": "string", "description": "The URL to fetch (trusted/reliable domains)."}
             },
             "required": ["url"]
         }
@@ -455,89 +455,82 @@ TOOLS = {
         }
     },
     "kanka_search": {
-        "description": "Search across all entity types (characters, locations, items, etc.) within a Kanka campaign. Returns matching entities with type, ID, and name. Accepts campaign by name or ID.",
+        "description": "Search the Kanka campaign's entries by name. Returns each entry's entity_id (for kanka_get_entity), name, kind and type. DM-only entries appear only in a conversation with the DM alone.",
         "params": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search term to find entities by name or content."},
-                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
-                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."}
+                "query": {"type": "string", "description": "Name, or part of one, to look for."},
+                "campaign": {"type": "string", "description": "Campaign name; defaults to Sunrise in the Valley."},
+                "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
             },
             "required": ["query"]
         }
     },
     "kanka_list_entities": {
-        "description": "List entities of a given type in a Kanka campaign, with optional name filter and pagination. Returns up to 45 entities per page.",
+        "description": "List the campaign's entries of one kind, 45 per page, with entity_ids.",
         "params": {
             "type": "object",
             "properties": {
-                "entity_type": {
-                    "type": "string",
-                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
-                    "description": "The type of entities to list."
-                },
-                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "entity_type": {"type": "string", "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"], "description": "Which kind of entries."},
+                "campaign": {"type": "string", "description": "Campaign name; defaults to Sunrise in the Valley."},
                 "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
-                "name": {"type": "string", "description": "Optional: filter entities whose name contains this string."},
-                "page": {"type": "integer", "description": "Page number for pagination (default 1)."}
+                "name": {"type": "string", "description": "Optional: only names containing this."},
+                "page": {"type": "integer", "description": "Page number (default 1)."}
             },
             "required": ["entity_type"]
         }
     },
     "kanka_get_entity": {
-        "description": "Get a specific entity from a Kanka campaign by type and ID. Returns full entity details including entry text, metadata, and optionally related sub-resources (posts, attributes, relations).",
+        "description": "Read one campaign entry by its entity_id (from search or list): name, kind, type, parent and its text.",
         "params": {
             "type": "object",
             "properties": {
-                "entity_type": {
-                    "type": "string",
-                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
-                    "description": "The type of entity to retrieve."
-                },
-                "entity_id": {"type": "integer", "description": "The entity's ID within its type."},
-                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "entity_id": {"type": "integer", "description": "The entry's entity_id."},
+                "campaign": {"type": "string", "description": "Campaign name; defaults to Sunrise in the Valley."},
                 "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
-                "related": {"type": "boolean", "description": "If true, include related data (posts, attributes, relations). Default false."}
             },
-            "required": ["entity_type", "entity_id"]
+            "required": ["entity_id"]
         }
     },
     "kanka_create_entity": {
-        "description": "Create a new entity (character, journal, note, location, etc.) in a Kanka campaign. Requires approval. Use for session journals, new NPCs, location notes, etc.",
+        "description": "Propose a new campaign entry. Nothing is written until Azrael approves it with his authenticator code; only in a conversation with him alone. DM-only unless public is true.",
         "params": {
             "type": "object",
             "properties": {
-                "entity_type": {
-                    "type": "string",
-                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
-                    "description": "The type of entity to create."
-                },
-                "name": {"type": "string", "description": "Name/title of the new entity."},
-                "entry": {"type": "string", "description": "HTML body/description of the entity."},
-                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "entity_type": {"type": "string", "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"], "description": "What kind of entry."},
+                "name": {"type": "string", "description": "Its name."},
+                "entry": {"type": "string", "description": "Its text (HTML allowed)."},
+                "type": {"type": "string", "description": "Optional subtype, e.g. 'Capital city', 'NPC'."},
+                "parent": {"type": "string", "description": "Optional: the parent entry's name or entity_id."},
+                "location": {"type": "string", "description": "Optional: where it is, a location's name or entity_id."},
+                "public": {"type": "boolean", "description": "Visible to players (default false: DM-only)."},
+                "campaign": {"type": "string", "description": "Campaign name; defaults to Sunrise in the Valley."},
                 "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
-                "fields": {"type": "object", "description": "Optional type-specific fields (e.g., {\"date\": \"2024-01-15\"} for journals, {\"type\": \"NPC\"} for characters)."}
+                "fields": {"type": "object", "description": "Optional other Kanka fields."}
             },
             "required": ["entity_type", "name"]
         }
     },
     "kanka_update_entity": {
-        "description": "Update an existing entity in a Kanka campaign. Requires approval. Only send the fields you want to change.",
+        "description": "Propose a change to a campaign entry. append_entry adds text to the end; fields.entry replaces all of it. Nothing changes until Azrael approves with his authenticator code; only in a conversation with him alone.",
         "params": {
             "type": "object",
             "properties": {
-                "entity_type": {
-                    "type": "string",
-                    "enum": ["characters", "locations", "journals", "items", "events", "organisations", "races", "quests", "families", "maps", "calendars", "notes", "abilities", "tags", "timelines", "creatures", "conversations"],
-                    "description": "The type of entity to update."
-                },
-                "entity_id": {"type": "integer", "description": "The entity's ID to update."},
-                "campaign": {"type": "string", "description": "Campaign name (e.g. 'Twilight of the Gods'). Resolved to ID automatically."},
+                "entity": {"type": "string", "description": "Which entry: its name (or entity_id)."},
+                "entity_id": {"type": "integer", "description": "The entry's entity_id, instead of entity."},
+                "append_entry": {"type": "string", "description": "Text to add to the end of the entry."},
+                "parent": {"type": "string", "description": "Optional: new parent, by name or entity_id."},
+                "location": {"type": "string", "description": "Optional: new location, by name or entity_id."},
+                "fields": {"type": "object", "description": "Fields to set, e.g. {\"name\": \"New Name\"}."},
+                "campaign": {"type": "string", "description": "Campaign name; defaults to Sunrise in the Valley."},
                 "campaign_id": {"type": "integer", "description": "Campaign ID (alternative to campaign name)."},
-                "fields": {"type": "object", "description": "Fields to update (e.g., {\"name\": \"New Name\", \"entry\": \"<p>Updated description</p>\"})."}
             },
-            "required": ["entity_type", "entity_id", "fields"]
+            "required": []
         }
+    },
+    "kanka_name_hashes": {
+        "description": "Internal: hashes of the campaign's entry names, so gaia-core keeps them off web search.",
+        "params": {"type": "object", "properties": {"campaign": {"type": "string"}, "campaign_id": {"type": "integer"}}}
     },
     # --- NotebookLM Tools ---
     "notebooklm_list_notebooks": {

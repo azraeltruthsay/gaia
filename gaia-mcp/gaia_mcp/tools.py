@@ -28,7 +28,7 @@ from .web_tools import web_search, web_fetch
 from .browser_tools import browser_tool as _browser_tool
 from .kanka_tools import (
     kanka_list_campaigns, kanka_search, kanka_list_entities,
-    kanka_get_entity, kanka_create_entity, kanka_update_entity,
+    kanka_get_entity, kanka_create_entity, kanka_update_entity, kanka_name_hashes,
 )
 from .notebooklm_tools import (
     notebooklm_list_notebooks, notebooklm_get_notebook,
@@ -299,6 +299,7 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "kanka_get_entity": lambda p: kanka_get_entity(p),
         "kanka_create_entity": lambda p: kanka_create_entity(p),
         "kanka_update_entity": lambda p: kanka_update_entity(p),
+        "kanka_name_hashes": lambda p: kanka_name_hashes(p),
         # Promotion & blueprint tools
         "generate_blueprint": lambda p: _generate_blueprint_impl(p),
         "assess_promotion": lambda p: _assess_promotion_impl(p),
@@ -592,6 +593,10 @@ def preflight(method: str, params: Dict, approval_store: "ApprovalStore" = None)
             approval_store.validate_against_blast_shield(method, params)
         if method == "write_file":
             _checked_write_path(params.get("path"))
+        from .kanka_tools import write_problem as _kanka_write_problem
+        _problem = _kanka_write_problem(method, params)
+        if _problem:
+            return _problem
     except (ValueError, PermissionError) as e:
         return str(e)
     return None

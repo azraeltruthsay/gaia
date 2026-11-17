@@ -323,14 +323,23 @@ DOMAIN_TOOLS: Dict[str, dict] = {
 
     # ── Worldbuild (Kanka.io) ─────────────────────────────────────────
     "worldbuild": {
-        "description": "Kanka.io campaign and worldbuilding management",
+        "description": ("Azrael's D&D campaign wiki on Kanka (Sunrise in the Valley; the Dusk in Leshen "
+                        "chapter): search for an entry, then get it by entity_id. Most entries are DM-only "
+                        "and can be read only in a conversation with him alone. create/update propose a "
+                        "change; nothing is written until he approves it with his authenticator code"),
         "actions": {
             "campaigns": {"params": {}, "maps_to": "kanka_list_campaigns"},
             "search": {"params": {"query": "string", "campaign": "string?"}, "maps_to": "kanka_search"},
-            "list": {"params": {"entity_type": "string", "campaign": "string?"}, "maps_to": "kanka_list_entities"},
-            "get": {"params": {"entity_type": "string", "entity_id": "integer", "campaign": "string?"}, "maps_to": "kanka_get_entity"},
-            "create": {"params": {"entity_type": "string", "name": "string", "entry": "string?", "campaign": "string?"}, "maps_to": "kanka_create_entity", "sensitive": True},
-            "update": {"params": {"entity_type": "string", "entity_id": "integer", "fields": "object", "campaign": "string?"}, "maps_to": "kanka_update_entity", "sensitive": True},
+            "list": {"params": {"entity_type": "string", "name": "string?", "page": "integer?", "campaign": "string?"},
+                     "maps_to": "kanka_list_entities"},
+            "get": {"params": {"entity_id": "integer", "campaign": "string?"}, "maps_to": "kanka_get_entity"},
+            "create": {"params": {"entity_type": "string", "name": "string", "entry": "string?", "type": "string?",
+                                  "parent": "string?", "location": "string?", "public": "boolean?",
+                                  "campaign": "string?"},
+                       "maps_to": "kanka_create_entity", "sensitive": True},
+            "update": {"params": {"entity": "string", "append_entry": "string?", "fields": "object?",
+                                  "parent": "string?", "location": "string?", "campaign": "string?"},
+                       "maps_to": "kanka_update_entity", "sensitive": True},
         },
     },
 

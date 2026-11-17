@@ -78,8 +78,12 @@ def test_a_word_finds_its_relatives():
     assert "retrain without" in excerpt_for(text, "What does it say about retraining?", limit=300)
 
 
-def test_she_wakes_into_the_resting_gear_and_gear_one_stays_on_request():
+def test_she_wakes_into_the_resting_gear_and_gear_one_stays_on_request(monkeypatch, tmp_path):
+    from gaia_common.lifecycle import states
     from gaia_common.lifecycle.states import LifecycleState as S, RESTING_STATE, TransitionTrigger as T, validate_transition
+    # The default, not the live choice: the web toggle had set gear 1 in
+    # /shared and the test failed with GAIA's setting (2026-11-17).
+    monkeypatch.setattr(states, "RESTING_GEAR_FILE", tmp_path / "none.json")
     assert RESTING_STATE == S.FOCUSING
     for state in (S.PARKED, S.SLEEP, S.DEEP_SLEEP):
         assert validate_transition(state, T.WAKE_SIGNAL) == RESTING_STATE
