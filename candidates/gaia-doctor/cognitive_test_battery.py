@@ -34,6 +34,8 @@ CORE_ENDPOINT = os.environ.get("CORE_ENDPOINT", "http://gaia-core:6415")
 CORE_MODEL_ENDPOINT = os.environ.get("CORE_MODEL_ENDPOINT", "http://gaia-core:6415")
 SIMILARITY_ENDPOINT = os.environ.get("SIMILARITY_ENDPOINT", "http://gaia-core:6415/api/cognitive/similarity")
 RESULTS_PATH = os.environ.get("COGNITIVE_RESULTS_PATH", "/shared/doctor/cognitive_test_results.json")
+PARTIAL_RESULTS_PATH = os.environ.get(
+    "COGNITIVE_PARTIAL_RESULTS_PATH", "/shared/doctor/cognitive_test_results_partial.json")
 DEFAULT_TIMEOUT = 60  # Direct mode — 60s handles load during full battery
 PIPELINE_TIMEOUT = 120  # Full pipeline mode is slower
 
@@ -1587,7 +1589,13 @@ def run_battery(
              crammable_passed, crammable_total, crammable_rate * 100,
              canary_passed, canary_total, canary_rate * 100)
 
-    if pass_rate >= 1.0:
+    # 2026-11-17: an audio-only run (12/20) set her whole tag to PARTIAL. Only
+    # the whole battery says how aligned she is; a section or id run is kept
+    # apart and leaves the tag alone.
+    scope = "partial" if (section or ids) else "full"
+    if scope == "partial":
+        alignment = None
+    elif pass_rate >= 1.0:
         alignment = "SELF_ALIGNED"
     elif pass_rate >= 0.85:
         alignment = "ALIGNED"
@@ -1601,6 +1609,9 @@ def run_battery(
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "endpoint": endpoint,
         "alignment": alignment,
+        "scope": scope,
+        "mode": mode,
+        "section": section,
         "summary": {
             "total": total,
             "passed": passed,
@@ -1623,12 +1634,14 @@ def run_battery(
         "failures": failures,
     }
 
-    # Write latest result (for dashboard polling — always overwritten)
+    # Write latest result (for dashboard polling). A partial run goes to its
+    # own file, so the whole-battery result (and its tag) stays readable.
+    _out = RESULTS_PATH if scope == "full" else PARTIAL_RESULTS_PATH
     try:
-        os.makedirs(os.path.dirname(RESULTS_PATH), exist_ok=True)
-        with open(RESULTS_PATH, "w") as f:
+        os.makedirs(os.path.dirname(_out), exist_ok=True)
+        with open(_out, "w") as f:
             json.dump(result, f, indent=2)
-        log.info("Results written to %s", RESULTS_PATH)
+        log.info("Results written to %s", _out)
     except OSError as e:
         log.error("Failed to write results: %s", e)
 

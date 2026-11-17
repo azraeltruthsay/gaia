@@ -3799,6 +3799,19 @@ def _fetch_pipeline_status() -> dict | None:
     return None
 
 
+def _load_last_full_result() -> dict | None:
+    """The last whole-battery result on disk. Results from before scopes were
+    recorded count as whole only if they ran more than one section."""
+    path = os.environ.get("COGNITIVE_RESULTS_PATH", "/shared/doctor/cognitive_test_results.json")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    scope = data.get("scope") or ("full" if len(data.get("by_section") or {}) > 1 else "partial")
+    return data if scope == "full" else None
+
+
 _gpu_status_cache: dict | None = None
 _model_server_cache: dict | None = None
 _pipeline_status_cache: dict | None = None
@@ -4091,11 +4104,17 @@ class DoctorHandler(BaseHTTPRequestHandler):
             self._json_response(501, {"error": "cognitive_test_battery not available"})
             return
         summary = {}
-        alignment = "UNTRAINED"
+        # No whole-battery run on record is unknown, not untrained.
+        alignment = "UNKNOWN"
+        # The cache empties on every doctor restart; the last whole-battery
+        # result is on disk (the dashboard showed UNTRAINED after a restart).
+        if not _cognitive_last_result:
+            _cognitive_last_result = _load_last_full_result()
         if _cognitive_last_result:
             summary = _cognitive_last_result.get("summary", {})
             summary["run_id"] = _cognitive_last_result.get("run_id")
             summary["completed_at"] = _cognitive_last_result.get("completed_at")
+            summary["mode"] = _cognitive_last_result.get("mode")
             alignment = _cognitive_last_result.get("alignment", "UNTRAINED")
         self._json_response(200, {"running": _cognitive_running, "alignment": alignment, "last_run": summary})
 
@@ -4106,12 +4125,7 @@ class DoctorHandler(BaseHTTPRequestHandler):
             return
         # Try loading from file if we don't have cached results
         if not _cognitive_last_result:
-            results_path = os.environ.get("COGNITIVE_RESULTS_PATH", "/shared/doctor/cognitive_test_results.json")
-            try:
-                with open(results_path) as f:
-                    _cognitive_last_result = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
-                pass
+            _cognitive_last_result = _load_last_full_result()
         if _cognitive_last_result:
             self._json_response(200, _cognitive_last_result)
         else:
@@ -4195,7 +4209,9 @@ class DoctorHandler(BaseHTTPRequestHandler):
                     except Exception as e:
                         log.warning("Wake signal failed: %s", e)
                 result = _run_cognitive_battery(section=section, ids=ids, timeout=timeout, full_pipeline=full_pipeline, target=target, no_think=no_think)
-                _cognitive_last_result = result
+                # Only the whole battery sets her tag (a section run kept apart).
+                if (result or {}).get("scope", "full") == "full":
+                    _cognitive_last_result = result
                 # Regenerate rubric after battery (tests may have been updated)
                 try:
                     _generate_rubric()
