@@ -275,6 +275,14 @@ def speaker_line(session_id: str, registry: Optional[PeopleRegistry] = None) -> 
 _NAME_WORD_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b")
 
 
+def _to_speaker(text: str, speaker: Optional[Dict]) -> str:
+    """"Azrael's friend", told to Azrael, as "your friend": given the third
+    person she answered him in it (2026-11-17)."""
+    for own in (speaker or {}).get("names", []):
+        text = text.replace(f"{own}'s ", "your ")
+    return text
+
+
 def mentioned_line(text: str, session_id: str = "", registry: Optional[PeopleRegistry] = None) -> str:
     """What she knows of the people a message names, other than the speaker.
 
@@ -284,6 +292,9 @@ def mentioned_line(text: str, session_id: str = "", registry: Optional[PeopleReg
     try:
         registry = registry or PeopleRegistry()
         speaker = registry.for_session(session_id) if session_id else None
+        if not speaker and session_id and is_channel(session_id) and channel_speaker(session_id):
+            found = registry.find_by_name(channel_speaker(session_id))
+            speaker = found[0] if len(found) == 1 else None
     except OSError:
         return ""
     from gaia_common.utils.conversation_memory import channel_of, local_day
@@ -295,10 +306,10 @@ def mentioned_line(text: str, session_id: str = "", registry: Optional[PeopleReg
                 continue
             person = found[0]
             seen.add(person.get("id"))
-            name = person['names'][0]
+            name = _main_name(person)
             line = f"{name}, whom they mention"
             if person.get("relationship"):
-                line += f", is {person['relationship']}"
+                line += f", is {_to_speaker(person['relationship'], speaker)}"
             met = [a for a in person.get("accounts", []) if a.get("kind") == "session"]
             if met:
                 # First, before anything else: with the pronoun clause between
@@ -306,9 +317,17 @@ def mentioned_line(text: str, session_id: str = "", registry: Optional[PeopleReg
                 # said "I haven't met them yet" (2026-11-11).
                 line += (f". You have met {name}: you spoke with them in a "
                          f"{channel_of(met[0].get('id', ''))} on {local_day(met[0].get('linked_at') or '')}")
-            facts = [f["text"] for f in person.get("facts", []) if f.get("status") != "wrong"][:3]
+            facts = [_to_speaker(f["text"], speaker) for f in person.get("facts", [])
+                     if f.get("status") != "wrong"][:3]
             if facts:
                 line += ". What you've been told about them: " + "; ".join(facts)
+            # What she makes of them, if asked: without it, "what do you think
+            # of Nick?" got "someone I'd trust" with his trust at -1
+            # (2026-11-17).
+            from gaia_common.utils.bonds import bond_line
+            stand = bond_line(person, name)
+            if stand:
+                line += ". " + stand.rstrip(".")
             line += f". {pronoun_words(person)}"
             lines.append(line + ".")
             break

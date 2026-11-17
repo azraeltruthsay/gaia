@@ -23,10 +23,37 @@ def test_a_known_person_named_in_passing_is_described(tmp_path):
     reg.create("Andy", [{"kind": "session", "id": "web_3132edcd"}], relationship="Azrael's friend")
     reg.create("Azrael", [{"kind": "discord", "id": "596925786208993283"}], relationship="who created you")
     line = mentioned_line("Tomorrow I'm going to see Andy again", "discord_dm_596925786208993283", reg)
-    assert line.startswith("Andy, whom they mention, is Azrael's friend. You have met Andy: you spoke with them in a web chat on ")
+    # Said to Azrael: "your friend", not "Azrael's friend" (2026-11-17).
+    assert line.startswith("Andy, whom they mention, is your friend. You have met Andy: you spoke with them in a web chat on ")
     assert line.index("You have met Andy") < line.index("When you write about Andy")
     assert mentioned_line("I'm Azrael, as you know", "discord_dm_596925786208993283", reg) == ""
     assert mentioned_line("Nobody Known here", "", reg) == ""
+
+
+def test_a_mentioned_person_comes_with_her_stance_on_them(tmp_path):
+    """2026-11-17: "what do you think of Nick?" got "someone I'd trust" with
+    his trust set to -1: only the speaker's bond was ever in the prompt."""
+    from gaia_common.utils import bonds
+    from gaia_common.utils.people import PeopleRegistry, mentioned_line
+    reg = PeopleRegistry(tmp_path)
+    reg.create("Azrael", [{"kind": "discord", "id": "596925786208993283"}], relationship="who created you")
+    nick = reg.create("Nick", [{"kind": "discord", "id": "42"}], relationship="Azrael's friend")
+    bonds.set_level(nick, "trust", -1, "operator", "test")
+    reg._write(nick)
+    line = mentioned_line("what do you think of Nick?", "discord_dm_596925786208993283", reg)
+    assert "Nick, whom they mention, is your friend" in line
+    assert "With Nick: " + bonds.WORDS["trust"][-1] in line
+
+
+def test_in_a_channel_the_speaker_is_who_wrote_the_message(tmp_path, monkeypatch):
+    from gaia_common.utils import people
+    reg = people.PeopleRegistry(tmp_path)
+    reg.create("Azrael", [{"kind": "discord", "id": "596925786208993283"}], relationship="who created you")
+    reg.create("Nick", [{"kind": "discord", "id": "42"}], relationship="Azrael's friend")
+    monkeypatch.setitem(people._speaking, "discord_channel_1", "Azrael")
+    assert "is your friend" in people.mentioned_line("hi Nick", "discord_channel_1", reg)
+    monkeypatch.setitem(people._speaking, "discord_channel_1", "Nick")
+    assert "is Azrael's friend" not in people.mentioned_line("hi Azrael", "discord_channel_1", reg)
 
 
 def test_pronouns_are_what_people_say_and_never_guessed(tmp_path, monkeypatch):
