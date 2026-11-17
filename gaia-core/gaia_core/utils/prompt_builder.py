@@ -2181,6 +2181,15 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
             elif filename and ("/" in filename or filename.startswith("/")):
                 _audio_parts.append({"type": "audio_url",
                                      "audio_url": {"url": filename}})
+    if _audio_parts:
+        # Her hearing sense: what each clip measurably is, before the question.
+        _huds = []
+        for df in (getattr(_content_obj, 'data_fields', None) or []):
+            if getattr(df, 'key', '') == 'audio_hud' and isinstance(getattr(df, 'value', None), list):
+                _huds = df.value
+        if _huds:
+            from gaia_core.utils.hearing_hud import with_hud
+            _orig_prompt_text = with_hud(_orig_prompt_text, _huds)
     if _image_parts or _audio_parts:
         user_prompt = {
             "role": "user",

@@ -45,6 +45,14 @@ class AnalyzeAudioRequest(BaseModel):
     sample_rate: int = Field(16000, description="Sample rate of the audio")
 
 
+class HearRequest(BaseModel):
+    """A clip for her hearing sense (hearing.py): measured and named."""
+
+    audio_base64: str = Field(..., description="Base64-encoded audio (wav, mp3, flac, ogg, or anything ffmpeg reads)")
+    sample_rate: int | None = Field(None, description="Only for raw PCM; encoded files carry their own")
+    labels: bool = Field(True, description="Also name the sound with the AudioSet classifier")
+
+
 # ── Response schemas ─────────────────────────────────────────────────
 
 
@@ -88,6 +96,15 @@ class AnalyzeAudioResponse(BaseModel):
     brightness: float
     semantic_tags: list[dict]
     latency_ms: float
+
+
+class HearResponse(BaseModel):
+    """What the clip measurably is, and the line she reads."""
+
+    hud: str
+    measured: dict
+    labels: list[dict] = Field(default_factory=list)
+    latency_ms: float = 0.0
 
 
 class VoiceInfo(BaseModel):

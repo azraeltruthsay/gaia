@@ -41,6 +41,9 @@ def main() -> None:
     p.add_argument("--temperature", type=float, default=0.3,
                    help="sampling temperature (battery default 0.3; 0 = greedy, for a per-test "
                         "comparison of two engines)")
+    p.add_argument("--no-hearing", action="store_true",
+                   help="leave out her hearing sense (gaia-audio /hear via gaia-core): the model's ears alone")
+    p.add_argument("--core", default="http://gaia-core:6415", help="gaia-core, for the hearing sense")
     p.add_argument("--sections", default="vision,audio,audio_tones",
                    help="battery sections to run (Prime has no audio: --sections vision)")
     p.add_argument("--dump", default=None,
@@ -72,6 +75,8 @@ def main() -> None:
     # The GAIA engine path, as the battery sends it (image_url / audio_url data
     # URIs to /v1/chat/completions), with the temperature as a parameter.
     def _gaia(prompt, path, kind, engine_endpoint=ep, timeout=120, max_tokens=80):
+        if kind == "audio_url" and not a.no_hearing:
+            prompt = b.with_hearing(prompt, path, endpoint=a.core)
         ext = os.path.splitext(path)[1].lower()
         mime = (b._VISION_MIME_BY_EXT.get(ext, "image/jpeg") if kind == "image_url"
                 else b._AUDIO_MIME_BY_EXT.get(ext, "audio/wav"))

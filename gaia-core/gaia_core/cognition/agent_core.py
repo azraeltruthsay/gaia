@@ -1061,6 +1061,25 @@ class AgentCore:
                 except Exception as _att_err:
                     self.logger.warning("Skipping malformed attachment: %s (%s)", raw, _att_err)
 
+        # 2026-11-17: audio reached the router in metadata and stopped there —
+        # this packet never carried it, so prompt_builder sent Core the text
+        # alone ("Listen to this" with nothing to listen to). Forward it, and
+        # the hearing sense's line per clip.
+        _md = metadata or {}
+        if _md.get("_audio_payloads"):
+            from gaia_common.protocols.cognition_packet import AudioPayload
+            for raw in _md["_audio_payloads"]:
+                try:
+                    if isinstance(raw, AudioPayload):
+                        content.audio_payloads.append(raw)
+                    elif isinstance(raw, dict):
+                        content.audio_payloads.append(AudioPayload(**{
+                            k: v for k, v in raw.items() if k in AudioPayload.__dataclass_fields__}))
+                except Exception as _ap_err:
+                    self.logger.warning("Skipping malformed audio payload (%s)", _ap_err)
+            if _md.get("_audio_hud"):
+                content.data_fields.append(DataField(key="audio_hud", value=list(_md["_audio_hud"])))
+
         # Include the immutable Tier-1 identity and a short intro in the packet content
         try:
             content.data_fields.append(DataField(key='immutable_identity', value=getattr(self.config, 'identity', '') or ''))
@@ -2481,8 +2500,12 @@ class AgentCore:
 
                 # 8ki: when image attachments are present, NeuralRouter must
                 # not reroute to Prime — vision lives only on Core. Pin to Core.
-                if _has_inbound_image:
-                    logger.info("[CASCADE] Image attachment(s) — NeuralRouter bypassed; staying on Core")
+                # 2026-11-17: audio too. The router's audio triage sent a clip
+                # with "What is this sound?" to nano, whose slim prompt drops
+                # media: Core never got the audio, and asked for an upload.
+                if _has_inbound_image or _has_inbound_audio:
+                    logger.info("[CASCADE] %s — NeuralRouter bypassed; staying on Core",
+                                "Image attachment(s)" if _has_inbound_image else "Audio payload(s)")
                 elif selected_model_name in ("core", "nano") and not force_operator and not is_forced_thinker:
                     # o9dh/saq3: NeuralRouter was never imported here — this
                     # whole cascade-routing branch NameError'd on its very

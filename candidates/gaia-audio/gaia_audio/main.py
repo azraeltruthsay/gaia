@@ -32,6 +32,8 @@ from gaia_audio.models import (
     RefineResponse,
     AnalyzeAudioRequest,
     AnalyzeAudioResponse,
+    HearRequest,
+    HearResponse,
     VoiceInfo,
 )
 from gaia_audio.status import status_tracker
@@ -321,6 +323,47 @@ async def analyze_audio(request: AnalyzeAudioRequest):
         await status_tracker.emit("error", f"Analysis failed: {e}")
         logger.error("Analysis failed", exc_info=True)
         raise HTTPException(500, f"Analysis failed: {e}") from e
+
+
+# ── Hearing sense ───────────────────────────────────────────────────
+
+
+def _decode_with_rate(audio_bytes: bytes, fallback_sr: int) -> tuple:
+    """(mono float32 array, its real sample rate). audio_bytes_to_array keeps
+    no rate, and a 44.1 kHz file read as 16 kHz measures every pitch wrong."""
+    import io
+
+    import soundfile as sf
+    from gaia_audio.stt_engine import _ffmpeg_to_wav
+    for data in (audio_bytes, None):
+        if data is None:
+            data = _ffmpeg_to_wav(audio_bytes)
+            if data is None:
+                break
+        try:
+            arr, sr = sf.read(io.BytesIO(data), dtype="float32")
+            return (arr.mean(axis=1) if arr.ndim > 1 else arr), int(sr)
+        except Exception:
+            continue
+    return audio_bytes_to_array(audio_bytes, fallback_sr), fallback_sr
+
+
+@app.post("/hear", response_model=HearResponse)
+async def hear(request: HearRequest):
+    """Her hearing sense: measure a clip and name what it sounds like
+    (gaia_audio/hearing.py). CPU only; ~0.7 s for a few seconds of audio."""
+    from gaia_audio import hearing
+
+    t0 = time.monotonic()
+    try:
+        audio_bytes = base64.b64decode(request.audio_base64)
+        arr, sr = _decode_with_rate(audio_bytes, request.sample_rate or 16000)
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: hearing.hear(arr, sr, with_labels=request.labels))
+    except Exception as e:
+        logger.error("Hearing failed", exc_info=True)
+        raise HTTPException(500, f"Hearing failed: {e}") from e
+    return HearResponse(**result, latency_ms=round((time.monotonic() - t0) * 1000, 1))
 
 
 # ── Refinement (Nano LLM) ───────────────────────────────────────────

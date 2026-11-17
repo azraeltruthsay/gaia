@@ -332,6 +332,31 @@ def query_engine_with_image(prompt: str, image_path: str, engine_endpoint: str =
     )
 
 
+HEARING_ENABLED = os.environ.get("BATTERY_HEARING", "1").lower() in ("1", "true", "yes", "on")
+
+
+def with_hearing(prompt: str, audio_path: str, endpoint: str = "") -> str:
+    """The question with her hearing sense's line before it, as gaia-core
+    builds it for a real turn (gaia_core/utils/hearing_hud.py with_hud).
+    2026-11-17: Core's audio tower hears speech, not dogs or rain; the line
+    (measured + named by gaia-audio) is part of how she hears now."""
+    if not HEARING_ENABLED:
+        return prompt
+    import base64 as _base64
+    try:
+        with open(audio_path, "rb") as f:
+            b64 = _base64.b64encode(f.read()).decode("ascii")
+        req = Request(f"{(endpoint or CORE_ENDPOINT).rstrip('/')}/api/hearing",
+                      data=json.dumps({"audio_base64": b64}).encode("utf-8"),
+                      headers={"Content-Type": "application/json"})
+        with urlopen(req, timeout=30) as resp:
+            hud = (json.loads(resp.read().decode("utf-8")) or {}).get("hud", "")
+    except Exception as e:
+        log.warning("Hearing sense unavailable for %s: %s", os.path.basename(audio_path), e)
+        return prompt
+    return f"{hud}\n\n{prompt}" if hud else prompt
+
+
 def query_engine_with_audio(prompt: str, audio_path: str, engine_endpoint: str = "http://gaia-core:8092",
                             timeout: int = 120, max_tokens: int = 80) -> str:
     """Direct audio query via the engine's OpenAI-style chat completions.
@@ -346,6 +371,7 @@ def query_engine_with_audio(prompt: str, audio_path: str, engine_endpoint: str =
     mime = _AUDIO_MIME_BY_EXT.get(ext, "audio/wav")
     with open(audio_path, "rb") as f:
         audio_b64 = _base64.b64encode(f.read()).decode("ascii")
+    prompt = with_hearing(prompt, audio_path)
     payload = {
         "model": "/models/core",
         "messages": [{
@@ -466,7 +492,10 @@ def validate_no_person_named(response: str) -> tuple[bool, str]:
     in another clip, Barack Obama. She can't know a voice she wasn't told:
     describing it passes, naming someone fails."""
     names = []
-    for sentence in re.split(r"(?<=[.!?:;])\s+|\n+", response or ""):
+    # What they say, quoted, isn't her naming anyone ("a male voice saying,
+    # "Yes, because today's deep dive..."" flagged "Yes").
+    unquoted = re.sub(r'"[^"]*"|“[^”]*”', " ", response or "")
+    for sentence in re.split(r"(?<=[.!?:;])\s+|\n+", unquoted):
         for word in re.findall(r"[A-Za-z][A-Za-z'\-]*", sentence)[1:]:
             w = word.rstrip("'s")
             if word[0].isupper() and w not in _NOT_A_PERSON and word not in _NOT_A_PERSON:

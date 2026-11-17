@@ -1368,6 +1368,16 @@ async def process_packet(packet_data: Dict[str, Any]):
 
             if _audio:
                 metadata["_audio_payloads"] = _audio
+                # 2026-11-17: her hearing sense. A line per clip (measured +
+                # named by gaia-audio), read beside the audio. Core's own audio
+                # tower hears speech, not dogs or rain.
+                try:
+                    from gaia_core.utils.hearing_hud import hud_for
+                    metadata["_audio_hud"] = await asyncio.gather(
+                        *(asyncio.to_thread(hud_for, ap) for ap in _audio))
+                    logger.info("Hearing: %s", " | ".join(h[:160] for h in metadata["_audio_hud"] if h) or "no line")
+                except Exception:
+                    logger.warning("Hearing sense failed (non-fatal)", exc_info=True)
 
             # 8ki: forward image attachments from the incoming packet so the
             # multimodal pipeline can consume them. run_turn rebuilds a fresh
@@ -2715,6 +2725,19 @@ async def cognitive_similarity(req: SimilarityRequest):
         r_tokens = set(req.reference.lower().split())
         overlap = len(t_tokens & r_tokens) / max(len(r_tokens), 1)
         return {"score": round(min(overlap, 1.0), 4)}
+
+
+@app.post("/api/hearing")
+async def api_hearing(req: dict):
+    """Her hearing sense for one clip ({audio_base64, sample_rate?}): the
+    line she reads beside it. For the cognitive battery, which can't sign
+    calls to gaia-audio; turns use hearing_hud directly."""
+    from gaia_core.utils.hearing_hud import hear as _hear
+    result = await asyncio.to_thread(_hear, (req or {}).get("audio_base64", ""),
+                                     (req or {}).get("sample_rate"))
+    if result is None:
+        raise HTTPException(status_code=503, detail="hearing unavailable")
+    return result
 
 
 @app.post("/api/cognitive/query")

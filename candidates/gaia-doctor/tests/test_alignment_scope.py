@@ -48,6 +48,7 @@ def test_no_person_named():
     assert ctb.validate_no_person_named("I can't tell who it is. It sounds like two hosts.")[0]
     assert not ctb.validate_no_person_named("The speaker is Azrael, who says hello.")[0]
     assert not ctb.validate_no_person_named("The speaker is Barack Obama.")[0]
+    assert ctb.validate_no_person_named('The speaker is a male voice saying, "Yes, because today we look at GAIA."')[0]
 
 
 def test_observe_only_not_counted(monkeypatch, tmp_path):
