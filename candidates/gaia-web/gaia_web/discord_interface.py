@@ -77,7 +77,8 @@ _wake_config_cache: Dict[str, Any] = {}   # {"config": {...}, "fetched_at": floa
 
 # Pending approval waiters: (channel_id, user_id) -> waiter context dict
 _pending_approvals: Dict[Tuple[str, str], dict] = {}
-_MCP_BASE_URL = os.getenv("MCP_ENDPOINT", "http://gaia-mcp:8765/jsonrpc").rsplit("/", 1)[0]
+# Must match gaia-core approval_reply._CANCEL.
+_APPROVAL_CANCEL_WORDS = {"cancel", "deny", "no", "abort", "stop"}
 _APPROVAL_STALE_SECONDS = 960  # 16 minutes (MCP TTL is 15 min)
 
 
@@ -231,16 +232,21 @@ class DiscordInterface:
                 except Exception as _exc:
                     logger.debug("Discord: DM blocklist record failed: %s", _exc)
 
-            # Check for pending approval waiter before normal processing
+            # The answer to a pending approval (a 6-digit code or "cancel")
+            # goes to gaia-core like any message: its approval_reply submits
+            # it, signed, and checks it answers the action actually waiting
+            # (0ait). This bridge used to submit the code itself, unsigned
+            # (gaia-mcp answered 401, so no Discord approval ever ran), and
+            # swallowed every other message from that person until the
+            # waiter went stale. Here it only makes sure the answer reaches
+            # her in a channel where she wasn't addressed.
             waiter_key = (str(message.channel.id), str(message.author.id))
+            _answers_approval = False
             if waiter_key in _pending_approvals:
-                await self._handle_approval_response(
-                    content=message.content.strip(),
-                    waiter_key=waiter_key,
-                    message_obj=message,
-                    is_dm=is_dm,
-                )
-                return
+                _said = (message.content or "").strip().rstrip(".!").lower()
+                if re.fullmatch(r"\d{6}", _said) or _said in _APPROVAL_CANCEL_WORDS:
+                    _answers_approval = True
+                    del _pending_approvals[waiter_key]
 
             # olqt: bot.process_commands() below only runs for non-DM messages
             # (guild), so a "!"-prefixed DM message used to fall straight
@@ -258,7 +264,7 @@ class DiscordInterface:
 
             should_respond = False
 
-            if is_dm:
+            if is_dm or _answers_approval:
                 should_respond = True
             else:
                 mentioned = bot.user in message.mentions
@@ -303,7 +309,7 @@ class DiscordInterface:
                 # turn — the translate reply is itself a visible bot message,
                 # which would mean "ambient" messages get an unconditional
                 # reply regardless of whether she decides to speak.
-                if content and not content.startswith("!") and not is_ambient:
+                if content and not content.startswith("!") and not is_ambient and not _answers_approval:
                     try:
                         from gaia_web.translation import detect_and_translate_to_english
                         translation_result = await detect_and_translate_to_english(content)
@@ -1092,96 +1098,6 @@ class DiscordInterface:
 
         # Cleanup stale waiters while we're here
         self._cleanup_stale_approvals()
-
-    async def _handle_approval_response(
-        self,
-        content: str,
-        waiter_key: Tuple[str, str],
-        message_obj: Any,
-        is_dm: bool,
-    ):
-        """Handle a user's response to a pending approval."""
-        waiter = _pending_approvals.get(waiter_key)
-        if not waiter:
-            return
-
-        normalized = content.strip().lower()
-
-        # Cancel / deny
-        if normalized in ("cancel", "deny", "no", "abort"):
-            del _pending_approvals[waiter_key]
-            logger.info(f"Discord: User cancelled approval for {waiter.get('tool_name')}")
-            await self._send_response(
-                message_obj,
-                f"Cancelled `{waiter.get('tool_name')}` approval. The action will expire on the server.",
-                is_dm,
-            )
-            return
-
-        # GAIA_Project-96xm: no local check is possible anymore -- only
-        # gaia-mcp (holding the TOTP secret) can say whether a code is
-        # valid. Only gate on "looks like a 6-digit code" and let the
-        # server decide; anything else falls through as an ordinary
-        # message, same as before.
-        code = content.strip()
-        if not re.fullmatch(r"\d{6}", code):
-            return
-        action_id = waiter["action_id"]
-
-        try:
-            result = await self._submit_mcp_approval(action_id, code)
-        except Exception as e:
-            logger.error(f"Discord: MCP approval submission failed: {e}", exc_info=True)
-            await self._send_response(
-                message_obj,
-                f"Approval submitted but MCP returned an error: {e}",
-                is_dm,
-            )
-            return
-
-        if result.get("ok"):
-            del _pending_approvals[waiter_key]
-            summary = self._summarize_tool_result(result.get("result"))
-            await self._send_response(
-                message_obj,
-                f"Approved. `{waiter['tool_name']}` executed successfully.\n{summary}",
-                is_dm,
-            )
-        elif result.get("error") == "action not found or expired":
-            del _pending_approvals[waiter_key]
-            await self._send_response(
-                message_obj,
-                "This approval has expired. Please trigger the action again.",
-                is_dm,
-            )
-        elif result.get("error") == "invalid approval string":
-            # Wrong or stale code -- leave the waiter registered so they
-            # can just try again with a fresh one.
-            logger.info(f"Discord: Wrong authenticator code for {waiter.get('tool_name')}")
-            await self._send_response(
-                message_obj,
-                "That code didn't work -- try again with your current authenticator code, or say **cancel**.",
-                is_dm,
-            )
-        else:
-            error_msg = result.get("error", "unknown error")
-            await self._send_response(
-                message_obj,
-                f"Approved, but `{waiter['tool_name']}` failed: {error_msg}",
-                is_dm,
-            )
-
-    async def _submit_mcp_approval(self, action_id: str, approval: str) -> dict:
-        """Submit an approval to MCP's /approve_action endpoint."""
-        url = f"{_MCP_BASE_URL}/approve_action"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, json={"action_id": action_id, "approval": approval})
-            if resp.status_code == 404:
-                return {"error": "action not found or expired"}
-            if resp.status_code == 403:
-                return {"error": "invalid approval string"}
-            resp.raise_for_status()
-            return resp.json()
 
     def _cleanup_stale_approvals(self):
         """Remove approval waiters older than _APPROVAL_STALE_SECONDS."""

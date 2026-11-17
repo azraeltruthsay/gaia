@@ -55,7 +55,9 @@ def test_wrong_code_leaves_it_parked_for_retry():
 
 def test_cancel_drops_the_pending_action():
     s = _parked()
-    assert ar.handle(s, "dm1", "cancel").startswith("Cancelled")
+    dropped = []
+    reply = ar.handle(s, "dm1", "cancel", cancel=lambda a: dropped.append(a) or {"ok": True, "cancelled": True})
+    assert reply.startswith("Cancelled") and dropped == ["a-1"]   # twxs: in gaia-mcp too
     assert ar.handle(s, "dm1", "482913", approve=lambda *a: 1 / 0) is None
 
 
@@ -208,3 +210,10 @@ def test_parked_from_a_file_reconfirms_too(tmp_path, monkeypatch):
 def test_a_rejected_code_report_is_kept():
     msg = "That code didn't approve `x`: invalid or expired authenticator code. Try again, or say cancel."
     assert ar.compact(msg) == msg
+
+
+def test_cancel_says_so_when_mcp_does_not_confirm():
+    s = _parked()
+    reply = ar.handle(s, "dm1", "cancel", cancel=lambda a: {"ok": False, "error": "timeout"})
+    assert "didn't confirm" in reply and "15 minutes" in reply
+    assert s.get_session_meta("dm1", ar.KEY) is None

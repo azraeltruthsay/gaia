@@ -125,7 +125,8 @@ def _show(result) -> str:
     return str(result)[:1800]
 
 
-def handle(session_manager, session_id: str, text: str, approve=None) -> Optional[str]:
+def handle(session_manager, session_id: str, text: str, approve=None,
+           cancel=None) -> Optional[str]:
     """A reply if `text` answers this session's pending approval, else None."""
     try:
         pending = session_manager.get_session_meta(session_id, KEY) or _parked(session_id)
@@ -140,6 +141,16 @@ def handle(session_manager, session_id: str, text: str, approve=None) -> Optiona
     label = pending.get("label") or "that"
     if said.lower() in _CANCEL:
         _forget(session_manager, session_id)
+        # twxs: drop it in gaia-mcp too, or a code could still approve it.
+        if cancel is None:
+            from gaia_core.utils.mcp_client import cancel_action_via_mcp as cancel
+        try:
+            r = cancel(pending["action_id"]) or {}
+        except Exception as e:
+            r = {"ok": False, "error": str(e)}
+        if not r.get("ok"):
+            return (f"Cancelled `{label}` here, but gaia-mcp didn't confirm it "
+                    f"({r.get('error') or 'no answer'}); it expires on its own within 15 minutes.")
         return f"Cancelled `{label}`; it won't run."
     # GAIA_Project-96xm: no local check is possible anymore -- only
     # gaia-mcp (holding the TOTP secret) can say whether a code is valid.

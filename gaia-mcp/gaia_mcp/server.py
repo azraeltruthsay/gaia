@@ -294,6 +294,24 @@ async def approve_action_endpoint(request: Request):
         return JSONResponse(content={"ok": False, "error": str(e)}, status_code=500)
 
 
+@app.post("/cancel_action")
+async def cancel_action_endpoint(request: Request):
+    """Drop a pending action without running it (twxs: "cancel" in chat
+    only forgot it on the core's side; it stayed approvable here until
+    its 15 minutes ran out)."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    action_id = (body or {}).get("action_id")
+    if not action_id:
+        return JSONResponse(content={"ok": False, "error": "action_id is required"}, status_code=400)
+    cancelled = approval_store.cancel(action_id)
+    if cancelled:
+        logger.info(f"🚫 ACTION CANCELLED: {action_id}")
+    return {"ok": True, "cancelled": cancelled}
+
+
 @app.get("/")
 def read_root():
     return {"message": "GAIA MCP-Lite Server is running."}

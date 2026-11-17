@@ -30,7 +30,7 @@ def _normalize_endpoint(ep: str) -> str:
     if ep.endswith("/jsonrpc"):
         return ep
     # If it already ends with a path (e.g., /approve_action), leave as-is for non-RPC callers.
-    if ep.endswith("/approve_action") or ep.endswith("/request_approval") or ep.endswith("/pending_approvals"):
+    if ep.endswith(("/approve_action", "/request_approval", "/pending_approvals", "/cancel_action")):
         return ep
     if ep.endswith("/"):
         return ep + "jsonrpc"
@@ -480,6 +480,22 @@ def approve_action_via_mcp(action_id: str, approval: str) -> Dict:
         return {"ok": True, "result": r.json()}
     except Exception as e:
         logger.error(f"Failed to submit approval via MCP: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+def cancel_action_via_mcp(action_id: str) -> Dict:
+    """Drop a pending action in gaia-mcp so no code can approve it (twxs)."""
+    endpoint = _normalize_endpoint(os.getenv("MCP_LITE_ENDPOINT") or config.get_endpoint("mcp"))
+    if not endpoint:
+        return {"ok": False, "error": "no endpoint"}
+    url = endpoint.replace('/jsonrpc', '/cancel_action')
+    try:
+        r = requests.post(url, json={"action_id": action_id},
+                          headers=_signed("POST", "/cancel_action"), timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        logger.warning(f"Failed to cancel MCP action {action_id}: {e}")
         return {"ok": False, "error": str(e)}
 
 

@@ -68,3 +68,19 @@ def test_a_failure_after_a_right_code_is_reported_as_approved(approval_store, to
     out = asyncio.run(server.approve_action_endpoint(_Req(
         {"action_id": action_id, "approval": totp_code(totp_secret)})))
     assert out == {"ok": False, "approved": True, "method": "file", "error": "Path not allowed"}
+
+
+def test_cancel_drops_the_action_so_no_code_approves_it(approval_store, totp_secret, monkeypatch):
+    # twxs: "cancel" in chat now reaches gaia-mcp, not just the core's memory.
+    monkeypatch.setattr(server, "approval_store", approval_store)
+    action_id, _, _ = approval_store.create_pending("file", {"action": "write", "path": "/sandbox/x"},
+                                                    allow_pending=True)
+    out = asyncio.run(server.cancel_action_endpoint(_Req({"action_id": action_id})))
+    assert out == {"ok": True, "cancelled": True}
+    assert approval_store.list_pending() == []
+    resp = asyncio.run(server.approve_action_endpoint(_Req(
+        {"action_id": action_id, "approval": totp_code(totp_secret)})))
+    assert resp.status_code == 403
+    again = asyncio.run(server.cancel_action_endpoint(_Req({"action_id": action_id})))
+    assert again == {"ok": True, "cancelled": False}
+    assert asyncio.run(server.cancel_action_endpoint(_Req({}))).status_code == 400
