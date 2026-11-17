@@ -3670,7 +3670,8 @@ class AgentCore:
             # exchange ("Where did he get the sword?"), which reads as chat.
             from gaia_core.cognition.nlu.intent_detection import (
                 conversation_topic, is_conversation_recall, is_factual_pushback,
-                is_conversation_followup, is_knowledge_followup, mentions_a_conversation)
+                is_conversation_followup, is_knowledge_followup, is_recent_recall,
+                mentions_a_conversation)
             # 02m5: "that's not accurate, he spoke with you yesterday" disputes
             # her memory of a conversation. The record answers that, not the web.
             _pushback = (is_factual_pushback(user_input, history)
@@ -3682,7 +3683,10 @@ class AgentCore:
                                               or is_conversation_followup(user_input, history))
             _followup = (not _pushback and not _conv_recall
                          and is_knowledge_followup(user_input, history))
-            if _lookup_recalled:
+            # vdaj: "what were we just talking about?" is answered by the turns
+            # on screen (CFR keeps them in focus); any search here drowns them.
+            _recent_recall = not _lookup_recalled and is_recent_recall(user_input)
+            if _lookup_recalled or _recent_recall:
                 _pushback = _conv_recall = _followup = False
             # Outcome ledger (gjuh.2): a dispute is the strongest signal the
             # last answer went wrong; the miner joins it to that turn's records.
@@ -3692,6 +3696,9 @@ class AgentCore:
             try:
                 if _lookup_recalled:
                     _grounding_ctx = None  # answered from the earlier search (bxzc)
+                elif _recent_recall:
+                    _grounding_ctx = None
+                    logger.info("KnowledgeRouter: skipped — asks about this conversation; the visible turns answer it")
                 elif _pushback:
                     from gaia_core.cognition.knowledge_router import (
                         disputed_exchange, ground_conversation)
@@ -3743,7 +3750,8 @@ class AgentCore:
                     )
                 outcome_ledger.record_lookup(
                     session_id, packet.header.packet_id,
-                    mode=("earlier_lookup" if _lookup_recalled else "pushback" if _pushback else "conversation" if _conv_recall
+                    mode=("earlier_lookup" if _lookup_recalled else "visible_turns" if _recent_recall
+                          else "pushback" if _pushback else "conversation" if _conv_recall
                           else "follow-up" if _followup
                           else "recall" if _kr_skip else "ground"),
                     query=getattr(_grounding_ctx, "query", "") or user_input,

@@ -405,10 +405,19 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         raise ValueError(f"Tool '{method}' is not a valid, implemented tool.")
 
     # Execute the tool
-    if method in tool_map:
-        return tool_map[method](params)
-    elif method in async_tool_map:
-        return await async_tool_map[method](params)
+    try:
+        if method in tool_map:
+            return tool_map[method](params)
+        elif method in async_tool_map:
+            return await async_tool_map[method](params)
+    except KeyError as e:
+        # vdaj: context(rolling) with no doc_id crashed as "Internal error:
+        # 'doc_id'". A parameter the call left out is the caller's mistake:
+        # say which one, as a failed result the model can read.
+        missing = e.args[0] if e.args else None
+        if isinstance(missing, str) and missing not in (params or {}):
+            raise ValueError(f"'{method}' needs the parameter '{missing}'") from None
+        raise
     
     raise ValueError(f"Tool '{method}' failed to dispatch.")
 

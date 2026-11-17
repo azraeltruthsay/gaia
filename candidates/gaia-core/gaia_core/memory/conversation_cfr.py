@@ -64,6 +64,13 @@ _REFERENCE_MARKERS = (
     " the name", " the title", " the author", " the source", " the article",
     " the poem", " the result", " you just", " you said", " you mentioned",
     " earlier", " above", " before that", " which one", " what was",
+    # vdaj: asking about the conversation itself ("what were we just talking
+    # about?", "where were we?", "what did I ask?"). These share no words
+    # with the turns they ask about, so cosine relevance blurs exactly the
+    # turns that answer them.
+    " what were", " were we", " we were", " talking about", " just now",
+    " a moment ago", " last thing", " recap", " what did i", " i asked",
+    " i just", " i said", " what did we", " we discussed", " we talked",
 )
 
 
@@ -126,6 +133,24 @@ def select_focus_turns(
     if _is_reference:
         anchor_n = max(anchor_n, int(_cfg_float("CFR_REFERENCE_ANCHOR", 4.0)))
         floor = min(floor, 0.15)
+    # vdaj: "where were we before that?" asks about the conversation itself, a
+    # few exchanges back. Keep the whole recent window in order, not just 4.
+    try:
+        from gaia_core.cognition.nlu.intent_detection import is_recent_recall
+        _is_recall = is_recent_recall(current_msg)
+    except Exception:
+        _is_recall = False
+    if _is_recall:
+        # Count exchanges, not messages: a reply after a tool call and a second
+        # mind's note are messages of their own, and six messages reached back
+        # less than three exchanges.
+        _is_reference = True
+        _want = int(_cfg_float("CFR_RECALL_EXCHANGES", 4.0))
+        _cap = int(_cfg_float("CFR_RECALL_MAX_MESSAGES", 12.0))
+        _users = [i for i, t in enumerate(history) if t.get("role") == "user"]
+        _start = _users[-_want] if len(_users) >= _want else 0
+        anchor_n = max(anchor_n, min(len(history) - _start, _cap))
+        max_focus = max(max_focus, anchor_n)
 
     anchor_n = max(0, min(anchor_n, len(history)))
     _tail = history[-anchor_n:] if anchor_n else []

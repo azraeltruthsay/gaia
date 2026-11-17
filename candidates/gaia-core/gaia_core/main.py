@@ -2449,6 +2449,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                             session_id, ", ".join(_t.tool_name + (f"({_t.tool_action})" if _t.tool_action else "")
                                                   for _t in _pending_tool_calls))
                 try:
+                    _agent_core.session_manager.drop_raw_tool_call_reply(session_id)
                     _agent_core.session_manager.add_message(session_id, "assistant", full_response)
                 except Exception:
                     log_gaia_error(logger, "GAIA-CORE-081",

@@ -230,6 +230,23 @@ class SessionManager:
             # If not archiving, just save the new message to the state file
             self._save_state()
 
+    def drop_raw_tool_call_reply(self, session_id: str) -> bool:
+        """vdaj: the slim path keeps its reply before the stream path sees the
+        tool call in it; the stream path then keeps the reply after the tool.
+        Both stayed, so one exchange took two assistant turns, one of them raw
+        call markup, and CFR's last-N window reached back less far. Drop the
+        raw one (the latest turn, an assistant turn holding call markup)."""
+        session = self.sessions.get(session_id)
+        if not session or not session.history:
+            return False
+        last = session.history[-1]
+        text = last.get("content") or ""
+        if last.get("role") != "assistant" or not any(
+                m in text for m in ("<tool_call>", "<|tool>", "<|tool|>", "<tool_calling:")):
+            return False
+        session.history.pop()
+        return True
+
     # ── Tool-result ledger (231 Phase 1) ───────────────────────────────────
     # Tool/fetch results are emitted to the user but never become durable turns,
     # so a later "what's its name / the link?" has nothing to ground on and GAIA

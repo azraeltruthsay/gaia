@@ -998,6 +998,28 @@ def is_conversation_recall(text: str) -> bool:
         stripped.endswith("?") or bool(_CONV_PROMPT_RE.search(stripped)))
 
 
+# vdaj: a question about the conversation happening right now ("what were we
+# just talking about?", "where were we?", "what did I just ask?"). The turns
+# on screen answer it: searching the web or the lookup memory for the phrase
+# found pages about the phrase, and she answered from those.
+_RECENT_RECALL_RE = re.compile(
+    r"\bwhat\s+(were|are|have)\s+we\s+(just\s+|been\s+)*(talking|chatting|discussing|talked|discussed)\b"
+    r"|\bwhere\s+were\s+we\b"
+    r"|\bwhat\s+(did|was)\s+(i|you|we)\s+just\s+(say|ask|tell|talk|discuss|saying|asking|talking)\w*\b"
+    r"|\bwhat\s+was\s+(i|you|we)\s+(just\s+)?(saying|asking|talking)\b"
+    r"|\bwhat\s+did\s+(i|you|we)\s+(\w+\s+){0,3}?(say|ask|tell|talk|discuss)\w*\b"
+    r".*\b(a\s+(moment|minute|second|bit)\s+ago|just\s+now)\b"
+    r"|\b(recap|summari[sz]e)\s+(this|our|the)\s+(conversation|chat|discussion)\b",
+    re.I)
+
+
+def is_recent_recall(text: str) -> bool:
+    """True for a question about the conversation right now, which the visible
+    turns answer: "what were we just talking about?", "where were we?"."""
+    stripped = (text or "").strip()
+    return bool(stripped) and len(stripped) <= 200 and bool(_RECENT_RECALL_RE.search(stripped))
+
+
 def conversation_topic(text: str) -> str:
     """What a conversation-recall question asks about, with the recall
     phrasing removed: "What did we talk about regarding the memory palace?"

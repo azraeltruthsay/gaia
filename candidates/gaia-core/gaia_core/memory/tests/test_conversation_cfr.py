@@ -20,6 +20,12 @@ from gaia_core.memory.conversation_cfr import looks_like_reference_query, select
     "You just said something interesting",
     "what was that?",
     "which one is better",
+    # vdaj: questions about the conversation itself
+    "what were we just talking about?",
+    "where were we?",
+    "what did I ask you a moment ago?",
+    "can you recap?",
+    "what did we discuss?",
 ])
 def test_reference_queries_detected(msg):
     assert looks_like_reference_query(msg) is True
@@ -121,3 +127,49 @@ def test_stale_but_topically_relevant_turn_still_excluded_by_scoring():
     focus, dbg = select_focus_turns(
         history, "which containers am I running again?", max_focus=6, anchor_n=1)
     assert not any(t["id"] == "old" for t in focus)
+
+
+def test_conversation_recall_keeps_last_exchanges_vdaj():
+    # 2026-11-16: "what were we just talking about?" after Canberra turns got
+    # 1 focus / 5 blurred and she answered "who I am". The recall question
+    # must keep the last two exchanges whatever their cosine score.
+    history = [
+        {"id": "a", "role": "user", "content": "who are you?"},
+        {"id": "b", "role": "assistant", "content": "I'm GAIA, built by Azrael."},
+        {"id": "c", "role": "user", "content": "what's the capital of Australia?"},
+        {"id": "d", "role": "assistant", "content": "Canberra."},
+        {"id": "e", "role": "user", "content": "and its population?"},
+        {"id": "f", "role": "assistant", "content": "About 470,000 people."},
+    ]
+    focus, dbg = select_focus_turns(history, "what were we just talking about?",
+                                    max_focus=6, anchor_n=1)
+    assert dbg.get("reference") is True
+    kept = {t["id"] for t in focus}
+    assert {"c", "d", "e", "f"} <= kept
+
+
+def test_conversation_recall_keeps_whole_window_vdaj():
+    # "where were we before that?" reaches past the last two exchanges.
+    history = _hist(8)
+    focus, dbg = select_focus_turns(history, "where were we before that?",
+                                    max_focus=6, anchor_n=1)
+    assert [t["id"] for t in focus] == ["m0", "m1", "m2", "m3", "m4", "m5", "m6", "m7"]
+
+
+def test_conversation_recall_counts_exchanges_not_messages_vdaj():
+    # Extra assistant messages (a reply after a tool call, a second mind's
+    # note) must not push the earlier exchanges out.
+    history = [
+        {"id": "u1", "role": "user", "content": "who are you?"},
+        {"id": "a1", "role": "assistant", "content": "I'm GAIA <tool_call>"},
+        {"id": "a1b", "role": "assistant", "content": "I'm GAIA, built by Azrael."},
+        {"id": "u2", "role": "user", "content": "capital of Australia?"},
+        {"id": "a2", "role": "assistant", "content": "Canberra."},
+        {"id": "u3", "role": "user", "content": "its population?"},
+        {"id": "a3", "role": "assistant", "content": "About 485,000."},
+        {"id": "a3b", "role": "assistant", "content": "*[Second mind]* can't back that up"},
+        {"id": "u4", "role": "user", "content": "what were we just talking about?"},
+        {"id": "a4", "role": "assistant", "content": "Canberra's population."},
+    ]
+    focus, _ = select_focus_turns(history, "where were we before that?", max_focus=6, anchor_n=1)
+    assert [t["id"] for t in focus] == [t["id"] for t in history]
