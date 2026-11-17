@@ -164,6 +164,12 @@ class SessionManager:
         """
         if role == "assistant":
             content = _strip_mind_tag(_strip_think_tags_robust(content))
+            # 0ait: an approval card is kept as one line; whole, she copies it.
+            try:
+                from gaia_core.cognition.approval_reply import compact
+                content = compact(content)
+            except Exception:
+                logger.debug("approval card compaction failed", exc_info=True)
             if not content.strip():
                 logger.warning(f"Skipping empty assistant message for session '{session_id}' (was only think tags)")
                 return

@@ -127,3 +127,84 @@ def test_approved_but_the_tool_failed_says_so_and_is_spent():
     reply = ar.handle(s, "dm1", "482913", approve=approve)
     assert reply.startswith("Approved, but `shell(run)` failed: Path not allowed")
     assert ar.handle(s, "dm1", "482913", approve=approve) is None
+
+
+# --- 0ait: a card copied from history must not approve an older action ---
+
+from datetime import datetime, timezone  # noqa: E402
+
+
+class SessionsWithHistory(Sessions):
+    def __init__(self):
+        super().__init__()
+        self.history = {}
+
+    def say(self, sid, role, text, at=None):
+        ts = datetime.fromtimestamp(at or time.time(), timezone.utc).isoformat()
+        self.history.setdefault(sid, []).append({"role": role, "content": text, "timestamp": ts})
+
+    def get_history(self, sid):
+        return self.history.get(sid, [])
+
+
+CARD = ("That needs your approval first: `worldbuild(update)` "
+        '{"action": "update", "entity": "Leshen", "append_entry": "x"}. '
+        "Reply with your current 6-digit authenticator code to approve, or say cancel.")
+
+
+def test_card_is_kept_as_one_line():
+    out = ar.compact("Sure. " + CARD)
+    assert out == "Sure. (I asked for approval to run `worldbuild(update)`.)"
+    assert "authenticator" not in out and "Leshen" not in out
+
+
+def test_other_requests_for_a_code_are_dropped():
+    out = ar.compact("Done thinking. Please send your authenticator code to proceed.\nAnything else?")
+    assert "authenticator" not in out and "Anything else?" in out
+    assert ar.compact("Hello there.") == "Hello there."
+
+
+def test_code_right_after_the_card_approves():
+    s = SessionsWithHistory()
+    ar.remember(s, "dm1", "a-1", "worldbuild(update)", {"entity": "Leshen"})
+    s.say("dm1", "assistant", CARD)
+    seen = []
+    reply = ar.handle(s, "dm1", "123456",
+                      approve=lambda a, c: seen.append(a) or {"ok": True, "result": {"ok": True}})
+    assert seen == ["a-1"] and reply.startswith("Approved.")
+
+
+def test_code_after_she_spoke_again_reconfirms_first():
+    s = SessionsWithHistory()
+    ar.remember(s, "dm1", "a-1", "worldbuild(update)", {"entity": "Leshen"})
+    s.say("dm1", "assistant", CARD)
+    s.say("dm1", "user", "add it again")
+    s.say("dm1", "assistant", CARD)          # copied, no new action behind it
+    seen = []
+
+    def approve(a, c):
+        seen.append(a)
+        return {"ok": True, "result": {"ok": True}}
+
+    reply = ar.handle(s, "dm1", "123456", approve=approve)
+    assert seen == [] and "didn't use that code" in reply
+    assert "worldbuild(update)" in reply and "Leshen" in reply
+    s.say("dm1", "assistant", reply)         # agent_core stores the reconfirmation
+    reply = ar.handle(s, "dm1", "654321", approve=approve)
+    assert seen == ["a-1"] and reply.startswith("Approved.")
+
+
+def test_parked_from_a_file_reconfirms_too(tmp_path, monkeypatch):
+    monkeypatch.setattr(ar, "APPROVALS_DIR", tmp_path)
+    s = SessionsWithHistory()
+    ar.park_for("dm2", "p-1", "send my letter")
+    s.say("dm2", "assistant", "one")
+    s.say("dm2", "assistant", "two")
+    reply = ar.handle(s, "dm2", "123456", approve=lambda *a: 1 / 0)
+    assert "didn't use that code" in reply
+    assert ar._parked("dm2")["reshown_at"]
+
+
+def test_a_rejected_code_report_is_kept():
+    msg = "That code didn't approve `x`: invalid or expired authenticator code. Try again, or say cancel."
+    assert ar.compact(msg) == msg

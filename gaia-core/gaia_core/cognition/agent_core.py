@@ -10959,7 +10959,8 @@ Start your response with the first line of the file."""
                             from gaia_core.cognition import approval_reply
                             approval_reply.remember(
                                 self.session_manager, session_id, rpc_result.get("action_id"),
-                                _tool_label)
+                                _tool_label,
+                                {k: v for k, v in (tool.params or {}).items() if not k.startswith('_')})
                         except Exception:
                             logger.warning("Could not remember the pending approval", exc_info=True)
                         # Parked behind the human gate. Keep the action

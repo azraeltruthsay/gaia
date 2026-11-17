@@ -2037,7 +2037,7 @@ async def process_packet(packet_data: Dict[str, Any]):
                             try:
                                 from gaia_core.cognition import approval_reply
                                 approval_reply.remember(_agent_core.session_manager, session_id,
-                                                        rpc_result.get("action_id"), _label)
+                                                        rpc_result.get("action_id"), _label, _shown)
                             except Exception:
                                 logger.warning("Could not remember the pending approval", exc_info=True)
                             try:
