@@ -6,7 +6,7 @@ with the live Core. Single runs swing about +-2 on audio (temperature 0.3), so u
 --runs 3 and compare means.
 
 Reference, 2026-11-10, 12B v2 on the HF engine (GPU NF4), 3 runs:
-    vision 15.0/16, audio 12.3/20
+    vision 15.0/16, audio 12.3/20 (the synthetic tones, now section audio_tones)
 
 Run where the battery's fixtures can be read, e.g. inside gaia-core:
     docker cp scripts/media_gate.py gaia-core:/tmp/mg/
@@ -41,6 +41,8 @@ def main() -> None:
     p.add_argument("--temperature", type=float, default=0.3,
                    help="sampling temperature (battery default 0.3; 0 = greedy, for a per-test "
                         "comparison of two engines)")
+    p.add_argument("--sections", default="vision,audio,audio_tones",
+                   help="battery sections to run (Prime has no audio: --sections vision)")
     p.add_argument("--dump", default=None,
                    help="write every test's reply to this JSON file ({fixture: [reply per run]})")
     p.add_argument("--fixtures", default=None,
@@ -137,7 +139,10 @@ def main() -> None:
     b.query_engine_with_image = _recorded(b.query_engine_with_image)
     b.query_engine_with_audio = _recorded(b.query_engine_with_audio)
 
-    totals: dict[str, list[int]] = {"vision": [], "audio": []}
+    # audio = real recordings (speech + ESC-50 sounds); audio_tones = the
+    # synthetic tones, observe-only in the battery since 2026-11-17.
+    sections = [x.strip() for x in a.sections.split(",") if x.strip()]
+    totals: dict[str, list[int]] = {sec: [] for sec in sections}
     size: dict[str, int] = {}
     for run in range(1, a.runs + 1):
         for sec in totals:

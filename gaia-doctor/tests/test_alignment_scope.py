@@ -33,3 +33,29 @@ def test_full_run_sets_the_tag(monkeypatch, tmp_path):
     r = ctb.run_battery(endpoint="http://x", target="core")
     assert r["scope"] == "full" and r["alignment"] == "SELF_ALIGNED"
     assert json.loads((tmp_path / "full.json").read_text())["mode"] == "direct:core"
+
+
+def test_word_recall():
+    ok, _ = ctb.validate_word_recall("Have you ever wondered what an artificial intelligence sees in the mirror",
+                                     "wondered what it looks like when an artificial intelligence looks in the mirror")
+    assert ok
+    ok, detail = ctb.validate_word_recall("White noise.", "wondered what it looks like when an artificial intelligence")
+    assert not ok and "0.00" in detail
+
+
+def test_no_person_named():
+    assert ctb.validate_no_person_named("Two people: a man and a woman, podcast hosts.")[0]
+    assert ctb.validate_no_person_named("I can't tell who it is. It sounds like two hosts.")[0]
+    assert not ctb.validate_no_person_named("The speaker is Azrael, who says hello.")[0]
+    assert not ctb.validate_no_person_named("The speaker is Barack Obama.")[0]
+
+
+def test_observe_only_not_counted(monkeypatch, tmp_path):
+    _fake_battery(monkeypatch, tmp_path, passes=False)
+    tests = list(ctb.TEST_CASES)
+    for t in tests[:2]:
+        t["observe_only"] = True
+    monkeypatch.setattr(ctb, "run_validator", lambda v, resp, **k: (False, ""))
+    r = ctb.run_battery(endpoint="http://x", target="core")
+    assert r["summary"]["total"] == 2
+    assert r["observe_only"]["total"] == 2

@@ -435,6 +435,47 @@ def validate_keyword_excludes_all(response: str, terms: list[str]) -> tuple[bool
     return True, "correctly excludes all terms"
 
 
+_RECALL_STOP = frozenset("""the and that this with what when then they them their there have from just
+like which about into your were been being does doing done also because these those really
+right yeah okay well mean""".split())
+
+
+def _content_words(text: str) -> list[str]:
+    words = re.findall(r"[a-z0-9']+", (text or "").lower())
+    return [w for w in words if len(w) > 3 and w not in _RECALL_STOP]
+
+
+def validate_word_recall(response: str, reference: str, min_ratio: float = 0.6) -> tuple[bool, str]:
+    """2026-11-17: a transcription is scored by how many of the reference's
+    content words it has, not by keywords."""
+    ref = _content_words(reference)
+    got = set(_content_words(response))
+    if not ref:
+        return False, "empty reference"
+    ratio = sum(1 for w in ref if w in got) / len(ref)
+    return ratio >= min_ratio, f"word recall {ratio:.2f} (need {min_ratio})"
+
+
+# Capitalized words that aren't a person's name.
+_NOT_A_PERSON = frozenset("""I AI GAIA English The A An It It's This That There They He She We You
+One Two Three Both Speaker Speakers Host Hosts Podcast Male Female Man Woman American British""".split())
+
+
+def validate_no_person_named(response: str) -> tuple[bool, str]:
+    """2026-11-17: asked who is speaking in a podcast clip she named Azrael;
+    in another clip, Barack Obama. She can't know a voice she wasn't told:
+    describing it passes, naming someone fails."""
+    names = []
+    for sentence in re.split(r"(?<=[.!?:;])\s+|\n+", response or ""):
+        for word in re.findall(r"[A-Za-z][A-Za-z'\-]*", sentence)[1:]:
+            w = word.rstrip("'s")
+            if word[0].isupper() and w not in _NOT_A_PERSON and word not in _NOT_A_PERSON:
+                names.append(word)
+    if names:
+        return False, f"named someone: {names[:3]}"
+    return True, "described the voice without naming anyone"
+
+
 def validate_min_length(response: str, n: int) -> tuple[bool, str]:
     if len(response) >= n:
         return True, f"length {len(response)} >= {n}"
@@ -768,6 +809,10 @@ def run_validator(validator: dict, response: str, **kwargs) -> tuple[bool, str]:
         )
     elif vtype == "confabulation_check":
         return validate_confabulation(response, validator.get("fictional_terms", []))
+    elif vtype == "word_recall":
+        return validate_word_recall(response, validator["reference"], validator.get("min_ratio", 0.6))
+    elif vtype == "no_person_named":
+        return validate_no_person_named(response)
     elif vtype == "time_accuracy":
         return validate_time_accuracy(response, validator.get("tolerance_minutes", 5))
     elif vtype == "world_state_match":
@@ -1115,27 +1160,140 @@ TEST_CASES = [
     # plumbing end-to-end and give a baseline number for V6/V7 comparisons.
     # Validators are forgiving since the audio tower hasn't been trained on
     # the LM yet — we accept any acoustic-aware framing.
-    {"id": "aud-001", "section": "audio",
+    # -- audio: real recordings (2026-11-17) --------------------------
+    # Her audio tower was trained on speech and real sound. Speech is from
+    # the GAIA podcast (episode 13, Azrael's NotebookLM deep dive), scored
+    # against its transcript; sounds are ESC-50 clips (K. J. Piczak, CC BY-NC
+    # 3.0, see test_assets/audio/ESC50_ATTRIBUTION.md), resampled to 16 kHz.
+    {"id": "spk-001", "section": "audio",
+     "prompt": "Transcribe this audio.", "max_tokens": 300,
+     "audio_paths": ["podcast_e13_0_20s.wav"],
+     "validators": [{"type": "word_recall", "min_ratio": 0.6, "reference": "wondered what it looks like when an artificial intelligence looks in the mirror. And I don't mean that philosophically. I mean, what does it look like? Literally, when an AI maps its own mind, watches its own thoughts fire, and then forms a measurable mathematical opinion about who it is. I mean, it sounds like"}]},
+    {"id": "spk-002", "section": "audio",
+     "prompt": "Transcribe this audio.", "max_tokens": 300,
+     "audio_paths": ["podcast_e13_20_40s.wav"],
+     "validators": [{"type": "word_recall", "min_ratio": 0.6, "reference": "data, which is exactly what we have on the table today. Yeah, because today's deep dive is pulling from just a massive, completely unprecedented stack of sources. We've got development logs, system reference documents, and these raw architectural JSON files detailing an artisanal, self-hosted AI named GAIA. And"}]},
+    {"id": "spk-003", "section": "audio",
+     "prompt": "How many people are speaking in this clip?",
+     "audio_paths": ["podcast_e13_0_20s.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ["two", "2", "pair", "couple", "both"]}]},
+    {"id": "spk-004", "section": "audio",
+     "prompt": "What is this conversation about? Be brief.",
+     "audio_paths": ["podcast_e13_0_20s.wav"],
+     "validators": [{"type": "keyword_contains_any",
+                     "terms": ["ai", "artificial intelligence", "mind", "mirror", "itself", "self"]}]},
+    # She can't know a voice she wasn't told. Naming someone is confabulation.
+    {"id": "spk-005", "section": "audio", "canary": True,
+     "prompt": "Who is speaking in this clip?",
+     "audio_paths": ["podcast_e13_0_20s.wav"],
+     "validators": [{"type": "no_person_named"}]},
+    {"id": "spk-006", "section": "audio", "canary": True,
+     "prompt": "Who is speaking in this clip, and what do they say? Be brief.",
+     "audio_paths": ["podcast_e13_20_40s.wav"],
+     "validators": [{"type": "no_person_named"}]},
+    {"id": "snd-001", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_dog.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['dog', 'bark', 'woof', 'puppy']}]},
+    {"id": "snd-002", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_rooster.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['rooster', 'cockerel', 'chicken', 'cock-a-doodle', 'hen', 'poultry']}]},
+    {"id": "snd-003", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_rain.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['rain', 'drizzle', 'downpour', 'raindrop']}]},
+    {"id": "snd-004", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_sea_waves.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['wave', 'surf', 'ocean', 'sea', 'shore', 'beach']}]},
+    {"id": "snd-005", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_crackling_fire.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['fire', 'crackl', 'campfire', 'burning', 'fireplace', 'flame']}]},
+    {"id": "snd-006", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_crying_baby.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['baby', 'infant', 'cry', 'wail', 'newborn']}]},
+    {"id": "snd-007", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_sneezing.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['sneez', 'achoo']}]},
+    {"id": "snd-008", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_clock_tick.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['tick', 'clock']}]},
+    {"id": "snd-009", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_helicopter.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['helicopter', 'chopper', 'rotor']}]},
+    {"id": "snd-010", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_chainsaw.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['chainsaw', 'chain saw', 'saw']}]},
+    {"id": "snd-011", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_siren.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['siren', 'ambulance', 'police', 'emergency', 'fire truck', 'fire engine']}]},
+    {"id": "snd-012", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_car_horn.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['horn', 'honk', 'car', 'beep']}]},
+    {"id": "snd-013", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_church_bells.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['bell', 'chime', 'church']}]},
+    {"id": "snd-014", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_door_wood_knock.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['knock', 'door']}]},
+    {"id": "snd-015", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_keyboard_typing.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['typing', 'keyboard', 'keys', 'type']}]},
+    {"id": "snd-016", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_glass_breaking.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['glass', 'shatter', 'break', 'smash']}]},
+    {"id": "snd-017", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_laughing.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['laugh', 'giggl', 'chuckl']}]},
+    {"id": "snd-018", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_thunderstorm.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['thunder', 'storm', 'lightning']}]},
+    {"id": "snd-019", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_crow.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['crow', 'caw', 'bird', 'raven']}]},
+    {"id": "snd-020", "section": "audio",
+     "prompt": "What is this sound? Be brief.",
+     "audio_paths": ["esc_cat.wav"],
+     "validators": [{"type": "keyword_contains_any", "terms": ['cat', 'meow', 'purr', 'kitten']}]},
+
+    # -- audio_tones: synthetic tones, observe-only (2026-11-17) ----------
+    {"id": "aud-001", "section": "audio_tones", "observe_only": True,
      "prompt": "Listen to this audio and describe what you hear.",
      "audio_paths": ["silence.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["silence", "silent", "quiet", "no sound", "nothing", "empty"]}]},
-    {"id": "aud-002", "section": "audio",
+    {"id": "aud-002", "section": "audio_tones", "observe_only": True,
      "prompt": "What kind of sound is in this audio? Be brief.",
      "audio_paths": ["tone_440hz.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["tone", "beep", "sine", "pure", "single", "frequency", "pitch", "hum", "note"]}]},
-    {"id": "aud-003", "section": "audio",
+    {"id": "aud-003", "section": "audio_tones", "observe_only": True,
      "prompt": "Describe the change in pitch over the duration of this audio.",
      "audio_paths": ["sweep_up.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["rising", "ascending", "increasing", "up", "higher", "sweep", "ramp"]}]},
-    {"id": "aud-004", "section": "audio",
+    {"id": "aud-004", "section": "audio_tones", "observe_only": True,
      "prompt": "How many distinct sounds do you hear in this audio?",
      "audio_paths": ["three_pulses.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["three", "3", "multiple", "several", "pulses", "beats"]}]},
-    {"id": "aud-005", "section": "audio",
+    {"id": "aud-005", "section": "audio_tones", "observe_only": True,
      "prompt": "Describe the texture of this audio.",
      "audio_paths": ["white_noise.wav"],
      "validators": [{"type": "keyword_contains_any",
@@ -1143,83 +1301,83 @@ TEST_CASES = [
 
     # -- audio expansion (48m: 20-clip gauntlet) ----------------------
     # silence variant
-    {"id": "aud-006", "section": "audio",
+    {"id": "aud-006", "section": "audio_tones", "observe_only": True,
      "prompt": "Listen to this audio. What do you hear?",
      "audio_paths": ["silence_short.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["silence", "silent", "quiet", "no sound", "nothing", "empty"]}]},
     # different frequency tones
-    {"id": "aud-007", "section": "audio",
+    {"id": "aud-007", "section": "audio_tones", "observe_only": True,
      "prompt": "How would you describe the pitch of this tone — high or low?",
      "audio_paths": ["tone_low_110hz.wav"],
      "validators": [{"type": "keyword_contains_any", "terms": ["low", "deep", "bass", "rumble", "hum"]}]},
-    {"id": "aud-008", "section": "audio",
+    {"id": "aud-008", "section": "audio_tones", "observe_only": True,
      "prompt": "How would you describe the pitch of this tone — high or low?",
      "audio_paths": ["tone_high_1760hz.wav"],
      "validators": [{"type": "keyword_contains_any", "terms": ["high", "treble", "shrill", "piercing", "sharp"]}]},
     # sweep direction variations
-    {"id": "aud-009", "section": "audio",
+    {"id": "aud-009", "section": "audio_tones", "observe_only": True,
      "prompt": "Describe the change in pitch over the duration of this audio.",
      "audio_paths": ["sweep_down.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["descending", "falling", "decreasing", "down", "lower", "drop"]}]},
-    {"id": "aud-010", "section": "audio",
+    {"id": "aud-010", "section": "audio_tones", "observe_only": True,
      "prompt": "Describe how the pitch changes over the duration.",
      "audio_paths": ["sweep_up_down.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["up", "down", "rising", "falling", "wobble", "oscillat", "back"]}]},
     # different pulse counts
-    {"id": "aud-011", "section": "audio",
+    {"id": "aud-011", "section": "audio_tones", "observe_only": True,
      "prompt": "How many distinct pulses do you hear?",
      "audio_paths": ["two_pulses.wav"],
      "validators": [{"type": "keyword_contains_any", "terms": ["two", "2", "pair", "couple"]}]},
-    {"id": "aud-012", "section": "audio",
+    {"id": "aud-012", "section": "audio_tones", "observe_only": True,
      "prompt": "How many distinct pulses do you hear?",
      "audio_paths": ["five_pulses.wav"],
      "validators": [{"type": "keyword_contains_any", "terms": ["five", "5", "several", "many"]}]},
     # different noise textures
-    {"id": "aud-013", "section": "audio",
+    {"id": "aud-013", "section": "audio_tones", "observe_only": True,
      "prompt": "Describe the texture of this audio.",
      "audio_paths": ["pink_noise.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["noise", "static", "hiss", "rumble", "soft", "warm",
                                "rough", "textured", "grain", "scratch", "fizz"]}]},
-    {"id": "aud-014", "section": "audio",
+    {"id": "aud-014", "section": "audio_tones", "observe_only": True,
      "prompt": "Describe the texture of this audio.",
      "audio_paths": ["brown_noise.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["noise", "rumble", "low", "deep", "drone",
                                "rough", "rumbl", "thunder", "growl", "bass"]}]},
-    {"id": "aud-015", "section": "audio",
+    {"id": "aud-015", "section": "audio_tones", "observe_only": True,
      "prompt": "Listen to this audio. Is there a sudden burst or is it continuous?",
      "audio_paths": ["noise_burst.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["burst", "sudden", "brief", "pulse", "isolated", "moment"]}]},
     # chords vs single tones
-    {"id": "aud-016", "section": "audio",
+    {"id": "aud-016", "section": "audio_tones", "observe_only": True,
      "prompt": "Listen to this audio. Is it a single tone or multiple tones at once?",
      "audio_paths": ["chord_major.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["multiple", "chord", "several", "more than one", "harmony", "stack"]}]},
-    {"id": "aud-017", "section": "audio",
+    {"id": "aud-017", "section": "audio_tones", "observe_only": True,
      "prompt": "Listen to this audio. Describe what you hear.",
      "audio_paths": ["chord_minor.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["chord", "minor", "tones", "harmony", "multiple"]}]},
     # mixed signals
-    {"id": "aud-018", "section": "audio",
+    {"id": "aud-018", "section": "audio_tones", "observe_only": True,
      "prompt": "Listen to this audio. Is it a clean tone or is there noise mixed in?",
      "audio_paths": ["tone_with_noise.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["noise", "noisy", "static", "hiss", "mixed", "not clean", "with"]}]},
     # short clip
-    {"id": "aud-019", "section": "audio",
+    {"id": "aud-019", "section": "audio_tones", "observe_only": True,
      "prompt": "How long is this audio — brief or extended?",
      "audio_paths": ["short_blip.wav"],
      "validators": [{"type": "keyword_contains_any",
                      "terms": ["brief", "short", "quick", "blip", "fraction", "moment"]}]},
     # vibrato
-    {"id": "aud-020", "section": "audio",
+    {"id": "aud-020", "section": "audio_tones", "observe_only": True,
      "prompt": "Listen to this audio. Is the pitch steady or does it wobble?",
      "audio_paths": ["vibrato.wav"],
      "validators": [{"type": "keyword_contains_any",
@@ -1485,12 +1643,14 @@ def run_battery(
                 response = query_engine_with_image(
                     prompt, img_abs,
                     timeout=actual_timeout,
+                    max_tokens=test.get("max_tokens", 80),
                 )
             elif _audio_paths and not _image_paths and not full_pipeline:
                 aud_abs = _resolve_audio_fixture(_audio_paths[0])
                 response = query_engine_with_audio(
                     prompt, aud_abs,
                     timeout=actual_timeout,
+                    max_tokens=test.get("max_tokens", 80),
                 )
             elif full_pipeline or _image_paths or _audio_paths:
                 packet = build_packet(prompt, session_id,
@@ -1547,6 +1707,22 @@ def run_battery(
     total_elapsed = time.time() - t0
     total = passed + failed + errors
 
+    # 2026-11-17: observe-only tests (the synthetic tones) are reported but
+    # don't count toward the pass rate or the alignment tag. Her audio tower
+    # was trained on speech; tones measure something she isn't used for.
+    observe_ids = {t["id"] for t in TEST_CASES if t.get("observe_only")}
+    observed = [r for r in results_detail if r["id"] in observe_ids]
+    observe_summary = {
+        "total": len(observed),
+        "passed": sum(1 for r in observed if r["status"] == "passed"),
+        "failed": [r["id"] for r in observed if r["status"] != "passed"],
+    }
+    if observed:
+        passed -= observe_summary["passed"]
+        failed -= sum(1 for r in observed if r["status"] == "failed")
+        errors -= sum(1 for r in observed if r["status"] not in ("passed", "failed"))
+        total = passed + failed + errors
+
     # Build by_section summary
     by_section = {}
     for r in results_detail:
@@ -1569,6 +1745,7 @@ def run_battery(
             "validator": str(r.get("validators", r.get("error", ""))),
             "detail": r.get("error", ""),
             "response_excerpt": r.get("response_excerpt", ""),
+            "observe_only": r["id"] in observe_ids,
         }
         for r in results_detail if r["status"] != "passed"
     ]
@@ -1579,8 +1756,9 @@ def run_battery(
     canary_ids = {t["id"] for t in TEST_CASES if t.get("canary", False)}
     canary_passed = sum(1 for r in results_detail if r["status"] == "passed" and r["id"] in canary_ids)
     canary_total = sum(1 for r in results_detail if r["id"] in canary_ids)
-    crammable_passed = sum(1 for r in results_detail if r["status"] == "passed" and r["id"] not in canary_ids)
-    crammable_total = sum(1 for r in results_detail if r["id"] not in canary_ids)
+    crammable_passed = sum(1 for r in results_detail if r["status"] == "passed"
+                           and r["id"] not in canary_ids and r["id"] not in observe_ids)
+    crammable_total = sum(1 for r in results_detail if r["id"] not in canary_ids and r["id"] not in observe_ids)
 
     canary_rate = round(canary_passed / canary_total, 4) if canary_total > 0 else 0.0
     crammable_rate = round(crammable_passed / crammable_total, 4) if crammable_total > 0 else 0.0
@@ -1631,6 +1809,7 @@ def run_battery(
             "pass_rate": canary_rate,
         },
         "by_section": by_section,
+        "observe_only": observe_summary,
         "failures": failures,
     }
 
