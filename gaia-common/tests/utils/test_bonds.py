@@ -80,3 +80,24 @@ def test_checked_told_fact_moves_teller_trust(tmp_path, monkeypatch):
                        kind="told")
     mem.record_check(ids[0], "contradicted", [])
     assert bonds.standing(reg.get(nick["id"]))["trust"] == -1
+
+
+def test_teasing_dips_then_reverts():
+    p = _p()
+    t0 = datetime(2026, 11, 12, tzinfo=timezone.utc)
+    bonds.set_level(p, "regard", 1, "friend", "Azrael", now=t0)
+    for i in range(3):
+        bonds.note(p, "regard", -1, "teased her", transient=True, now=t0 + timedelta(hours=i))
+    assert bonds.level(p, "regard", now=t0 + timedelta(hours=3)) == 0
+    assert bonds.recently(p, "teased her", now=t0 + timedelta(hours=10))
+    later = t0 + timedelta(hours=2 + bonds.TRANSIENT_HOURS + 1)
+    assert bonds.level(p, "regard", now=later) == 1
+    assert not bonds.recently(p, "teased her", now=later)
+
+
+def test_teasing_capped_at_two_levels():
+    p = _p()
+    t0 = datetime(2026, 11, 12, tzinfo=timezone.utc)
+    for i in range(20):
+        bonds.note(p, "regard", -1, "teased her", transient=True, now=t0)
+    assert bonds.level(p, "regard", now=t0) == -2

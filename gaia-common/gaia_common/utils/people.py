@@ -179,7 +179,8 @@ class PeopleRegistry:
         return True
 
     def bond_note(self, person_id: str, scale: str, points: float, why: str, evidence: str = "",
-                  by: str = "code", where: str = "", once_per_day: bool = False) -> Optional[Dict]:
+                  by: str = "code", where: str = "", once_per_day: bool = False,
+                  transient: bool = False) -> Optional[Dict]:
         """An event that moves where she stands with them (bonds.py)."""
         from gaia_common.utils import bonds
         with _lock:
@@ -187,7 +188,7 @@ class PeopleRegistry:
             if not person:
                 return None
             if bonds.note(person, scale, points, why, evidence=evidence, by=by, where=where,
-                          once_per_day=once_per_day):
+                          once_per_day=once_per_day, transient=transient):
                 self._write(person)
         return person
 

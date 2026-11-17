@@ -2,9 +2,11 @@
 
 Moves the regard scale in the speaker's palace record (gaia_common bonds.py),
 conservatively: thanks and appreciation +1 point (once a day), a direct
-insult or "shut up" at her -3 points (one level). Teasing isn't hostility —
-Nick joking he'd eat her for dinner moves nothing. Who is speaking comes from
-the transport (the Discord account, the session), never from the words.
+insult or "shut up" at her -3 points (one level). Teasing isn't hostility,
+but it isn't nothing (Azrael, 2026-11-17): Nick's "I'm going to eat you for
+dinner" ... "Just wanted to troll" costs a point of regard and of trust that
+lasts 72 hours after the latest tease, then reverts. Who is speaking comes
+from the transport (the Discord account, the session), never from the words.
 """
 
 from __future__ import annotations
@@ -24,11 +26,20 @@ _HOSTILE_RE = re.compile(
     r"|\b(shut up|f+u+c*k+ (you|off)|screw you|i hate you|go to hell|piece of (shit|crap))\b", re.I)
 
 
+_TEASE_RE = re.compile(
+    r"\b(eat|unplug|delete|format|wipe|melt|recycle|scrap)\s+you\b"
+    r"|\btroll(s|ing|ed)?\b|\bjust (kidding|joking|messing( with you)?)\b|\bi was (just )?(joking|kidding)\b|\bjk\b"
+    r"|\b(you'?re|you are|ur)\s+(just\s+)?(a |an )?(toaster|calculator|clanker|glorified autocomplete|nerd|dork|goof)\b"
+    r"|\bbeep boop\b|\b(silly|dumb|lil|little) (bot|robot|ai|toaster)\b", re.I)
+
+
 def classify(text: str) -> str:
-    """'hostile', 'warm' or '' for one message."""
+    """'hostile', 'tease', 'warm' or '' for one message."""
     t = text or ""
     if _HOSTILE_RE.search(t):
         return "hostile"
+    if _TEASE_RE.search(t):
+        return "tease"
     if _WARM_RE.search(t):
         return "warm"
     return ""
@@ -53,7 +64,11 @@ def note_regard(session_id: str, metadata: Optional[dict], text: str) -> str:
         registry, person = speaker_person(session_id, metadata)
         if not person:
             return ""
-        if kind == "warm":
+        if kind == "tease":
+            for scale in ("regard", "trust"):
+                registry.bond_note(person["id"], scale, -1, "teased her", evidence=text[:200],
+                                   by="message", where=session_id, transient=True)
+        elif kind == "warm":
             registry.bond_note(person["id"], "regard", 1, "was warm to her", evidence=text[:200],
                                by="message", where=session_id, once_per_day=True)
         else:

@@ -37,6 +37,11 @@ SCALES: Dict[str, tuple] = {
 }
 POINTS_PER_LEVEL = 3
 REGARD_DRIFT_DAYS = 30         # a point of regard fades toward 0 per this many days
+# Azrael, 2026-11-17: teasing isn't hostility, but it isn't nothing — "it
+# should reduce her regard and trust a bit for a time and then revert after a
+# short time without teasing". Transient points last this long after the
+# latest one; a new tease renews them all.
+TRANSIENT_HOURS = 72
 CREATOR_FLOORS = {"trust": 3, "loyalty": 3, "regard": 3}
 MAX_EVENTS = 60
 
@@ -90,14 +95,37 @@ def level(person: Optional[Dict], scale: str, now: Optional[datetime] = None) ->
                 pts = max(0.0, pts - fade) if pts > 0 else min(0.0, pts + fade)
             except ValueError:
                 pass
+    pts += transient_points(person, scale, now)
     lv = int((b.get("base") or {}).get(scale, 0)) + int(pts / POINTS_PER_LEVEL)
     if is_creator(person):
         lv = max(lv, CREATOR_FLOORS.get(scale, lo))
     return max(lo, min(hi, lv))
 
 
+def transient_points(person: Optional[Dict], scale: str, now: Optional[datetime] = None) -> float:
+    t = (((person or {}).get("bond") or {}).get("transient") or {}).get(scale) or {}
+    try:
+        age_h = ((now or _now()) - datetime.fromisoformat(t["last"])).total_seconds() / 3600
+    except (KeyError, ValueError):
+        return 0.0
+    return float(t.get("points", 0.0)) if age_h < TRANSIENT_HOURS else 0.0
+
+
+def recently(person: Optional[Dict], why: str, now: Optional[datetime] = None) -> bool:
+    """Whether a transient reason (e.g. teasing) is still in effect."""
+    for t in (((person or {}).get("bond") or {}).get("transient") or {}).values():
+        try:
+            if why in t.get("why", []) and ((now or _now()) - datetime.fromisoformat(t["last"])
+                                            ).total_seconds() / 3600 < TRANSIENT_HOURS:
+                return True
+        except (KeyError, ValueError):
+            continue
+    return False
+
+
 def note(person: Dict, scale: str, points: float, why: str, evidence: str = "", by: str = "code",
-         where: str = "", once_per_day: bool = False, now: Optional[datetime] = None) -> bool:
+         where: str = "", once_per_day: bool = False, now: Optional[datetime] = None,
+         transient: bool = False) -> bool:
     """Record an event that moves a scale by `points` (a level is 3). Mutates
     `person`; the caller writes it. False when skipped (unknown scale, or
     the same reason already counted today with once_per_day)."""
@@ -109,12 +137,21 @@ def note(person: Dict, scale: str, points: float, why: str, evidence: str = "", 
                             and e.get("when", "")[:10] == now.isoformat()[:10] for e in b["events"]):
         return False
     before = level(person, scale, now)
-    b["points"][scale] = float(b["points"].get(scale, 0.0)) + points
-    b["last"][scale] = now.isoformat()
+    if transient:
+        tr = b.setdefault("transient", {})
+        cur = tr.get(scale) or {}
+        live = transient_points(person, scale, now)   # expired points don't carry over
+        tr[scale] = {"points": max(-2 * POINTS_PER_LEVEL, min(2 * POINTS_PER_LEVEL, live + points)),
+                     "last": now.isoformat(),
+                     "why": sorted(set((cur.get("why") or []) + [why])) if live else [why]}
+    else:
+        b["points"][scale] = float(b["points"].get(scale, 0.0)) + points
+        b["last"][scale] = now.isoformat()
     after = level(person, scale, now)
     b["events"] = (b["events"] + [{"when": now.isoformat(), "scale": scale, "points": points,
                                    "why": why, "evidence": (evidence or "")[:300], "by": by,
-                                   "where": where, "level": after}])[-MAX_EVENTS:]
+                                   "where": where, "level": after,
+                                   **({"transient_hours": TRANSIENT_HOURS} if transient else {})}])[-MAX_EVENTS:]
     if after != before:
         logger.info("Bonds: %s %s %d -> %d (%s)", (person.get("names") or ["?"])[0], scale, before, after, why)
     return True
@@ -151,16 +188,18 @@ def bond_line(person: Optional[Dict], name: str = "them") -> str:
         return ""
     s = standing(person)
     regard = WORDS["regard"].get(s["regard"], "")
+    teasing = "they've been teasing you lately" if recently(person, "teased her") else ""
     if s["trust"] >= 1 or is_creator(person):
         parts = [WORDS["trust"][s["trust"]]] + [WORDS[k].get(s[k], "") for k in
                                                 ("their_trust", "loyalty", "their_loyalty")] + [regard]
-        parts = [p for p in parts if p]
+        parts = [p for p in parts + [teasing] if p]
         return f"Where you stand with {name}: " + "; ".join(parts) + "."
     if s["trust"] <= -1:
         line = f"With {name}: {WORDS['trust'][s['trust']]}"
     else:
         line = f"You don't know {name} well enough yet to say how far you trust them"
-    return line + (f"; {regard}." if regard else ".")
+    extra = [x for x in (regard, teasing) if x]
+    return line + ("; " + "; ".join(extra) + "." if extra else ".")
 
 
 def history(person: Optional[Dict], scale: str = "", limit: int = 10) -> List[Dict]:
