@@ -861,8 +861,17 @@ async def health_check():
             "inference_ok": inference_ok,
             "inference_detail": inference_detail or "ok",
             "observer": _obs,
+            "transmission": _transmission_status(),
         }
     )
+
+
+def _transmission_status() -> dict:
+    try:
+        from gaia_core.cognition import transmission
+        return transmission.status()
+    except Exception as e:
+        return {"error": str(e)[:120]}
 
 
 @app.get("/")
@@ -1260,6 +1269,24 @@ async def process_packet(packet_data: Dict[str, Any]):
                 yield json.dumps({"type": "status", "value": "awake"}) + "\n"
             async for chunk in _run_loop_inner():
                 yield chunk
+        # 2026-11-17 correction transmission: a reply went out in a conversation.
+        _tx_session = ((packet_data or {}).get("header") or {}).get("session_id", "")
+        _tx_real = _packet_source(packet_data) in ("web", "discord")
+        if _tx_real and _tx_session:
+            try:
+                from gaia_core.cognition import transmission as _tx
+                _reply = (_after_turn.get("second_mind") or (None, None, ""))[2] or _after_turn.get("reply", "")
+                _shifted = await asyncio.to_thread(_tx.note_turn, _tx_session, "", _reply)
+                if _shifted == "down":
+                    yield json.dumps({"type": "token", "value": "*[Shifting back: Core speaks again — "
+                                      "five answers in a row needed no correction.]*"}) + "\n"
+                    yield json.dumps({"type": "flush"}) + "\n"
+                elif _shifted == "up":
+                    yield json.dumps({"type": "token", "value": "\n*[Shifting up: Prime takes over for a "
+                                      "while — two of my last three answers needed correcting.]*"}) + "\n"
+                    yield json.dumps({"type": "flush"}) + "\n"
+            except Exception:
+                logger.debug("transmission note_turn failed", exc_info=True)
         # b9ts: her reply is out and the turn is free, so the next message never
         # waits on this. The other mind adds a follow-up if it seems necessary.
         args = _after_turn.get("second_mind")
@@ -1284,6 +1311,16 @@ async def process_packet(packet_data: Dict[str, Any]):
                     args[0].session_manager.add_message(args[4], "assistant", text)
                 except Exception:
                     logger.debug("Second mind: follow-up not kept in history", exc_info=True)
+                # The other mind had to correct this answer: a strike.
+                if _tx_real and _tx_session:
+                    try:
+                        from gaia_core.cognition import transmission as _tx
+                        if await asyncio.to_thread(_tx.note_correction, _tx_session, "second_mind", said) == "up":
+                            yield json.dumps({"type": "token", "value": "\n*[Shifting up: Prime takes over for a "
+                                              "while — two of my last three answers needed correcting.]*"}) + "\n"
+                            yield json.dumps({"type": "flush"}) + "\n"
+                    except Exception:
+                        logger.debug("transmission note_correction failed", exc_info=True)
 
     async def _run_loop_inner():
         try:
@@ -2428,6 +2465,7 @@ async def process_packet(packet_data: Dict[str, Any]):
             except Exception:
                 logger.debug("stream-path observer failed (non-fatal)", exc_info=True)
 
+            _after_turn["reply"] = full_response   # the transmission judges a reply to a dispute
             # b9ts: the other mind reads this reply once the turn is over.
             if full_response.strip() and source in ("web", "discord") and not _pending_recital(full_response):
                 _sources = "\n".join(x for x in (

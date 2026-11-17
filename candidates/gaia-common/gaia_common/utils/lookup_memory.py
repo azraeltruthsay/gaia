@@ -571,7 +571,34 @@ class LookupMemory:
             elif outcome == "contradicted":
                 rec["disputed_at"] = stamp
 
-        return self._update([rid], change, "record a check on")
+        n = self._update([rid], change, "record a check on")
+        if n and outcome in ("supported", "contradicted"):
+            self._teller_trust(rid, outcome)
+        return n
+
+    def _teller_trust(self, rid: str, outcome: str) -> None:
+        """2026-11-17: a told fact checked independently moves her trust in
+        whoever told it: +1 point when it holds (3 make a level), -3 when it
+        doesn't. Slow to earn, quick to lose (bonds.py)."""
+        try:
+            path = self._find(rid)
+            rec = self._load(path) if path else None
+            tellers = [t.get("id") for t in (rec or {}).get("told_by") or [] if t.get("id")]
+            if not tellers:
+                return
+            from gaia_common.utils.people import PeopleRegistry, person_for_teller
+            registry = PeopleRegistry()
+            what = (rec.get("title") or rec.get("snippet") or "")[:200]
+            for tid in tellers:
+                person = person_for_teller(tid, registry)
+                if person:
+                    registry.bond_note(
+                        person["id"], "trust", 1 if outcome == "supported" else -3,
+                        "something they told her checked out" if outcome == "supported"
+                        else "something they told her turned out wrong",
+                        evidence=what, by="fact check", where=rid)
+        except Exception:
+            logger.debug("Teller trust update failed for %s", rid, exc_info=True)
 
     def mark_disputed(self, ids: Iterable[str], now: Optional[datetime] = None) -> int:
         """Flag records as needing revalidation (e.g. the user pushed back on

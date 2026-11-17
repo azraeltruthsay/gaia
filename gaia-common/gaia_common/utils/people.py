@@ -178,6 +178,30 @@ class PeopleRegistry:
             self._write(person)
         return True
 
+    def bond_note(self, person_id: str, scale: str, points: float, why: str, evidence: str = "",
+                  by: str = "code", where: str = "", once_per_day: bool = False) -> Optional[Dict]:
+        """An event that moves where she stands with them (bonds.py)."""
+        from gaia_common.utils import bonds
+        with _lock:
+            person = self.get(person_id)
+            if not person:
+                return None
+            if bonds.note(person, scale, points, why, evidence=evidence, by=by, where=where,
+                          once_per_day=once_per_day):
+                self._write(person)
+        return person
+
+    def bond_set(self, person_id: str, scale: str, value: int, why: str, by: str) -> Optional[Dict]:
+        """Set a level outright (the operator, or a reviewed proposal)."""
+        from gaia_common.utils import bonds
+        with _lock:
+            person = self.get(person_id)
+            if not person:
+                return None
+            bonds.set_level(person, scale, value, why, by)
+            self._write(person)
+        return person
+
     def set_pronouns(self, person_id: str, pronouns: str, source: str = "") -> Optional[Dict]:
         """Pronouns as the person gave them. Never inferred from a name."""
         pronouns = (pronouns or "").strip().lower()
@@ -242,7 +266,9 @@ def speaker_line(session_id: str, registry: Optional[PeopleRegistry] = None) -> 
              for f in person.get("facts", []) if f.get("status") != "wrong"][:5]
     if facts:
         line += " What you've been told about them: " + "; ".join(facts) + "."
-    return line
+    from gaia_common.utils.bonds import bond_line
+    stand = bond_line(person)
+    return line + (" " + stand if stand else "")
 
 
 _NAME_WORD_RE = re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b")
@@ -294,6 +320,19 @@ def person_for_discord(author_id: str, registry: Optional["PeopleRegistry"] = No
         return None
     return next((p for p in (registry or PeopleRegistry()).everyone() for a in p.get("accounts", [])
                  if a.get("kind") == "discord" and a.get("id") == str(author_id)), None)
+
+
+def person_for_teller(teller_id: str, registry: Optional["PeopleRegistry"] = None) -> Optional[Dict]:
+    """The person behind a told fact's teller id ("discord:<id>" / "session:<id>")."""
+    kind, _, ident = (teller_id or "").partition(":")
+    if not ident:
+        return None
+    registry = registry or PeopleRegistry()
+    if kind == "discord":
+        return person_for_discord(ident, registry)
+    if kind == "session":
+        return registry.for_session(ident)
+    return None
 
 
 def creator_line(session_id: str = "", text: str = "", registry: Optional[PeopleRegistry] = None,
@@ -438,6 +477,10 @@ def channel_speaker_line(session_id: str, author_id: str, registry: Optional["Pe
     facts = [f["text"] for f in person.get("facts", []) if f.get("status") != "wrong"][:3]
     if facts:
         line += " What you've been told about them: " + "; ".join(facts) + "."
+    from gaia_common.utils.bonds import bond_line
+    stand = bond_line(person)
+    if stand:
+        line += " " + stand
     return line + " " + pronoun_words(person) + "."
 
 

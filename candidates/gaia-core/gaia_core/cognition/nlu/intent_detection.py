@@ -838,7 +838,12 @@ _PUSHBACK_PHRASE_RE = re.compile(
     r"|i heard (?:it|that|he|she|they)\b"
     r"|^\s*no,? (?:it|he|she|they|that)(?:'s| was| is| were| did)\b"
     r"|^\s*actually,? (?:it|he|she|they|that)\b"
-    r"|\b(?:wasn'?t|isn'?t) it\b)",
+    r"|\b(?:wasn'?t|isn'?t) it\b"
+    # 2026-11-17: "That's still not right, check again." went undetected, and
+    # Core, ungrounded, agreed and made up an answer ("You're right, it's Paris").
+    r"|\b(?:that'?s|that is|you'?re|you are)\s+(?:still\s+|just\s+)?"
+    r"(?:not right|not correct|wrong|incorrect|mistaken)\b"
+    r"|\b(?:check|look) (?:it |that )?again\b|\bdouble[- ]check\b)",
     re.IGNORECASE,
 )
 

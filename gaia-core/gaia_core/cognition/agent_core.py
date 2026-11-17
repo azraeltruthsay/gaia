@@ -2686,6 +2686,12 @@ class AgentCore:
                 self.session_manager.add_message(session_id, "user", user_input)
                 self._emit_timeline_message(session_id, "user", source)
                 _user_msg_persisted = True
+                # 2026-11-17: warmth or hostility moves where she stands with them.
+                try:
+                    from gaia_core.cognition.regard_signals import note_regard
+                    note_regard(session_id, _metadata, user_input)
+                except Exception:
+                    logger.debug("regard signal failed", exc_info=True)
     
             # Inject semantic probe result into packet (if probe found hits)
             if probe_result and probe_result.has_hits:
@@ -3756,6 +3762,15 @@ class AgentCore:
             # last answer went wrong; the miner joins it to that turn's records.
             if _pushback:
                 outcome_ledger.record_pushback(session_id, packet.header.packet_id, user_input)
+                # The person disputed her last answer: a strike on it (transmission).
+                # Disputed: a strike only if her reply concedes it (transmission).
+                try:
+                    from gaia_core.cognition import transmission as _tx
+                    _last = next((h.get("content") or "" for h in reversed(history or [])
+                                  if isinstance(h, dict) and h.get("role") == "assistant"), "")
+                    _tx.note_pushback(session_id, _last)
+                except Exception:
+                    logger.debug("transmission pushback note failed", exc_info=True)
             _memory_answer = False
             try:
                 if _lookup_recalled:
