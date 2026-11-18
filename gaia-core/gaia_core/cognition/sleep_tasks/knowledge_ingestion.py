@@ -236,7 +236,7 @@ def _process_course(
         check_interrupted()
 
     # ── Phase 3: CFR compression ──────────────────────────────────
-    cfr_sections = _try_cfr_compression(raw_texts, course_id, _mcp_call)
+    cfr_sections = _try_cfr_compression(raw_texts, course_id, _mcp_call, course_raw_dir)
 
     if check_interrupted:
         check_interrupted()
@@ -302,40 +302,47 @@ def _process_course(
 
 # ── Phase 3: CFR compression helper ──────────────────────────────────────────
 
+def _prime_loaded(endpoint: str = "http://gaia-prime:7777") -> bool:
+    """CFR summarizes with Prime; asleep, Prime's engine is in standby and
+    every summary would wait out retries to fail (vjhn)."""
+    try:
+        from urllib.request import urlopen
+        with urlopen(f"{endpoint}/health", timeout=3) as resp:
+            return bool(json.loads(resp.read()).get("model_loaded"))
+    except Exception:
+        return False
+
+
 def _try_cfr_compression(
     raw_texts: Dict[str, str],
     course_id: str,
     mcp_call,
+    course_raw_dir: Optional[Path] = None,
+    prime_loaded=_prime_loaded,
 ) -> List[dict]:
-    """Try to compress raw texts via CFR. Returns sections or empty list on failure."""
+    """Try to compress raw texts via CFR. Returns sections or empty list on failure.
+
+    vjhn: cfr_ingest takes a file gaia-mcp can read (file_path, doc_id) --
+    it was sent text/source/tags and answered HTTP 400 every cycle -- and
+    cfr_synthesize needs that doc_id and answers {"synthesis": ...}.
+    """
     sections: List[dict] = []
+    if course_raw_dir is None or not prime_loaded():
+        logger.info("KnowledgeIngestion: CFR skipped for %s (Prime not loaded); using raw text",
+                    course_id)
+        return sections
 
     try:
-        # Ingest each page into CFR
-        for page, text in raw_texts.items():
-            mcp_call(
-                "cfr_ingest",
-                {
-                    "text": text,
-                    "source": f"ocw/{course_id}/{page}",
-                    "tags": ["ocw", course_id],
-                },
-            )
-
-        # Get synthesis
-        synthesis = mcp_call("cfr_synthesize", {})
-
-        # Extract sections from synthesis result
-        if isinstance(synthesis, dict):
-            raw_sections = synthesis.get("sections", synthesis.get("results", []))
-            if isinstance(raw_sections, list):
-                sections = raw_sections
-            elif synthesis.get("content") or synthesis.get("summary"):
-                # Single-section synthesis
-                sections = [{
-                    "title": f"MIT OCW: {course_id}",
-                    "content": synthesis.get("content") or synthesis.get("summary", ""),
-                }]
+        for page in raw_texts:
+            doc_id = f"ocw-{course_id}-{page}"
+            ing = mcp_call("cfr_ingest", {"file_path": str(course_raw_dir / f"{page}.txt"),
+                                          "doc_id": doc_id})
+            if isinstance(ing, dict) and ing.get("ok") is False:
+                raise RuntimeError(ing.get("error") or "cfr_ingest failed")
+            syn = mcp_call("cfr_synthesize", {"doc_id": doc_id})
+            text = syn.get("synthesis") if isinstance(syn, dict) else None
+            if text:
+                sections.append({"title": f"MIT OCW: {course_id} ({page})", "content": text})
 
         if sections:
             logger.info(

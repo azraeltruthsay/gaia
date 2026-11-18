@@ -27,7 +27,9 @@ PHASE_A_COURSES: List[Dict[str, Any]] = [
         "department": "6",
         "title": "Computer Systems Security",
         "license": "CC BY-NC-SA 4.0",
-        "pages": ["syllabus", "lecture-notes", "assignments"],
+        # vjhn: this course has no "assignments" page (404 every cycle);
+        # its problem sets are the labs.
+        "pages": ["syllabus", "lecture-notes", "labs", "readings"],
     },
 ]
 
@@ -42,8 +44,10 @@ def _mcp_call(
     method: str,
     params: dict,
     endpoint: str = _DEFAULT_MCP_ENDPOINT,
+    timeout: int = 600,
 ) -> dict:
-    """Make a JSON-RPC 2.0 call to gaia-mcp."""
+    """Make a JSON-RPC 2.0 call to gaia-mcp. cfr_ingest summarizes every
+    section with a model call, so 30 s was never enough (vjhn)."""
     body = json.dumps({
         "jsonrpc": "2.0",
         "method": method,
@@ -52,7 +56,7 @@ def _mcp_call(
     }).encode()
     req = Request(endpoint, data=body, method="POST")
     req.add_header("Content-Type", "application/json")
-    with urlopen(req, timeout=30) as resp:
+    with urlopen(req, timeout=timeout) as resp:
         result = json.loads(resp.read())
     if "error" in result:
         raise RuntimeError(

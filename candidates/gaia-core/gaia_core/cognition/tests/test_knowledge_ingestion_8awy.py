@@ -49,3 +49,41 @@ def test_seed_wording_counts_pages_read(tmp_path, monkeypatch):
                            course_titles=["Computer Systems Security"], results=[])
     seed = json.loads(next(tmp_path.glob("seed_*.json")).read_text())
     assert "Read 2 pages (0 newly fetched)" in seed["seed"]
+
+
+# ── vjhn: CFR is called the way gaia-mcp's tools take it ─────────────────────
+
+def test_cfr_ingest_gets_a_file_and_doc_id(tmp_path):
+    from gaia_core.cognition.sleep_tasks.knowledge_ingestion import _try_cfr_compression
+    calls = []
+
+    def mcp(method, params):
+        calls.append((method, params))
+        return {"ok": True, "synthesis": "a summary"} if method == "cfr_synthesize" else {"ok": True}
+
+    out = _try_cfr_compression({"syllabus": "x"}, "c1", mcp, tmp_path, prime_loaded=lambda: True)
+    assert calls[0] == ("cfr_ingest", {"file_path": str(tmp_path / "syllabus.txt"), "doc_id": "ocw-c1-syllabus"})
+    assert calls[1] == ("cfr_synthesize", {"doc_id": "ocw-c1-syllabus"})
+    assert out == [{"title": "MIT OCW: c1 (syllabus)", "content": "a summary"}]
+
+
+def test_cfr_skipped_while_prime_is_unloaded(tmp_path):
+    from gaia_core.cognition.sleep_tasks.knowledge_ingestion import _try_cfr_compression
+
+    def mcp(method, params):
+        raise AssertionError("no MCP call while Prime is unloaded")
+
+    assert _try_cfr_compression({"syllabus": "x"}, "c1", mcp, tmp_path, prime_loaded=lambda: False) == []
+
+
+def test_cfr_error_falls_back(tmp_path):
+    from gaia_core.cognition.sleep_tasks.knowledge_ingestion import _try_cfr_compression
+    out = _try_cfr_compression({"syllabus": "x"}, "c1", lambda m, p: {"ok": False, "error": "no"},
+                               tmp_path, prime_loaded=lambda: True)
+    assert out == []
+
+
+def test_course_pages_exist_on_ocw():
+    from gaia_core.cognition.sleep_tasks.ocw_fetcher import get_course_manifest
+    pages = [e["page"] for e in get_course_manifest("6-858-computer-systems-security-fall-2014")]
+    assert "assignments" not in pages and "labs" in pages
