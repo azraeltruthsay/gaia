@@ -142,6 +142,61 @@ class HeadScrubber:
         return out
 
 
+
+# Notes to herself that open a line: a thought seed, and Prime's "Action: none
+# (direct answer)" (2026-11-18, closing a haiku).
+_SEED_MARKS = ("THOUGHT_SEED:", "ACTION: NONE")
+_SEED_LEN = max(len(m) for m in _SEED_MARKS)
+
+
+class SeedLineFilter:
+    """Drops any line of a token stream that opens with a note to herself
+    (_SEED_MARKS), bare or in emphasis ("*THOUGHT_SEED: ...*"). HeadScrubber
+    only sees the opening; Prime closed a haiku with one (2026-11-18). Holds
+    only the start of a line while it could still become one."""
+
+    def __init__(self):
+        self._pending = ""
+        self._at_start = True
+        self._dropping = False
+
+    @staticmethod
+    def _match(text: str):
+        """'seed' when `text` opens with a mark, 'maybe' while it still could."""
+        core = text.lstrip(" \t*_").upper()
+        if any(core.startswith(m) for m in _SEED_MARKS):
+            return "seed"
+        return "maybe" if any(m.startswith(core) for m in _SEED_MARKS) else None
+
+    def feed(self, text: str) -> str:
+        out = []
+        for ch in text:
+            if self._dropping:
+                if ch == "\n":
+                    self._dropping, self._at_start = False, True
+                continue
+            if not self._at_start:
+                out.append(ch)
+                self._at_start = ch == "\n"
+                continue
+            self._pending += ch
+            state = None if ch == "\n" else self._match(self._pending)
+            if state == "seed":
+                self._pending, self._dropping = "", True
+            elif state == "maybe":
+                continue
+            else:
+                out.append(self._pending)
+                self._pending = ""
+                self._at_start = ch == "\n"
+        return "".join(out)
+
+    def flush(self) -> str:
+        held = "" if self._dropping else self._pending
+        self.__init__()
+        return held
+
+
 # How a sentence sounds when more is coming: an announcement or a pleasantry.
 _NOT_AN_ANSWER_RE = re.compile(
     r"(?:i'?ll|i will|i'?m|i am|i can|i need|i should|i'?d|let me|let'?s|one moment|just a|"
@@ -358,6 +413,7 @@ async def scrub_stream(lines: AsyncIterator[str], drop_apology: bool = False,
     `held_answer` (the answer the person disputed), until conceding words
     there can be cut if she holds it (esak)."""
     scrubber = HeadScrubber()
+    seeds = SeedLineFilter()
     trim = trim_apology if drop_apology else (
         (lambda t: trim_concession(t, held_answer)) if held_answer else None)
     hold = [""] if trim else None   # reply text held while it may open with one
@@ -388,7 +444,7 @@ async def scrub_stream(lines: AsyncIterator[str], drop_apology: bool = False,
         except (TypeError, ValueError):
             event, is_token = None, False
         if is_token:
-            text = _out(scrubber.feed(event.get("value") or ""))
+            text = _out(seeds.feed(scrubber.feed(event.get("value") or "")))
             if text:
                 yield json.dumps({"type": "token", "value": text}) + "\n"
             continue
@@ -396,17 +452,18 @@ async def scrub_stream(lines: AsyncIterator[str], drop_apology: bool = False,
             # zdrj: the text so far is taken back; what is held goes with it.
             scrubber.flush()
             scrubber = HeadScrubber()
+            seeds = SeedLineFilter()
             if hold:
                 hold[0] = ""
             yield line
             continue
-        held = _out(scrubber.flush())
+        held = _out(seeds.feed(scrubber.flush()) + seeds.flush())
         if hold and hold[0]:
             held += _release(final=True)
         if held:
             yield json.dumps({"type": "token", "value": held}) + "\n"
         yield line
-    held = _out(scrubber.flush())
+    held = _out(seeds.feed(scrubber.flush()) + seeds.flush())
     if hold and hold[0]:
         held += _release(final=True)
     if held:

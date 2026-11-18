@@ -253,6 +253,23 @@ def _load_wav_mono_16k(path: str):
 _BOS_CACHE: dict = {}
 
 
+def _always_bos(tokenizer) -> bool:
+    """Make the tokenizer add <bos> (f8x8). Gemma 4 12B's ships with
+    add_bos_token False, so text samples trained without <bos> while media
+    samples, the GGUF path and Google's template all have it. Same rule as
+    gaia_engine.core.always_bos. Returns True when it changed the tokenizer."""
+    bos_id = getattr(tokenizer, "bos_token_id", None)
+    if not getattr(tokenizer, "bos_token", None) or bos_id is None:
+        return False
+    try:
+        if tokenizer.encode("x")[:1] == [bos_id]:
+            return False
+        tokenizer.add_bos_token = True
+        return tokenizer.encode("x")[:1] == [bos_id]
+    except Exception:
+        return False
+
+
 def _media_text(processor, text: str) -> str:
     """Text for processor(text=..., images/audio=...), with <bos> when the
     processor won't add it. The 12B unified processor doesn't (E4B's does);
@@ -1153,6 +1170,8 @@ def main():
     log.info("Processor: %s", type(processor).__name__)
     if processor.tokenizer.pad_token is None:
         processor.tokenizer.pad_token = processor.tokenizer.eos_token
+    if _always_bos(processor.tokenizer):
+        log.info("Tokenizer set to add <bos>: text samples now train with it, like media (f8x8)")
 
     # 2. Dataset
     log.info("Building dataset...")

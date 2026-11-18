@@ -3715,6 +3715,7 @@ class AgentCore:
                 pass
             _grounding_ctx = None
             _kr_skip = bool(_local_file_re2.search(user_input or ""))
+            _kr_compose = False   # im6c: a creative request: nothing recalled either
             if _kr_skip:
                 logger.info(
                     "KnowledgeRouter: skipped — user prompt names a local "
@@ -3763,6 +3764,12 @@ class AgentCore:
             if not _kr_skip and is_relational(user_input or ""):
                 _kr_skip = True
                 logger.info("KnowledgeRouter: skipped — about them and her, not the world")
+            if not _kr_skip:
+                from gaia_core.cognition.nlu.intent_detection import is_creative_request
+                if is_creative_request(user_input or ""):
+                    _kr_skip = True
+                    _kr_compose = True
+                    logger.info("KnowledgeRouter: skipped — something to compose, not look up")
             # Personal/chitchat gate: "how are you?", greetings, smalltalk don't
             # benefit from knowledge grounding — and grounding them retrieves PAST
             # ops-flavored answers from the journal ("I'm awake and running, parked
@@ -3874,9 +3881,11 @@ class AgentCore:
                 elif _kr_skip:
                     # 0vuz: skipped as chat, but if she looked this question
                     # up before, her memory of it still answers (no web).
-                    from gaia_core.cognition.knowledge_router import recall_answer
-                    _grounding_ctx = recall_answer(user_input)
-                    _memory_answer = _grounding_ctx is not None
+                    # Not for something to compose (im6c).
+                    if not _kr_compose:
+                        from gaia_core.cognition.knowledge_router import recall_answer
+                        _grounding_ctx = recall_answer(user_input)
+                        _memory_answer = _grounding_ctx is not None
                 else:
                     from gaia_core.cognition.knowledge_router import ground_query
                     # 2026-11-17: their own world isn't on the web. A message

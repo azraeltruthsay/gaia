@@ -295,6 +295,8 @@ services:
       # sibling tasks: initiative_cycle and auto-promote of NON-vital services
       # (web, study, audio, orchestrator, doctor). Turned on by Azrael 2026-11-17.
       - SERENITY_DRILLS=${SERENITY_DRILLS:-1}
+      # w6in/b9mp: keep live deliberation prompts for the thinking adapters' teacher data
+      - DELIBERATION_CAPTURE_DIR=${DELIBERATION_CAPTURE_DIR:-/shared/deliberation_prompts}
       # h1ok: Core deliberates in Gemma 4's own thought channel (<|think|>,
       # core_thinking_v1 adapter) instead of following <think> instructions it
       # ignored ~94% of the time and leaked into replies. Held-out eval: thought

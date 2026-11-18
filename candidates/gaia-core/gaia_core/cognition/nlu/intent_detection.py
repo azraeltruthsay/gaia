@@ -928,6 +928,31 @@ def is_world_question(text: str) -> bool:
         m.group(0) not in _NOT_WORLD_NAMES for m in _WORLD_NAME_RE.finditer(stripped))
 
 
+# im6c: "Write me a haiku about autumn rain" was grounded like a question
+# (intent brainstorming / write_file): memory and the web were searched and
+# Prime signed the haiku "Inspired by ... Richland, WA". Something to compose
+# from her own words needs nothing looked up.
+_CREATIVE_RE = re.compile(
+    r"^\s*(?:(?:please|can you|could you|would you|will you|now|ok(?:ay)?|hey gaia)[\s,]+)*"
+    r"(?:write|compose|create|make(?:\s+up)?|tell|give|craft|pen|come up with|invent|draft)\s+"
+    r"(?:me\s+|us\s+)?(?:(?:a|an|one|some|another|two|three|four|five|\d+|short|little|quick|"
+    r"funny|silly|sad|happy|cute|new|original|good|nice|tiny|brief|simple|clever|dark|"
+    r"four-line|\w+-line)\s+)*"
+    r"(?:haikus?|poems?|poetry|limericks?|sonnets?|verses?|songs?|song verses?|lyrics|raps?|"
+    r"jokes?|puns?|riddles?|stor(?:y|ies)|tales?|fables?|scenes?|odes?|ballads?|couplets?|"
+    r"stanzas?|acrostics?|tongue[- ]twisters?|bedtime stor(?:y|ies)|knock[- ]knock jokes?)\b",
+    re.IGNORECASE)
+
+
+def is_creative_request(text: str) -> bool:
+    """A request to compose something (a poem, joke, riddle, story) from her
+    own words, which no lookup helps. A URL to summarize is not this."""
+    stripped = (text or "").strip()
+    if not stripped or len(stripped) > 300 or "://" in stripped:
+        return False
+    return bool(_CREATIVE_RE.search(stripped))
+
+
 # krtr: "Who is the current president?" answered "Joe Biden" from weights.
 # Who holds something now changes after training; the web, asked with this
 # year, knows (with the year: Trump; without: the Declaration of Independence).

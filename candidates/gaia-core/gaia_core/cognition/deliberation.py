@@ -36,6 +36,7 @@ significance comes from the introspection-evidence count. Phase 3
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -666,6 +667,8 @@ def deliberate(
     except Exception:
         logger.debug("Deliberation: tool schema injection skipped (non-fatal)", exc_info=True)
 
+    _capture_prompt(messages, model_role, adapter_name, native_thinking)
+
     model = None
     raw = ""
     reasoning = None
@@ -765,6 +768,28 @@ def deliberate(
         confabulation_flags=confabulation_flags,
         model_used=model_role,
     )
+
+
+def _capture_prompt(messages, model_role, adapter_name, native_thinking) -> None:
+    """With DELIBERATION_CAPTURE_DIR set, keep each deliberation prompt as
+    sent (w6in/b9mp: the thinking adapters must train on what live sends).
+    Off by default; capped at DELIBERATION_CAPTURE_MAX lines a day."""
+    root = os.environ.get("DELIBERATION_CAPTURE_DIR", "").strip()
+    if not root:
+        return
+    try:
+        path = os.path.join(root, time.strftime("%Y%m%d") + ".jsonl")
+        os.makedirs(root, exist_ok=True)
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                if sum(1 for _ in f) >= int(os.environ.get("DELIBERATION_CAPTURE_MAX", "500")):
+                    return
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": time.time(), "model_role": model_role, "adapter": adapter_name,
+                                "native_thinking": bool(native_thinking), "messages": messages},
+                               default=str) + "\n")
+    except Exception:
+        logger.debug("Deliberation: prompt capture failed (non-fatal)", exc_info=True)
 
 
 # ── Top-level orchestration: deliberate + safety net ────────────────────

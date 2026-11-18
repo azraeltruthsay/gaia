@@ -6,11 +6,11 @@ For each real user message, build the prompt GAIA would assemble
 engine's turn format for the tier, and keep the teacher's thought and the
 answer after it (both are trained on — see train_core_thinking.py).
 
-  --tier core  (h1ok, core_thinking_v1)
-      Teacher: stock google/gemma-4-E4b-it (Q8 GGUF). <|think|> opens the system
-      turn; the thought comes back as <|channel>thought ...<channel|>. Packets
-      keep the default header, as the shipped adapter was trained (see bead
-      w6in: live Core deliberation gets the compact 'core' prompt instead).
+  --tier core  (h1ok core_thinking_v1; w6in core_thinking_v2 for the 12B)
+      Teacher: stock google/gemma-4-12B-it (GGUF), asked in Google's turn
+      format. <|think|> opens the system turn; the thought comes back as
+      <|channel>thought ...<channel|>. Packets are named 'core' so the prompt
+      is the one live Core deliberation gets (v1 used the default header).
   --tier prime (isep, prime_thinking_v1)
       Teacher: stock Qwen/Qwen3-VL-8B-Thinking (Q8 GGUF). Packets are named
       'prime' so prompt_builder emits Prime's real prompt; ChatML turns; the
@@ -24,15 +24,17 @@ answer after it (both are trained on — see train_core_thinking.py).
 Teacher server: llama-server on :8199 inside gaia-core with the teacher GGUF on
 the GPU (GAIA in maintenance + deep-sleep), e.g.
     llama-server -m /shared/tmp_h1ok/<teacher>.gguf --port 8199 -c 32768 -np 4 -ngl 99
-Inputs: /shared/tmp_h1ok/user_inputs.json — distinct real user messages from
-/shared/sessions*.json plus untruncated deliberation-journal inputs.
+Inputs: /shared/tmp_h1ok/turns.json (scripts/build_thinking_turns.py: real turns
+with session and history), then /shared/tmp_h1ok/user_inputs.json — distinct
+real user messages and untruncated deliberation-journal inputs — as first messages.
 Usage: python gen_thinking_teacher.py [--tier core|prime] [limit]   (in gaia-core)
 """
 import argparse, json, logging, re, sys, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, "/app")
 logging.disable(logging.WARNING)
-from gaia_common.protocols.cognition_packet import CognitionPacket, Content, Intent
+from gaia_common.protocols.cognition_packet import (CognitionPacket, Content, DataField, Intent,
+                                                      RelevantHistorySnippet)
 from gaia_core.utils import prompt_builder
 from gaia_common.utils.tool_call_parser import build_tool_schema_injection
 
@@ -41,17 +43,22 @@ GREET = re.compile(r"^\s*(hi|hello|hey|good (morning|afternoon|evening|night)|mo
 
 TIERS = {
     "core": {
-        "out": "/shared/tmp_h1ok/teacher.jsonl",
-        "header_name": None,            # default header, as core_thinking_v1 was trained
-        "live_intents": False,          # keyword heuristic, as core_thinking_v1 was trained
+        # w6in: Core's own header ('core'), so prompt_builder gives the prompt
+        # live Core deliberation gets; v1 trained on the default (Prime's).
+        "out": "/shared/tmp_h1ok/teacher_core12b.jsonl",
+        "header_name": "core",
+        "live_intents": True,
         "think_in_system": "<|think|>\n",
         "prefill": "",
+        # Teacher: stock gemma-4-12B-it, which never answers in the house
+        # format (prompt_format.py), so it is asked in Google's own.
+        "teacher_format": "stock",
         "thought_re": re.compile(r"\s*<\|channel>thought\n(.*?)<channel\|>(.*)", re.S),
         "stop": ["<turn|>", "<|turn>"],
         "n_predict": 1100, "sampling": {"temperature": 0.6, "top_p": 0.95, "top_k": 64},
     },
     "prime": {
-        "out": "/shared/tmp_h1ok/teacher_prime.jsonl",
+        "out": "/shared/tmp_h1ok/teacher_prime_v2b.jsonl",
         "header_name": "prime",
         "live_intents": True,
         "think_in_system": "",
@@ -87,7 +94,14 @@ def live_intent_for(text):
 
 
 def render(tier, messages):
-    """The engine's turn format for the tier (ChatFormatter / gaia_cpp)."""
+    """The turn format the tier's teacher is asked in: the engine's house
+    format, or Google's own for the stock 12B (it thinks in no other)."""
+    if TIERS[tier].get("teacher_format") == "stock":
+        out = []
+        for i, m in enumerate(messages):
+            role = "model" if m["role"] == "assistant" else m["role"]
+            out.append(f"<|turn>{role}\n{m['content']}<turn|>\n")
+        return "".join(out) + "<|turn>model\n"
     if tier == "core":
         parts = [f"<|turn>{m['role']}<turn|>\n{m['content']}" for m in messages]
         return "\n".join(parts) + "\n<|turn>assistant<turn|>\n"
@@ -95,12 +109,45 @@ def render(tier, messages):
     return "\n".join(parts) + "\n<|im_start|>assistant\n"
 
 
-def build(tier, text):
+def _grounding(text):
+    """What live grounding attaches for a question she looked up before
+    (0vuz: remembered lookups, as agent_core attaches them). No web."""
+    try:
+        from gaia_core.cognition.knowledge_router import _query_lookup_memory
+        hits = [r for r in _query_lookup_memory(text, top_k=2) if not r.stale]
+    except Exception:
+        return None
+    if not hits:
+        return None
+    return DataField(key="web_grounding", type="json", value={text[:50]: {"results": [
+        {"title": r.title or r.source, "snippet": r.content, "url": r.url, "remembered": True,
+         "retrieved_at": r.retrieved_at, "stale": r.stale, "memory_id": r.memory_id,
+         "trust": r.trust_tier} for r in hits]}})
+
+
+def build(tier, turn):
+    """The deliberation prompt for a real turn: `turn` is a user message, or
+    a dict from build_thinking_turns.py with its session and history (b9mp:
+    live THINKER prompts carry history, speaker, persona and grounding)."""
     cfg = TIERS[tier]
+    if isinstance(turn, str):
+        turn = {"user": turn}
+    text = turn["user"]
     intent = live_intent_for(text) if cfg["live_intents"] else intent_for(text)
     pkt = CognitionPacket(content=Content(original_prompt=text), intent=Intent(user_intent=intent))
     if cfg["header_name"]:
         pkt.header.model.name = cfg["header_name"]
+    if turn.get("session_id"):
+        pkt.header.session_id = turn["session_id"]
+    if turn.get("persona"):
+        pkt.header.persona.persona_id = turn["persona"]
+    pkt.context.relevant_history_snippet = [
+        RelevantHistorySnippet(id=f"h{i}", role=h["role"], summary=h["content"])
+        for i, h in enumerate(turn.get("history") or [])]
+    if intent not in ("greeting", "farewell", "gratitude", "smalltalk", "chat"):
+        g = _grounding(text)
+        if g is not None:
+            pkt.content.data_fields.append(g)
     msgs = [dict(m) for m in prompt_builder.build_from_packet(pkt)]
     msgs = [m for m in msgs if isinstance(m.get("content"), str)]
     if prompt_builder.offers_tools(intent):
@@ -117,10 +164,11 @@ def build(tier, text):
     return intent, msgs
 
 
-def one(tier, text):
+def one(tier, turn):
     cfg = TIERS[tier]
+    text = turn["user"] if isinstance(turn, dict) else turn
     try:
-        intent, msgs = build(tier, text)
+        intent, msgs = build(tier, turn)
         body = {"prompt": render(tier, msgs) + cfg["prefill"], "n_predict": cfg["n_predict"],
                 "special": True, "cache_prompt": True, "stop": cfg["stop"], **cfg["sampling"]}
         t = time.time()
@@ -142,7 +190,12 @@ def main():
     ap.add_argument("--parallel", type=int, default=4)
     ap.add_argument("limit", nargs="?", type=int)
     args = ap.parse_args()
-    inputs = json.load(open("/shared/tmp_h1ok/user_inputs.json"))
+    # Real turns with their context first, then the journal's inputs as
+    # first messages (no history), which live prompts also are.
+    turns = json.load(open("/shared/tmp_h1ok/turns.json"))
+    have = {t["user"].strip().lower() for t in turns}
+    inputs = turns + [t for t in json.load(open("/shared/tmp_h1ok/user_inputs.json"))
+                      if t.strip().lower() not in have]
     lim = args.limit or len(inputs)
     done = closed = 0
     t0 = time.time()

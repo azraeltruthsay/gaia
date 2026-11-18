@@ -400,7 +400,7 @@ def _parse_llm_output_into_packet(response_text: str, packet: CognitionPacket):
         packet.response.candidate = response_match.group(1).strip()
     else:
         # If no explicit RESPONSE, use the whole text, minus directives.
-        clean_text = re.sub(r"^(THOUGHT_SEED:|GOAL_SHIFT:|EXECUTE:|RESPONSE:|<<<|>>>).*\n?", "", cleaned_response, flags=re.MULTILINE).strip()
+        clean_text = re.sub(r"^[ \t*_]*(THOUGHT_SEED:|GOAL_SHIFT:|EXECUTE:|RESPONSE:|<<<|>>>).*\n?", "", cleaned_response, flags=re.MULTILINE).strip()
         packet.response.candidate = clean_text
 
     # Strip fabricated tool-call syntax the model may produce
