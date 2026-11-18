@@ -25,6 +25,24 @@ _serenity_achieved_at: float | None = None
 _serenity_reason: str = ""
 
 
+def _load():
+    """Pick up the persisted state (a57i): after a restart the module began
+    at 0 / not serene while the file the core reads could still say serene,
+    and break_serenity() then did nothing since it saw no serenity to break."""
+    global _serenity_active, _serenity_score, _serenity_achieved_at, _serenity_reason
+    try:
+        data = json.loads(SERENITY_FILE.read_text())
+    except (OSError, ValueError):
+        return
+    _serenity_active = bool(data.get("serene", False))
+    _serenity_score = float(data.get("score") or 0.0)
+    _serenity_achieved_at = data.get("achieved_at")
+    _serenity_reason = data.get("reason") or ""
+
+
+_load()
+
+
 def record_recovery(category: str, detail: str = "", meditation_active: bool = True):
     """Record a successful recovery. Only counts during active Defensive Meditation."""
     global _serenity_score

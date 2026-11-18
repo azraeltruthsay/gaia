@@ -966,6 +966,11 @@ services:
       - gaia-shared:/shared:rw
       - .:/gaia/GAIA_Project:ro
 
+    # a57i: the socket is root:docker 660 and the image runs as uid 1000;
+    # without the group every drill failed with "permission denied".
+    group_add:
+      - "${DOCKER_GID:-962}"
+
     environment:
       - CORE_ENDPOINT=http://gaia-core:6415
       - DOCTOR_ENDPOINT=http://gaia-doctor:6419

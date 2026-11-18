@@ -3316,14 +3316,10 @@ class SleepTaskScheduler:
                            filepath, exc_info=True)
 
     def _run_code_evolution(self, **kwargs) -> None:
-        """Generate code evolution snapshot for temporal self-awareness.
-
-        Gated on Serenity: only runs when GAIA has proven resilience through
-        Defensive Meditation, ensuring self-modification happens from a trusted baseline.
-        """
-        if not self._is_serene():
-            logger.info("Code evolution: skipping — GAIA is not Serene (earn serenity through Defensive Meditation)")
-            return
+        """Generate code evolution snapshot for temporal self-awareness."""
+        # a57i: no serenity gate. This only writes a snapshot of how her code
+        # has changed (self-awareness), not a change to it -- the gate kept
+        # it from ever running, as it did penpal (2wr).
         try:
             from gaia_common.utils.code_evolution import generate_code_evolution_snapshot
 
@@ -3551,6 +3547,31 @@ class SleepTaskScheduler:
     # adversarial_resilience_drill (RESILIENCE_DRILL)
     # ------------------------------------------------------------------
 
+    def _request_monkey_drill(self) -> None:
+        """Ask gaia-monkey for a container drill on the candidate stack.
+
+        Runs in a thread: the drill stops and restarts each candidate (a
+        couple of minutes), and a wake signal must not wait on it.
+        """
+        import threading
+
+        import httpx
+
+        url = os.getenv("MONKEY_URL", "http://gaia-monkey:6420").rstrip("/") + "/chaos/inject"
+
+        def _fire():
+            try:
+                r = httpx.post(url, json={"drill_types": ["container"]}, timeout=300)
+                body = r.json()
+                done = [f"{d.get('service')}={d.get('status')}" for d in body.get("drill_results", [])]
+                logger.info("Monkey drill: %s; serenity %s", ", ".join(done) or body.get("error"),
+                            body.get("serenity"))
+            except Exception as exc:
+                logger.warning("Monkey drill request failed: %s", exc)
+
+        threading.Thread(target=_fire, name="monkey-drill", daemon=True).start()
+        logger.info("Resilience drill: asked gaia-monkey for a container drill (not yet Serene)")
+
     def _run_adversarial_resilience_drill(self, **kwargs) -> None:
         """
         The Chaos Monkey / Adversarial Sandbox Loop.
@@ -3575,6 +3596,15 @@ class SleepTaskScheduler:
         if is_system_irritated():
             logger.info("Chaos Monkey: System is irritated — skipping drill (heal first)")
             return
+
+        # a57i: serenity is earned only from gaia-monkey's drills, and its
+        # scheduler is "triggered" -- nothing ever triggered it, so serenity
+        # stayed 0 and code_evolution / initiative_cycle never ran. Ask it
+        # for a container drill against the candidates while she sleeps.
+        # Off unless SERENITY_DRILLS=1: being Serene also unlocks auto-promote
+        # of non-vital services and the initiative cycle, which Azrael turns on.
+        if os.getenv("SERENITY_DRILLS", "0") == "1" and not self._is_serene():
+            self._request_monkey_drill()
 
         # All candidate services that this drill may touch.
         # Extend this list as the fix logic grows to cover more services.
