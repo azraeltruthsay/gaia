@@ -321,6 +321,7 @@ class SleepWakeManager:
 
             # Checkpoint complete — enter ASLEEP
             self.state = GaiaState.ASLEEP
+            self._clear_scheduler_wake()
             self.last_state_change = datetime.now(timezone.utc)
             self._emit_state_change("drowsy", "asleep", "checkpoint complete")
             logger.info("Checkpoint written — entering ASLEEP")
@@ -331,6 +332,15 @@ class SleepWakeManager:
             self.state = GaiaState.ACTIVE
             self.last_state_change = datetime.now(timezone.utc)
             return False
+
+    def _clear_scheduler_wake(self) -> None:
+        """Drop the scheduler's wake event once the wake is dealt with, unless
+        another one has just come in."""
+        if self._task_scheduler is not None and not self.wake_signal_pending:
+            try:
+                self._task_scheduler.clear_wake()
+            except Exception:
+                logger.debug("Failed to clear the scheduler's wake event", exc_info=True)
 
     def receive_wake_signal(self, reason: str = "") -> None:
         """Called by gaia-web (via POST /sleep/wake) when a message is queued.
@@ -451,6 +461,7 @@ class SleepWakeManager:
             self.state = GaiaState.ACTIVE
             self._phase = _TransientPhase.NONE
             self.wake_signal_pending = False
+            self._clear_scheduler_wake()
             self.prime_available = True
             self.last_state_change = datetime.now(timezone.utc)
             self._emit_state_change("asleep", "active", "wake signal processed")
@@ -482,6 +493,7 @@ class SleepWakeManager:
             self.state = GaiaState.ACTIVE
             self._phase = _TransientPhase.NONE
             self.wake_signal_pending = False
+            self._clear_scheduler_wake()
             return {"checkpoint_loaded": False}
 
     def get_pending_council_context(self):

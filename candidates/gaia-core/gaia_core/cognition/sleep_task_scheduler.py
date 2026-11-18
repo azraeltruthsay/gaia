@@ -85,6 +85,15 @@ class SleepTaskScheduler:
         self._wake_event.set()
         logger.info("Wake event signalled — interruptible tasks will be interrupted")
 
+    def clear_wake(self) -> None:
+        """The wake was handled (she woke, or fell asleep with none pending).
+
+        Only execute_task cleared the event, and get_next_task starts no
+        task while it is set: a wake that came during a long task, or any
+        message while awake, left it set, and the next sleep ran nothing
+        at all (2026-11-18: asleep 40 min, 0 tasks)."""
+        self._wake_event.clear()
+
     def check_interrupted(self) -> None:
         """Raise TaskInterruptedError if a wake signal is pending.
 
