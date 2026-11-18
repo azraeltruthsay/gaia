@@ -175,6 +175,8 @@ def _self_facts_for_observer(history: list, reply: str = "") -> str:
 
 
 _SECOND_MIND_SECONDS = 20.0
+# How long a turn waits for the engine to come back (a gear shift, ~45 s).
+_ENGINE_WAIT_S = 120.0
 
 
 def _packet_source(packet_data: dict) -> str:
@@ -227,6 +229,35 @@ def action_gap_seed(tool: str, action: str, error: str, user_input: str, session
     return ("THOUGHT_SEED: capability gap — wrong action on a real tool. "
             f"{why}; this could be researched as a naming or capability fix (knowledge gap). "
             f"Payload: {json.dumps(payload, default=str)}")
+
+
+async def _engine_health() -> dict:
+    import httpx
+    async with httpx.AsyncClient(timeout=3) as hc:
+        return (await hc.get("http://localhost:8092/health")).json()
+
+
+async def wait_for_engine(health=_engine_health, wait_s: float = None, sleep=asyncio.sleep, clock=None):
+    """While the engine loads (a gear shift, ~45 s), status lines to yield;
+    ends with True when it is up, False after `wait_s`."""
+    import time
+    clock = clock or time.monotonic
+    wait_s = _ENGINE_WAIT_S if wait_s is None else wait_s
+    t0, last = clock(), -10.0
+    while clock() - t0 < wait_s:
+        try:
+            h = await health()
+            if h.get("model_loaded") or h.get("status") == "ok":
+                yield True
+                return
+        except Exception:
+            pass
+        waited = clock() - t0
+        if waited - last >= 10:
+            last = waited
+            yield json.dumps({"type": "status", "value": "waking", "waited_s": int(waited)}) + "\n"
+        await sleep(2)
+    yield False
 
 
 def _second_mind_followup(agent_core, question: str, reply: str, known: str, session_id: str,
@@ -1249,6 +1280,7 @@ async def process_packet(packet_data: Dict[str, Any]):
     # ── Readiness Gate ──────────────────────────────────────────────────
     # Verify inference engine is reachable before processing.
     # Health check only — no test inference (that adds 500ms+ per request).
+    _engine_not_ready = False
     try:
         import httpx as _httpx
         _engine_ok = False
@@ -1272,17 +1304,11 @@ async def process_packet(packet_data: Dict[str, Any]):
             except Exception:
                 pass
 
-            # Return a friendly message — don't try to process the request
-            # from inside the gate (causes scoping issues with _run_loop).
-            # The user's client will see this and can retry.
-            async def _waking_response():
-                yield json.dumps({
-                    "type": "token",
-                    "value": "One moment — my inference engine is loading. Try again in a few seconds."
-                }) + "\n"
-                yield json.dumps({"type": "flush"}) + "\n"
-
-            return StreamingResponse(_waking_response(), media_type="application/x-ndjson")
+            # A gear shift reloads the engine (~45 s). Turning each message
+            # away with "try again" lost three in a row when the transmission
+            # shifted back to Core (2026-11-17); the turn now waits in
+            # _run_loop instead, telling the client it is waking.
+            _engine_not_ready = True
     except ImportError:
         pass  # httpx not available — skip gate
 
@@ -1290,6 +1316,19 @@ async def process_packet(packet_data: Dict[str, Any]):
 
     async def _run_loop():
         logger.info("Main: _run_loop generator started")
+        if _engine_not_ready:
+            _ready = False
+            async for _w in wait_for_engine():
+                if isinstance(_w, bool):
+                    _ready = _w
+                else:
+                    yield _w
+            if not _ready:
+                yield json.dumps({"type": "token", "value": "One moment — my inference engine is "
+                                  "still loading. Try again in a few seconds."}) + "\n"
+                yield json.dumps({"type": "flush"}) + "\n"
+                return
+            logger.info("Readiness gate: engine up, the waiting turn goes on")
         async with _turn_semaphore:
             logger.info("Main: acquired turn semaphore")
             if await asyncio.to_thread(_wake_for_turn, getattr(app.state, "lifecycle_client", None),
