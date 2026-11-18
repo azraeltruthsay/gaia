@@ -182,8 +182,10 @@ class SleepTaskScheduler:
             estimated_duration_seconds=10,
             handler=self._run_golden_thread_sync,
             # 2wr: golden thread doesn't need 10-second cadence; throttle
-            # so lower-priority tasks can win sleep slots.
-            min_interval_seconds=60,
+            # so lower-priority tasks can win sleep slots. x9h9: 60 s still
+            # rewrote the report 194 times in three hours; code changes come
+            # in commits, so every 15 min is plenty.
+            min_interval_seconds=900,
         ))
 
         self.register_task(SleepTask(
@@ -746,7 +748,7 @@ class SleepTaskScheduler:
                 project_root="/gaia/GAIA_Project",
                 output_path=output_path,
             )
-            logger.info("Golden Thread: As-Built report updated at %s", output_path)
+            logger.debug("Golden Thread: As-Built report checked at %s", output_path)
         except ImportError:
             logger.debug("code_evolution module not available, skipping golden thread sync")
         except Exception as e:

@@ -301,6 +301,15 @@ def generate_code_evolution_snapshot(
     content = "\n".join(lines)
     try:
         out = Path(output_path)
+        # x9h9: only the Generated line differs between most runs; keep the
+        # file (and its mtime) as is when nothing else changed.
+        try:
+            old = out.read_text(encoding="utf-8").split("\n", 2)
+            if len(old) == 3 and old[2] == content.split("\n", 2)[2]:
+                logger.debug("Code evolution snapshot unchanged: %s", output_path)
+                return output_path
+        except OSError:
+            pass
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(content, encoding="utf-8")
         logger.info("Code evolution snapshot written to %s", output_path)
