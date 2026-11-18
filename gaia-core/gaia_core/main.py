@@ -1719,6 +1719,16 @@ async def process_packet(packet_data: Dict[str, Any]):
                         logger.info("Chat: tool-free intent '%s' — suppressing tool calls", _intent_lbl)
             except Exception:
                 logger.debug("intent pre-check for tool suppression failed (non-fatal)", exc_info=True)
+            # la6r: "where were we?" is answered by the turns in front of her;
+            # introspect(recall) brought in events from every session (her
+            # 'you asked about public transit' was someone else's). Only
+            # expand_context, which pages back a set-aside turn of this
+            # conversation, still runs.
+            try:
+                from gaia_core.cognition.nlu.intent_detection import is_recent_recall
+                _recent_recall_turn = is_recent_recall(user_input or "")
+            except Exception:
+                _recent_recall_turn = False
 
             # nxxl follow-up: Core (and Prime) sometimes hallucinate an
             # entire nonexistent tool domain on creative-writing requests
@@ -1786,6 +1796,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                                     # into focus, and is meaningful even on a chatty turn.
                                     if _suppress_tools and pe.tool_name != "expand_context":
                                         logger.info("Tool call '%s' suppressed (tool-free intent)", pe.tool_name)
+                                        _suppressed_tool_count += 1
+                                        continue
+                                    if _recent_recall_turn and pe.tool_name != "expand_context":
+                                        logger.info("Tool call '%s' dropped: the visible turns answer a recent recall",
+                                                    pe.tool_name)
                                         _suppressed_tool_count += 1
                                         continue
                                     # Plain chat she has already answered needs no tool (8ail).

@@ -1604,6 +1604,7 @@ def _recall_events_impl(params: dict):
             return {
                 "ok": True,
                 "mode": "cfr",
+                "scope": "system-wide: events from every conversation and service, not only this one",
                 "hours": hours,
                 "event_count": len(events),
                 "timeline": text,
@@ -1616,6 +1617,9 @@ def _recall_events_impl(params: dict):
                 "ok": True,
                 "mode": "recent",
                 "event_count": len(events),
+                # la6r: read as this conversation's past, these became
+                # "earlier today you asked about public transit".
+                "scope": "system-wide: events from every conversation and service, not only this one",
                 "timeline": text,
             }
     except ImportError:
