@@ -3787,6 +3787,13 @@ class AgentCore:
                     "how's it going", "hows it going", "how goes it",
                 ))
                 if _is_personal:
+                    from gaia_core.cognition.nlu.intent_detection import is_world_question
+                    if is_world_question(user_input or ""):
+                        # e8hf: classed as chat, but it asks about the world
+                        # by name; ungrounded, both minds made the facts up.
+                        _is_personal = False
+                        logger.info("KnowledgeRouter: chat by intent, but a question about the world: grounding")
+                if _is_personal:
                     _kr_skip = True
                     logger.info(
                         "KnowledgeRouter: skipped — personal/chitchat ('%s')",

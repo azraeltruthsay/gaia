@@ -311,3 +311,40 @@ def test_pushback_phrasings(text, want):
     conceded the capital."""
     from gaia_core.cognition.nlu.intent_detection import is_factual_pushback
     assert is_factual_pushback(text, [{"role": "assistant", "content": "Canberra."}]) is want
+
+
+@pytest.mark.parametrize("text,want", [
+    ("Who betrayed King Arthur?", True),
+    ("How did Talos the bronze giant die?", True),
+    ("When did Rome fall?", True),
+    ("What is the capital of Australia?", True),
+    ("How are you doing, GAIA?", False),
+    ("What do you think of Paris?", False),
+    ("What should we eat tonight?", False),
+    ("what time is it?", False),
+    ("Who is Azrael?", False),
+])
+def test_world_questions(text, want):
+    """e8hf: classed as chat, these went ungrounded and were made up."""
+    from gaia_core.cognition.nlu.intent_detection import is_world_question
+    assert is_world_question(text) is want
+
+
+def test_a_question_introduces_no_names():
+    """e8hf: "Who betrayed King Arthur?" made Arthur theirs; the web was skipped."""
+    from gaia_core.cognition.nlu.intent_detection import names_introduced
+    assert names_introduced("Who betrayed King Arthur?") == []
+    assert names_introduced("The ruling family are the Neraly family.") == ["Neraly"]
+
+
+def test_world_question_reads_the_top_page(monkeypatch):
+    """e8hf: the part of the top page that answers it, not just the lead."""
+    from gaia_core.cognition import knowledge_router as kr
+    from gaia_core.utils import mcp_client
+    page = "Talos\nLead.\n\nDeath\n" + "Medea drained the ichor from his ankle. " * 10 + "\n\nLegacy\n" + "x " * 2000
+    monkeypatch.setattr(mcp_client, "call_jsonrpc",
+                        lambda m, p, timeout=None: {"response": {"result": {"content": page, "title": "Talos"}}})
+    top = kr.GroundingResult(source="web", trust_tier="looked_up", content="Talos: Lead.", url="https://x/Talos")
+    read = kr._read_top_result("How did Talos die?", [top])
+    assert read is not None and "Medea" in read.content and read.url == "https://x/Talos"
+    assert kr._read_top_result("How are you today?", [top]) is None

@@ -907,6 +907,25 @@ def is_knowledge_followup(text: str, history=None) -> bool:
     return bool(_FOLLOWUP_ANAPHOR_RE.search(stripped))
 
 
+# e8hf: "Who betrayed King Arthur?" and "How did Talos die?" read as chat,
+# so nothing grounded them and both minds answered from weights: Lancelot;
+# a boulder and Heracles' sword. A wh-question naming something (a capital
+# after the first word) that isn't about you/me/us is about the world.
+_WORLD_NAME_RE = re.compile(r"(?<!^)(?<![.!?]\s)\b[A-Z][a-z][A-Za-z'\-]*")
+_NOT_WORLD_NAMES = frozenset({"I", "GAIA", "Gaia", "Prime", "Core", "Discord", "Azrael"})
+
+
+def is_world_question(text: str) -> bool:
+    """True for a question about the world by name: "Who betrayed King
+    Arthur?", "When did Rome fall?". Not about the people talking."""
+    stripped = (text or "").strip()
+    if not stripped or len(stripped) > 200 or not _FOLLOWUP_WH_RE.search(stripped):
+        return False
+    if _FOLLOWUP_PERSONAL_RE.search(stripped):
+        return False
+    return any(m.group(0) not in _NOT_WORLD_NAMES for m in _WORLD_NAME_RE.finditer(stripped))
+
+
 # 6qzb: a question about the conversation itself — answered from the palace's
 # record of what was said, not from the web or her knowledge.
 _CONV_VERB = (r"(talk(ed|ing)?|discuss(ed|ing)?|chat(ted|ting)?|spoke|speak|say|said|"
@@ -1046,11 +1065,15 @@ def names_introduced(text: str) -> List[str]:
     """Names the speaker introduces as theirs: "is called Llasak", "the Neraly
     family", "House Neraly"."""
     names: List[str] = []
+    # e8hf: a question asks about a name, it doesn't introduce one: "Who
+    # betrayed King Arthur?" made Arthur theirs, and the web was skipped.
+    statements = [s for s in re.split(r"(?<=[.!?])\s+", text or "") if not s.rstrip().endswith("?")]
     for rx in _INTRODUCED_RES:
-        for m in rx.finditer(text or ""):
-            for word in m.group(1).split():
-                if word not in _NOT_OWN and word not in names:
-                    names.append(word)
+        for sentence in statements:
+            for m in rx.finditer(sentence):
+                for word in m.group(1).split():
+                    if word not in _NOT_OWN and word not in names:
+                        names.append(word)
     return names
 
 

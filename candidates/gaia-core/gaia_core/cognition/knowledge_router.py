@@ -452,6 +452,36 @@ def _query_web(query: str, max_results: int = 2, snippet_chars: int = 250) -> Li
     return results
 
 
+READ_CHARS = 1500
+
+
+def _read_top_result(question: str, web_results: List[GroundingResult]) -> Optional[GroundingResult]:
+    """The section of the top web result that answers `question`, for a
+    question about the world by name (e8hf). None otherwise or on failure."""
+    from gaia_core.cognition.nlu.intent_detection import is_world_question
+    top = next((r for r in web_results if r.url), None)
+    if top is None or not is_world_question(question):
+        return None
+    try:
+        from gaia_core.utils import mcp_client
+        from gaia_common.utils.doc_sections import excerpt_for
+        raw = mcp_client.call_jsonrpc("web_fetch", {"url": top.url}, timeout=10)
+        page = raw.get("response", raw) if isinstance(raw, dict) else {}
+        page = page.get("result", page) if isinstance(page, dict) else {}
+        text = (page.get("content") or "") if isinstance(page, dict) else ""
+        if len(text) < 200:
+            return None
+        title = page.get("title") or top.title or top.url
+        logger.info("KnowledgeRouter: read the part of %s that answers the question", top.url)
+        return GroundingResult(
+            source="web", trust_tier="looked_up",
+            content=f"{title} (the part that answers the question):\n{excerpt_for(text, question, READ_CHARS)}",
+            url=top.url, utility_score=top.utility_score, query=question, title=title)
+    except Exception as e:
+        logger.debug("Reading the top result failed: %s", e)
+        return None
+
+
 def _query_system_context(query: str) -> List[GroundingResult]:
     """Provide live system data for time/status/uptime questions.
 
@@ -576,8 +606,12 @@ def ground_query(
     # entries. Same trust tier as MemPalace (local, structured, grounded
     # in LiteJournal + samvega), but distinct in voice — first-person
     # narrative that surfaces past events when the user references them.
+    # e8hf: not for a question about the world by name. Her journal holds
+    # her own earlier answers, made-up ones included ("a traitor opened his
+    # vein"), and they came back as grounding for the same question.
+    from gaia_core.cognition.nlu.intent_detection import is_world_question
     try:
-        journal_results = _query_journal(query)
+        journal_results = [] if is_world_question(query) else _query_journal(query)
         ctx.results.extend(journal_results)
         ctx.sources_queried.append("journal")
         if journal_results:
@@ -604,6 +638,12 @@ def ground_query(
     if not skip_web and not local_has_answer and elapsed < max_total_ms * 0.8:
         try:
             web_results = _query_web(query)
+            # e8hf: a search result is a page's lead; "how did Talos die?"
+            # isn't in it, and both minds made the death up. For a question
+            # about the world, the part of the top page that answers it.
+            read = _read_top_result(query, web_results)
+            if read:
+                web_results.insert(0, read)
             ctx.results.extend(web_results)
             ctx.sources_queried.append("web")
             if web_results:
