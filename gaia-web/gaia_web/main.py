@@ -5,46 +5,46 @@ Provides the HTTP API gateway for the GAIA system.
 This is The Face - UI and API gateway.
 """
 
-import asyncio
-import json
-import logging
 import os
 import uuid
+import logging
+import json
+import httpx
+import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
+
+from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from typing import List
 
-import httpx
-from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-
-from gaia_web.routes.activations import router as activations_router
-from gaia_web.routes.audio import router as audio_router
-from gaia_web.routes.autonomous import router as autonomous_router
 from gaia_web.routes.blueprints import router as blueprints_router
-from gaia_web.routes.changelog import router as changelog_router
-from gaia_web.routes.chaos import router as chaos_router
-from gaia_web.routes.codemind import router as codemind_router
-from gaia_web.routes.conversations import router as conversations_router
-from gaia_web.routes.curriculum import router as curriculum_router
-from gaia_web.routes.discord import router as discord_router
 from gaia_web.routes.files import router as files_router
-from gaia_web.routes.generation import router as generation_router
 from gaia_web.routes.hooks import router as hooks_router
-from gaia_web.routes.logs import router as logs_router
-from gaia_web.routes.palace import router as palace_router
-from gaia_web.routes.system import router as system_router
 from gaia_web.routes.terminal import router as terminal_router
-from gaia_web.routes.training import router as training_router
 from gaia_web.routes.voice import router as voice_router
 from gaia_web.routes.wiki import router as wiki_router
+from gaia_web.routes.generation import router as generation_router
+from gaia_web.routes.logs import router as logs_router
+from gaia_web.routes.audio import router as audio_router
+from gaia_web.routes.discord import router as discord_router
+from gaia_web.routes.system import router as system_router
+from gaia_web.routes.chaos import router as chaos_router
+from gaia_web.routes.changelog import router as changelog_router
+from gaia_web.routes.codemind import router as codemind_router
+from gaia_web.routes.conversations import router as conversations_router
+from gaia_web.routes.activations import router as activations_router
+from gaia_web.routes.autonomous import router as autonomous_router
+from gaia_web.routes.curriculum import router as curriculum_router
+from gaia_web.routes.training import router as training_router
 from gaia_web.routes.world_merges import router as world_merges_router
+from gaia_web.routes.palace import router as palace_router
 
 # Setup logging
 try:
-    from gaia_common.utils import install_health_check_filter, setup_logging
+    from gaia_common.utils import setup_logging, install_health_check_filter
     setup_logging(log_dir="/logs", level=logging.INFO, service_name="gaia-web")
     install_health_check_filter()
 except ImportError:
@@ -60,7 +60,6 @@ except ImportError:
 
 # Module-level security middleware singleton
 from gaia_web.security.middleware import SecurityScanMiddleware
-
 _security_middleware = SecurityScanMiddleware()
 
 # Global singleton for the Discord interface (if enabled)
@@ -119,7 +118,7 @@ app = FastAPI(lifespan=lifespan, title="GAIA Web Gateway")
 # allow unauthenticated access to user-facing routes (/, /static, /dashboard)
 # while requiring auth on API routes called by other services.
 try:
-    from gaia_common.utils.service_auth import _PUBLIC_PATHS, AuthMiddleware
+    from gaia_common.utils.service_auth import AuthMiddleware, _PUBLIC_PATHS
     if AuthMiddleware:
         # Add user-facing paths to the public list
         _PUBLIC_PATHS.update({"/", "/dashboard", "/static", "/api/activations"})
@@ -257,7 +256,8 @@ async def process_user_input(user_input: str, request: Request):
                                 await wake_client.post(f"{core_url}/sleep/wake")
                                 # Also wake the GPU, into the resting gear
                                 orch_url = os.getenv("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
-                                await wake_client.post(f"{orch_url}/gpu/wake")
+                                if not os.getenv("GAIA_IS_CANDIDATE"):  # A candidate never drives the production gearbox (GAIA_IS_CANDIDATE).
+                                    await wake_client.post(f"{orch_url}/gpu/wake")
                         except Exception:
                             logger.debug("Wake signal send failed (non-blocking)")
                         import time as _time
@@ -339,7 +339,7 @@ _MAX_AUDIO_BYTES = 25 * 1024 * 1024  # 25MB per audio clip (~3min @ 128kbps)
 async def process_user_input_multipart(
     request: Request,
     text: str = Form(""),
-    files: list[UploadFile] = File(default=[]),
+    files: List[UploadFile] = File(default=[]),
 ):
     """Multipart entry point for user text + image/audio attachments.
 
@@ -354,8 +354,8 @@ async def process_user_input_multipart(
     multimodal audio path. Audio quality is bound by 7rq (audio side
     training); plumbing here is correct regardless.
     """
-    import base64 as _b64
     import hashlib
+    import base64 as _b64
 
     session_id = request.headers.get("X-Session-ID")
     if not session_id:
@@ -535,7 +535,7 @@ async def update_presence(request: Request):
 @app.get("/health")
 async def health_check():
     """System health check."""
-    return {"status": "healthy", "service": "gaia-web", "timestamp": datetime.now(UTC).isoformat()}
+    return {"status": "healthy", "service": "gaia-web", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 if __name__ == "__main__":
     import uvicorn

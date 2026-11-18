@@ -383,6 +383,8 @@ class SleepCycleLoop:
 
     def _reclaim_gpu_for_wake(self) -> None:
         """Ask orchestrator to start Prime and restore model pool. Non-fatal on failure."""
+        if os.getenv("GAIA_IS_CANDIDATE"):  # A candidate never drives the production gearbox (GAIA_IS_CANDIDATE).
+            return
         try:
             resp = httpx.post(
                 f"{self._orchestrator_url}/gpu/wake",

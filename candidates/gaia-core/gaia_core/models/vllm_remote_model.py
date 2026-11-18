@@ -717,6 +717,10 @@ class VLLMRemoteModel:
         if self._training_holds_gpu():
             logger.info("Self-healing: Prime not woken — training holds the GPU")
             return
+        if os.environ.get("GAIA_IS_CANDIDATE"):
+            # A candidate stopping in a chaos drill woke production this way
+            # (2026-11-18): its shutdown checkpoint hit its standby engine.
+            return
         orchestrator = os.environ.get("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
         try:
             resp = requests.post(

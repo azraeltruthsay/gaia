@@ -53,6 +53,9 @@ services:
       - PRIME_ENDPOINT=${PRIME_ENDPOINT:-http://gaia-prime-candidate:7777}
       # Disable sleep and background heartbeats in candidate to avoid waking GPU
       - SLEEP_ENABLED=False
+      # Never drive the production gearbox (/gpu/wake): a drill stopping this
+      # container woke GAIA from her nap through its shutdown checkpoint.
+      - GAIA_IS_CANDIDATE=1
       - HEARTBEAT_ENABLED=False
       # Tracks the live /models/prime symlink — was hardcoded to an
       # abandoned Huihui-Qwen3-8B abliteration experiment that no longer
@@ -171,6 +174,7 @@ services:
       - PORT=6414
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENABLE_DISCORD=0 # Disable discord in candidate to avoid duplicate bots
+      - GAIA_IS_CANDIDATE=1
 
     deploy:
       resources:

@@ -196,6 +196,8 @@ def _wake_for_turn(lifecycle_client, orchestrator_url, source: str) -> bool:
             return False
         import httpx
         logger.info("Main: parked and spoken to; waking first")
+        if os.getenv("GAIA_IS_CANDIDATE"):  # A candidate never drives the production gearbox (GAIA_IS_CANDIDATE).
+            return False
         return bool(httpx.post(f"{orchestrator_url}/gpu/wake", json={}, timeout=120).json().get("ok"))
     except Exception as e:
         logger.warning("Main: could not wake for this turn: %s", e)
@@ -1238,6 +1240,8 @@ async def process_packet(packet_data: Dict[str, Any]):
             logger.warning("Readiness gate: inference engine not ready")
             # Try to trigger a wake signal
             try:
+                if os.getenv("GAIA_IS_CANDIDATE"):  # A candidate never drives the production gearbox (GAIA_IS_CANDIDATE).
+                    raise RuntimeError("candidate")
                 _wake_url = getattr(app.state, "_orchestrator_url", "http://gaia-orchestrator:6410")
                 _httpx.post(f"{_wake_url}/gpu/wake", json={}, timeout=5)
             except Exception:

@@ -256,7 +256,8 @@ async def process_user_input(user_input: str, request: Request):
                                 await wake_client.post(f"{core_url}/sleep/wake")
                                 # Also wake the GPU, into the resting gear
                                 orch_url = os.getenv("ORCHESTRATOR_ENDPOINT", "http://gaia-orchestrator:6410")
-                                await wake_client.post(f"{orch_url}/gpu/wake")
+                                if not os.getenv("GAIA_IS_CANDIDATE"):  # A candidate never drives the production gearbox (GAIA_IS_CANDIDATE).
+                                    await wake_client.post(f"{orch_url}/gpu/wake")
                         except Exception:
                             logger.debug("Wake signal send failed (non-blocking)")
                         import time as _time
