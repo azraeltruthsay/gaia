@@ -359,3 +359,29 @@ def test_probe_skips_greetings_and_the_speaker(text, bad):
     from gaia_core.cognition.semantic_probe import extract_candidate_phrases
     assert bad not in extract_candidate_phrases(text)
     assert "Rogue's End" in extract_candidate_phrases("I visited Rogue's End today.")
+
+
+@pytest.mark.parametrize("text,want", [
+    ("Who is the president of the United States?", True),
+    ("who is the current president", True),
+    ("Who is the current UK prime minister?", True),
+    ("How are you today?", False),
+    ("What time is it right now?", False),
+    ("The current is strong today.", False),
+])
+def test_current_questions(text, want):
+    """krtr: 'who is the current president' -> 'Joe Biden' from weights."""
+    from gaia_core.cognition.nlu.intent_detection import is_current_question
+    assert is_current_question(text) is want
+
+
+def test_current_question_searches_with_the_year(monkeypatch):
+    from datetime import datetime
+    from gaia_core.cognition import knowledge_router as kr
+    asked = []
+    monkeypatch.setattr(kr, "_query_web", lambda q, *a, **k: asked.append(q) or [])
+    monkeypatch.setattr(kr, "_read_top_result", lambda q, r: None)
+    for name in ("_query_mempalace", "_query_lookup_memory", "_query_journal", "_query_knowledge_graph"):
+        monkeypatch.setattr(kr, name, lambda q: [])
+    kr.ground_query("Who is the president of the United States?")
+    assert asked and asked[0].endswith(str(datetime.now().year))

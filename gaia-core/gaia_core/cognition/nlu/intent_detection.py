@@ -911,19 +911,42 @@ def is_knowledge_followup(text: str, history=None) -> bool:
 # so nothing grounded them and both minds answered from weights: Lancelot;
 # a boulder and Heracles' sword. A wh-question naming something (a capital
 # after the first word) that isn't about you/me/us is about the world.
-_WORLD_NAME_RE = re.compile(r"(?<!^)(?<![.!?]\s)\b[A-Z][a-z][A-Za-z'\-]*")
+_WORLD_NAME_RE = re.compile(r"(?<!^)(?<![.!?]\s)\b(?:[A-Z][a-z][A-Za-z'\-]*|[A-Z]{2,}\b)")
 _NOT_WORLD_NAMES = frozenset({"I", "GAIA", "Gaia", "Prime", "Core", "Discord", "Azrael"})
 
 
 def is_world_question(text: str) -> bool:
     """True for a question about the world by name: "Who betrayed King
-    Arthur?", "When did Rome fall?". Not about the people talking."""
+    Arthur?", "When did Rome fall?", "Who is the UK prime minister?", or
+    about who holds an office now. Not about the people talking."""
     stripped = (text or "").strip()
     if not stripped or len(stripped) > 200 or not _FOLLOWUP_WH_RE.search(stripped):
         return False
     if _FOLLOWUP_PERSONAL_RE.search(stripped):
         return False
-    return any(m.group(0) not in _NOT_WORLD_NAMES for m in _WORLD_NAME_RE.finditer(stripped))
+    return is_current_question(stripped) or any(
+        m.group(0) not in _NOT_WORLD_NAMES for m in _WORLD_NAME_RE.finditer(stripped))
+
+
+# krtr: "Who is the current president?" answered "Joe Biden" from weights.
+# Who holds something now changes after training; the web, asked with this
+# year, knows (with the year: Trump; without: the Declaration of Independence).
+_CURRENT_RE = re.compile(
+    r"\b(?:current(?:ly)?|right now|nowadays|today'?s?|incumbent|at the moment|presently|"
+    r"these days|this year|as of now|latest)\b"
+    r"|^\s*who(?:'s|\s+is|\s+are)\s+(?:the\s+)?(?:\w+\s+){0,2}(?:president|prime minister|pm|ceo|"
+    r"chancellor|king|queen|pope|mayor|governor|leader|head of state|chair(?:man|woman|person)?|"
+    r"secretary|monarch|premier|speaker|minister|champion|coach|owner)\b",
+    re.IGNORECASE)
+
+
+def is_current_question(text: str) -> bool:
+    """A question whose answer is whoever or whatever it is now."""
+    stripped = (text or "").strip()
+    if not stripped or len(stripped) > 200 or _FOLLOWUP_PERSONAL_RE.search(stripped):
+        return False   # "how are you today?", "what time is it right now?"
+    asked = "?" in stripped or bool(_FOLLOWUP_WH_RE.search(stripped))
+    return asked and bool(_CURRENT_RE.search(stripped))
 
 
 # 6qzb: a question about the conversation itself — answered from the palace's

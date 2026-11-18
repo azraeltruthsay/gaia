@@ -635,10 +635,15 @@ def ground_query(
     # 3. Web Search — external knowledge (lowest trust, always cite)
     # Only search if local sources didn't provide enough
     elapsed = (time.time() - t0) * 1000
-    local_has_answer = _strong_memory(ctx.results) or _local_answers(ctx.results, query)
-    if not skip_web and not local_has_answer and elapsed < max_total_ms * 0.8:
+    # krtr: who holds something now can't come from memory or weights; the
+    # web is asked, with this year in the query.
+    from gaia_core.cognition.nlu.intent_detection import is_current_question
+    _current = is_current_question(query)
+    local_has_answer = not _current and (_strong_memory(ctx.results) or _local_answers(ctx.results, query))
+    if not skip_web and not local_has_answer and (_current or elapsed < max_total_ms * 0.8):
         try:
-            web_results = _query_web(query)
+            from datetime import datetime as _dt
+            web_results = _query_web(f"{query} {_dt.now().year}" if _current else query)
             ctx.results.extend(web_results)
             ctx.sources_queried.append("web")
             if web_results:
