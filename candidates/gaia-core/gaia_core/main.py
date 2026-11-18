@@ -8,7 +8,7 @@ This is The Brain - Cognitive loop and reasoning.
 import asyncio
 import os
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -202,6 +202,31 @@ def _wake_for_turn(lifecycle_client, orchestrator_url, source: str) -> bool:
     except Exception as e:
         logger.warning("Main: could not wake for this turn: %s", e)
         return False
+
+
+def action_gap_seed(tool: str, action: str, error: str, user_input: str, session_id: str) -> Optional[str]:
+    """72sk: the seed text for a call to a real tool with an action it doesn't
+    have, or None if the error isn't that. Hallucinated tool names already
+    seed a capability gap (vp52); this failure only corrected her. Two cases a
+    reviewer would treat differently: another tool has the action (the name
+    misled her: a catalog or naming fix), or none does (an action to add)."""
+    if "Unknown action" not in (error or ""):
+        return None
+    from datetime import datetime, timezone
+    from gaia_common.utils.domain_tools import domains_with_action
+    elsewhere = [d for d in domains_with_action(action) if d != tool]
+    kind = "misleading_name" if elsewhere else "missing_action"
+    payload = {
+        "attempted_tool_name": tool, "attempted_tool_action": action, "kind": kind,
+        "action_found_in": elsewhere, "error": (error or "")[:300],
+        "user_request": user_input, "session_id": session_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    why = (f"'{action}' belongs to {', '.join(elsewhere)}, so the name '{tool}' misled her"
+           if elsewhere else f"'{tool}' has no action '{action}' and nothing else does")
+    return ("THOUGHT_SEED: capability gap — wrong action on a real tool. "
+            f"{why}; this could be researched as a naming or capability fix (knowledge gap). "
+            f"Payload: {json.dumps(payload, default=str)}")
 
 
 def _second_mind_followup(agent_core, question: str, reply: str, known: str, session_id: str,
@@ -2135,6 +2160,16 @@ async def process_packet(packet_data: Dict[str, Any]):
                             _idx = _err_str.find("Unknown action")
                             if _idx >= 0:
                                 _norm_msg = _err_str[_idx:].split("\n")[0]
+                                # 72sk: a real tool, an action it lacks: seed it
+                                # like a hallucinated tool (vp52), not only correct her.
+                                try:
+                                    from gaia_core.cognition.thought_seed import save_thought_seed, seed_backlog_count
+                                    _gap = action_gap_seed(tc.tool_name, tc.tool_action or "", _norm_msg,
+                                                           user_input or "", session_id)
+                                    if _gap and seed_backlog_count() < int(os.environ.get("THOUGHT_SEED_MAX_PENDING", "2000")):
+                                        save_thought_seed(_gap, packet, _agent_core.config)
+                                except Exception:
+                                    logger.debug("action-gap seed failed (non-fatal)", exc_info=True)
                             elif "Internal error:" in _err_str:
                                 _idx2 = _err_str.find("Internal error:")
                                 _norm_msg = _err_str[_idx2:].split("\n")[0]

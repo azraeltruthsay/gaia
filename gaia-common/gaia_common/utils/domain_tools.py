@@ -626,6 +626,13 @@ def build_domain_schemas() -> Dict[str, dict]:
 # Validation
 # ═══════════════════════════════════════════════════════════════════════════
 
+def domains_with_action(action: str) -> List[str]:
+    """The tools that do have `action` (72sk: 'worldbuild(state)' failed; the
+    status she wanted is introspect's)."""
+    a = (action or "").strip().lower()
+    return [d for d, spec in DOMAIN_TOOLS.items() if a and a in (spec.get("actions") or {})]
+
+
 def validate_domain_call(domain: str, action: str) -> str:
     """
     Validate a domain tool call and return the legacy tool name.
