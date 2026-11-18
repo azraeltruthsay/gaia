@@ -267,36 +267,6 @@ interfaces:
 
     after deploying new model weights.'
   status: active
-- id: nano_backoff
-  direction: inbound
-  transport:
-    type: http_rest
-    path: /nano/backoff
-    method: POST
-    input_schema: null
-    output_schema: null
-  description: Evict Nano from GPU to CPU to free VRAM.
-  status: active
-- id: nano_restore
-  direction: inbound
-  transport:
-    type: http_rest
-    path: /nano/restore
-    method: POST
-    input_schema: null
-    output_schema: null
-  description: Restore Nano to GPU for faster inference.
-  status: active
-- id: nano_status
-  direction: inbound
-  transport:
-    type: http_rest
-    path: /nano/status
-    method: GET
-    input_schema: null
-    output_schema: null
-  description: Get Nano GPU/CPU placement status.
-  status: active
 - id: training_kill
   direction: inbound
   transport:

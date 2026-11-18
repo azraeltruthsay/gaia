@@ -58,15 +58,6 @@ interfaces:
       path: /request_approval
       method: POST
 
-  - id: pending_approvals
-    direction: inbound
-    description: "List all pending approvals awaiting human confirmation."
-    status: active
-    transport:
-      type: http_rest
-      path: /pending_approvals
-      method: GET
-
   - id: approve_action
     direction: inbound
     description: "Approve pending action by providing reversed 5-char challenge. Dispatches underlying tool on success."

@@ -280,33 +280,72 @@ def _check_endpoints(
     return items
 
 
+_ROUTER_PREFIX_RE = re.compile(
+    r"(\w+)\s*=\s*APIRouter\([^)]*?prefix\s*=\s*['\"]([^'\"]*)['\"]", re.DOTALL)
+_ANY_ROUTE_RE = re.compile(
+    r"@(\w+)\.(get|post|put|delete|patch|websocket|api_route)\(\s*['\"]([^'\"]*)['\"]"
+    r"(?:[^)]*?methods\s*=\s*\[([^\]]*)\])?",
+    re.IGNORECASE)
+_IMPORT_ROUTER_RE = re.compile(r"from\s+([\w.]+)\s+import\s+(\w+)\s+as\s+(\w+)")
+_INCLUDE_RE = re.compile(
+    r"include_router\(\s*([\w.]+)\s*,[^)]*?prefix\s*=\s*['\"]([^'\"]*)['\"]", re.DOTALL)
+
+
+def _mount_prefixes(source_files: Dict[str, str]) -> Dict[str, str]:
+    """Module path suffix ("routes/system.py") -> prefix it is mounted at
+    with include_router(..., prefix=...)."""
+    mounts: Dict[str, str] = {}
+    for content in source_files.values():
+        aliases = {alias: mod for mod, _name, alias in _IMPORT_ROUTER_RE.findall(content)}
+        for target, prefix in _INCLUDE_RE.findall(content):
+            mod = aliases.get(target.split(".")[0])
+            if mod:
+                mounts[mod.split(".", 1)[-1].replace(".", "/") + ".py"] = prefix
+    return mounts
+
+
+def _routes(source_files: Dict[str, str]):
+    """(method, full path, file, line) for every route decorator, with its
+    router's prefix and mount prefix applied (42qa: without them every
+    route on APIRouter(prefix="/sleep") read as missing)."""
+    mounts = _mount_prefixes(source_files)
+    for filename, content in source_files.items():
+        prefixes = dict(_ROUTER_PREFIX_RE.findall(content))
+        mount = next((p for suffix, p in mounts.items()
+                      if filename.replace("\\", "/").endswith(suffix)), "")
+        for i, line in enumerate(content.splitlines(), 1):
+            m = _ANY_ROUTE_RE.search(line)
+            if not m:
+                continue
+            var, method, path, methods = m.groups()
+            if var not in ("app", "router") and var not in prefixes:
+                continue
+            full = mount + prefixes.get(var, "") + path
+            if method.lower() == "api_route":
+                for verb in re.findall(r"\w+", methods or "GET"):
+                    yield verb.lower(), full, filename, i
+            else:
+                yield method.lower(), full, filename, i
+
+
 def _find_http_endpoint(
     method: str, path: str, source_files: Dict[str, str]
 ) -> tuple[Optional[str], int]:
-    """Find a matching @router.{method}("{path}") in source files."""
+    """Find a route decorator for `method` `path` in source files."""
     method_lower = method.lower()
-    for filename, content in source_files.items():
-        for i, line in enumerate(content.splitlines(), 1):
-            match = _HTTP_ROUTE_RE.search(line)
-            if match:
-                route_method = match.group(1).lower()
-                route_path = match.group(2)
-                if route_method == method_lower and _paths_match(route_path, path):
-                    return filename, i
+    for route_method, route_path, filename, i in _routes(source_files):
+        if route_method == method_lower and _paths_match(route_path, path):
+            return filename, i
     return None, 0
 
 
 def _find_ws_endpoint(
     path: str, source_files: Dict[str, str]
 ) -> tuple[Optional[str], int]:
-    """Find a matching @router.websocket("{path}") in source files."""
-    for filename, content in source_files.items():
-        for i, line in enumerate(content.splitlines(), 1):
-            match = _WS_ROUTE_RE.search(line)
-            if match:
-                route_path = match.group(1)
-                if _paths_match(route_path, path):
-                    return filename, i
+    """Find a websocket route for `path` in source files."""
+    for route_method, route_path, filename, i in _routes(source_files):
+        if route_method == "websocket" and _paths_match(route_path, path):
+            return filename, i
     return None, 0
 
 

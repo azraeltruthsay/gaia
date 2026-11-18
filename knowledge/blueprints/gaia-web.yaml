@@ -28,15 +28,6 @@ interfaces:
     type: http_rest
     path: /
     method: GET
-- id: queue_status
-  direction: inbound
-  description: Message queue telemetry — queued count, wake signal state, oldest message
-    age.
-  status: active
-  transport:
-    type: http_rest
-    path: /queue/status
-    method: GET
 - id: process_user_input
   direction: inbound
   description: 'Primary user input entry point. Receives text from web/Discord, converts
@@ -55,15 +46,6 @@ interfaces:
   transport:
     type: http_rest
     path: /presence
-    method: POST
-- id: output_router
-  direction: inbound
-  description: Route completed packets to output destinations (Discord channels, DMs,
-    logs). Called by gaia-core after response generation.
-  status: active
-  transport:
-    type: http_rest
-    path: /output_router
     method: POST
 - id: core_process_packet
   direction: outbound
