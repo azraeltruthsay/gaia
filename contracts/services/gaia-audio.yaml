@@ -83,7 +83,7 @@ provides:
       fields:
         text: string
         voice: string (optional)
-        tier: "auto | nano | prime" (default auto)
+        tier: "auto | nano | prime (default auto)"
     response_schema:
       fields:
         audio_base64: string

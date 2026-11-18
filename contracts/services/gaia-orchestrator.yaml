@@ -182,7 +182,7 @@ provides:
         messages: list
         max_tokens: int (default 512)
         temperature: float (default 0.7)
-        device: "cuda | cpu" (default cuda)
+        device: "cuda | cpu (default cuda)"
     consumers: [gaia-core]
 
   - endpoint: /tier/ensure

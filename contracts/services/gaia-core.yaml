@@ -215,7 +215,7 @@ provides:
         system: string (optional)
         max_tokens: int (default 512)
         temperature: float (default 0.3)
-        target: "core | prime | nano" (default core; "nano" now resolves to Core's embedded engine via the socat passthrough)
+        target: "core | prime | nano (default core; 'nano' now resolves to Core's embedded engine via the socat passthrough)"
         no_think: bool (default false)
     consumers: [gaia-doctor, gaia-monkey]
 

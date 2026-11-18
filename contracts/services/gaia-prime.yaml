@@ -33,7 +33,7 @@ provides:
         temperature: float
         top_p: float
         stream: bool
-        chat_template_kwargs: dict (optional, e.g. {enable_thinking: false})
+        chat_template_kwargs: "dict (optional, e.g. {enable_thinking: false})"
     response_schema:
       type: OpenAI ChatCompletionResponse
     consumers: [gaia-core]
@@ -71,7 +71,7 @@ provides:
     request_schema:
       fields:
         model: string (path to model directory)
-        device: "cuda | cpu" (default cuda)
+        device: "cuda | cpu (default cuda)"
     consumers: [gaia-orchestrator, gaia-core]
 
   - endpoint: /model/unload
