@@ -188,8 +188,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tier", choices=sorted(TIERS), default="core")
     ap.add_argument("--parallel", type=int, default=4)
+    ap.add_argument("--retry", action="store_true",
+                    help="re-ask the turns whose records the trainer would skip; "
+                         "write <out>.retry.jsonl and <out>.merged.jsonl")
     ap.add_argument("limit", nargs="?", type=int)
     args = ap.parse_args()
+    if args.retry:
+        return retry(args)
     # Real turns with their context first, then the journal's inputs as
     # first messages (no history), which live prompts also are.
     turns = json.load(open("/shared/tmp_h1ok/turns.json"))
@@ -207,6 +212,35 @@ def main():
             closed += bool(rec.get("closed"))
             if done % 25 == 0 or done == lim:
                 print(f"{done}/{lim} closed={closed} {time.time()-t0:.0f}s", flush=True)
+
+
+def retry(args):
+    """One more teacher sample for each turn whose record failed the trainer's
+    filters (no closed thought, a made-up tool result, cut off, too long...).
+    Sampling differs run to run, so a second ask often comes back usable."""
+    import train_core_thinking as trainer
+    tcfg = trainer.TIERS[args.tier]
+    out = TIERS[args.tier]["out"]
+    records = [json.loads(x) for x in open(out)]
+    good_users = {r["user"] for r in trainer.load_records(out, tcfg)}
+    turns = json.load(open("/shared/tmp_h1ok/turns.json"))
+    by_user = {t["user"]: t for t in turns}
+    todo = [by_user.get(r["user"], r["user"]) for r in records if r["user"] not in good_users]
+    print(f"retrying {len(todo)} of {len(records)}", flush=True)
+    with open(out + ".retry.jsonl", "w") as f, ThreadPoolExecutor(args.parallel) as ex:
+        for i, rec in enumerate(ex.map(lambda t: one(args.tier, t), todo), 1):
+            f.write(json.dumps(rec) + "\n")
+            f.flush()
+            if i % 25 == 0 or i == len(todo):
+                print(f"retry {i}/{len(todo)}", flush=True)
+    kept = {r["user"]: r for r in trainer.load_records(out, tcfg)}
+    for r in trainer.load_records(out + ".retry.jsonl", tcfg):
+        kept.setdefault(r["user"], r)
+    with open(out + ".merged.jsonl", "w") as f:
+        for r in kept.values():
+            f.write(json.dumps(r) + "\n")
+    print(f"merged: {len(kept)} usable", flush=True)
+    return 0
 
 
 if __name__ == "__main__":

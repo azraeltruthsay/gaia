@@ -451,6 +451,7 @@
   "DELIBERATION": {
     "enabled": true,
     "adapter_name": "core_deliberation_v1",
+    "prime_thinking_adapter_name": "prime_thinking_v3",
     "max_tokens": 900,
     "temperature": 0.55,
     "retry_on_confabulation": "warn",

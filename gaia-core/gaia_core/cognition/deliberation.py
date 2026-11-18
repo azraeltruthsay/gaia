@@ -729,6 +729,14 @@ def deliberate(
         if native_thinking:
             logger.info("Deliberation: native thinking requested but no thought channel returned")
         thinking, final_response, fallback_used = _split_think_and_response(raw)
+    # b9mp: only the system writes a <tool_result>. One in the model's own
+    # answer is made up (the tools block shows the tag); drop it, and an
+    # answer that was nothing else falls back like an empty one.
+    if _FAKE_RESULT_RE.search(final_response or ""):
+        final_response = _FAKE_RESULT_RE.sub("", final_response).strip()
+        logger.info("Deliberation: dropped a made-up tool result (%d chars left)", len(final_response))
+        if not final_response:
+            fallback_used = True
     final_response = _strip_leading_input_echo(final_response, user_input)
     final_response, _echo_dropped = _strip_scaffold_echo(
         final_response, _scaffold_text(messages[0].get("content", ""), _instructions), user_input)
@@ -796,6 +804,9 @@ def _capture_prompt(messages, model_role, adapter_name, native_thinking) -> None
 
 def _flag(value) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+_FAKE_RESULT_RE = re.compile(r"<tool_(?:result|response)>.*?(?:</tool_(?:result|response)>|$)", re.I | re.S)
 
 
 def _native_thinking_on(cfg: Dict[str, Any], prime: bool, deep_focus: bool = False) -> bool:

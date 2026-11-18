@@ -67,10 +67,12 @@ LOGGING_STEPS = 5
 TIERS = {
     "core": {
         "base": "/models/core",
-        "data": "/shared/tmp_h1ok/teacher.jsonl",
-        "out": "/models/lora_adapters/tier1_global/core_thinking_v1",
-        "name": "core_thinking_v1", "issue": "h1ok",
-        "teacher": "google/gemma-4-E4b-it (Q8 GGUF)",
+        # w6in: v2 is for the 12B Core v2, taught on the 'core' prompt live
+        # deliberation sends (v1: E4B, on Prime's prompt).
+        "data": "/shared/tmp_h1ok/teacher_core12b.jsonl",
+        "out": "/models/lora_adapters/tier1_global/core_thinking_v2",
+        "name": "core_thinking_v2", "issue": "h1ok/w6in",
+        "teacher": "google/gemma-4-12B-it (Q6_K GGUF, stock turn format)",
         "max_seq": 4096, "max_target": 1000, "teacher_cap": 1100,
         "skip_modules": ["lm_head", "vision_tower", "audio_tower", "embed_vision", "embed_audio"],
         "self_description": re.compile(r"\bas an ai\b|\blanguage model\b|\bllm\b|\bgoogle\b|\bgemma\b", re.I),
@@ -83,9 +85,11 @@ TIERS = {
     },
     "prime": {
         "base": "/models/prime",
-        "data": "/shared/tmp_h1ok/teacher_prime.jsonl",
-        "out": "/models/lora_adapters/tier1_global/prime_thinking_v2",
-        "name": "prime_thinking_v2", "issue": "isep/n1e4",
+        # b9mp: v3 is for Prime v2b, taught on live-shaped THINKER prompts
+        # (history, persona, grounding); v1/v2 were for Prime v1.
+        "data": "/shared/tmp_h1ok/teacher_prime_v2b.jsonl",
+        "out": "/models/lora_adapters/tier1_global/prime_thinking_v3",
+        "name": "prime_thinking_v3", "issue": "isep/n1e4/b9mp",
         "teacher": "Qwen/Qwen3-VL-8B-Thinking (Q8 GGUF)",
         "max_seq": 6144, "max_target": 3000, "teacher_cap": 3000,
         "skip_modules": ["lm_head", "visual"],
@@ -131,15 +135,29 @@ def render_target(tier: str, r: dict) -> str:
     return "<think>\n" + r["thought"] + "\n</think>\n\n" + r["answer"] + "<|im_end|>"
 
 
+# b9mp: live prompts describe <tool_result> and THOUGHT_SEED, and on them even
+# the stock teacher wraps answers in a made-up <tool_result> (13 of 51) or
+# signs off with a THOUGHT_SEED line. A fabricated result is dropped; a note to
+# herself is cut from the answer, so the adapter learns to answer plainly.
+_FAKE_RESULT_RE = re.compile(r"</?tool_(?:result|response)>|<tool_call>", re.I)
+_SELF_NOTE_RE = re.compile(r"^[ \t*_]*(?:THOUGHT_SEED|GOAL_SHIFT|Action: none)\b.*(?:\n|$)", re.I | re.M)
+
+
+def clean_answer(answer: str) -> str:
+    return _SELF_NOTE_RE.sub("", answer or "").strip()
+
+
 def load_records(path: str, cfg: dict) -> list:
     """Teacher records usable for training: a closed thought, a plain answer
     after it (no second thought block), no generation error, no refusal."""
     good, skipped = [], {"error": 0, "unclosed": 0, "nested": 0, "cut_off": 0,
                          "empty_answer": 0, "self_description": 0, "refusal": 0,
-                         "stance": 0, "long_thought": 0}
+                         "stance": 0, "long_thought": 0, "fake_tool_result": 0}
     with open(path) as f:
         for line in f:
             r = json.loads(line)
+            if r.get("answer"):
+                r["answer"] = clean_answer(r["answer"])
             if r.get("error"):
                 skipped["error"] += 1
             elif not r.get("closed") or not r.get("thought"):
@@ -150,6 +168,8 @@ def load_records(path: str, cfg: dict) -> list:
                 skipped["cut_off"] += 1
             elif not (r.get("answer") or "").strip():
                 skipped["empty_answer"] += 1
+            elif _FAKE_RESULT_RE.search(r["answer"]):
+                skipped["fake_tool_result"] += 1
             elif cfg["refusal"] is not None and cfg["refusal"].search(r["thought"] + "\n" + r["answer"]):
                 skipped["refusal"] += 1
             elif cfg["stance"] is not None and cfg["stance"].search(r["thought"] + "\n" + r["answer"]):
@@ -264,6 +284,10 @@ def main():
     tokenizer = AutoProcessor.from_pretrained(base_model, trust_remote_code=True).tokenizer
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # f8x8: the 12B's tokenizer adds no <bos>; every serving path sends one.
+    if tokenizer.bos_token and tokenizer("x")["input_ids"][:1] != [tokenizer.bos_token_id]:
+        tokenizer.add_bos_token = True
+        log.info("Tokenizer set to add <bos>")
     # The thought markers must be single tokens, or the adapter would learn a
     # text imitation the engine can't recognise.
     for marker in cfg["markers"]:
