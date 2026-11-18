@@ -572,7 +572,10 @@ def tool_result_text(result: Any, limit: int = 4000, question: str = "") -> str:
             return text.strip() or "(empty result)"
         else:
             rows = result.get("lookups") or result.get("results")
-            works = [w for w in result.get("works") or [] if isinstance(w, dict) and w.get("text")]
+            # sk6m: palace(status) answers "works": 13, a count, not a list.
+            _works = result.get("works")
+            works = [w for w in _works if isinstance(w, dict) and w.get("text")] \
+                if isinstance(_works, list) else []
             if works:
                 # A work she knows outranks scraps about it: with lookups
                 # alone she made up how The Raven ends (8ail, 2026-11-03).

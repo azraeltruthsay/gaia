@@ -163,3 +163,12 @@ class TestExistingFormatsRegression:
         events = _feed_all(p, "Just a normal reply, nothing special.")
         assert all(e.type == ParseEventType.TEXT for e in events)
         assert "".join(e.text for e in events) == "Just a normal reply, nothing special."
+
+
+def test_palace_status_counts_are_not_works():
+    """sk6m: palace(status) has "works": 13 (a count); the turn died with
+    "'int' object is not iterable"."""
+    from gaia_common.utils.tool_call_parser import tool_result_text
+    text = tool_result_text({"ok": True, "total_memories": 115, "works": 13,
+                             "lookups": {"active": 2078}}, question="where were we?")
+    assert "115" in text
