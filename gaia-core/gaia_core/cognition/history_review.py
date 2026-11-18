@@ -164,13 +164,13 @@ def review_history(
         return history
 
     _threshold_val = cfg.get("violation_threshold", 2)
-    if isinstance(_threshold_val, (int, float)) and not hasattr(_threshold_val, '_mock_return_value') and _threshold_val.__class__.__name__ != 'MagicMock':
+    if isinstance(_threshold_val, (int, float)):
         violation_threshold = int(_threshold_val)
     else:
         violation_threshold = 2
 
     _max_val = cfg.get("max_messages", 20)
-    if isinstance(_max_val, (int, float)) and not hasattr(_max_val, '_mock_return_value') and _max_val.__class__.__name__ != 'MagicMock':
+    if isinstance(_max_val, (int, float)):
         max_history_len = int(_max_val)
     else:
         max_history_len = 20

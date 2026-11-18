@@ -1240,7 +1240,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
     _context_window_early = 8192
     try:
         _val = getattr(packet.header.model, 'context_window_tokens', 8192) or 8192
-        if isinstance(_val, (int, float)) and not hasattr(_val, '_mock_return_value') and _val.__class__.__name__ != 'MagicMock':
+        if isinstance(_val, (int, float)):
             _context_window_early = int(_val)
     except Exception:
         pass
@@ -1256,7 +1256,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                         _model_cfg_early = _cfg_val
                         break
             _mml = _model_cfg_early.get('max_model_len', _context_window_early)
-            if _mml and isinstance(_mml, (int, float)) and not hasattr(_mml, '_mock_return_value') and _mml.__class__.__name__ != 'MagicMock':
+            if _mml and isinstance(_mml, (int, float)):
                 if _mml < _context_window_early:
                     _context_window_early = int(_mml)
     except Exception:
@@ -1418,7 +1418,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
     _context_window = 8192
     try:
         _val = getattr(packet.header.model, 'context_window_tokens', 8192) or 8192
-        if isinstance(_val, (int, float)) and not hasattr(_val, '_mock_return_value') and _val.__class__.__name__ != 'MagicMock':
+        if isinstance(_val, (int, float)):
             _context_window = int(_val)
     except Exception:
         pass
@@ -1436,7 +1436,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                         _model_cfg = _cfg_val
                         break
             _max_model_len = _model_cfg.get('max_model_len', _context_window)
-            if _max_model_len and isinstance(_max_model_len, (int, float)) and not hasattr(_max_model_len, '_mock_return_value') and _max_model_len.__class__.__name__ != 'MagicMock':
+            if _max_model_len and isinstance(_max_model_len, (int, float)):
                 if _max_model_len < _context_window:
                     _context_window = int(_max_model_len)
     except Exception:

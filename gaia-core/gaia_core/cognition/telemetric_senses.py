@@ -81,14 +81,34 @@ def get_gpu_usage() -> Dict[str, Any]:
         logger.debug(f"Could not get GPU usage: {e}")
         return {}
 
+def _proc_cpuinfo() -> Dict[str, Any]:
+    """The CPU's name and architecture from /proc/cpuinfo (Linux)."""
+    import platform
+    info: Dict[str, Any] = {"arch": platform.machine() or "Unknown"}
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.lower().startswith("model name"):
+                    info["brand_raw"] = line.split(":", 1)[1].strip()
+                    break
+    except OSError:
+        pass
+    return info
+
+
 def get_hardware_profile() -> Dict[str, Any]:
     """
     Gathers static information about the system's hardware.
     """
     try:
-        import cpuinfo
-        cpu_info = cpuinfo.get_cpu_info()
-        
+        try:
+            import cpuinfo
+            cpu_info = cpuinfo.get_cpu_info()
+        except ImportError:
+            # py-cpuinfo isn't in the image: the whole profile came back
+            # empty on every call (logged as an ERROR). /proc has the name.
+            cpu_info = _proc_cpuinfo()
+
         profile = {
             "cpu_info": {
                 "brand_raw": cpu_info.get("brand_raw", "Unknown"),

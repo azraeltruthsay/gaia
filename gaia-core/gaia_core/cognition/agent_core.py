@@ -249,18 +249,10 @@ class SafeConfigProxy:
             "MODEL_CONFIGS": {},
         }
 
-        # Check if the raw config itself is a Mock/MagicMock
-        raw_name = self._raw_config.__class__.__name__
-        is_raw_mock = (
-            self._raw_config is None or
-            raw_name in ('MagicMock', 'Mock', 'NonCallableMagicMock', 'NonCallableMock') or
-            hasattr(self._raw_config, '_mock_return_value')
-        )
-
-        if is_raw_mock:
+        if self._raw_config is None:
             if name == "constants":
                 return {}
-            return fallback_map.get(name, self._raw_config)
+            return fallback_map.get(name)
 
         # Get attribute from raw config
         try:
@@ -270,18 +262,18 @@ class SafeConfigProxy:
                 return {}
             return fallback_map.get(name, None)
 
-        # Check if the returned value is a Mock/MagicMock
-        if val is not None:
-            val_name = val.__class__.__name__
-            is_val_mock = (
-                val_name in ('MagicMock', 'Mock', 'NonCallableMagicMock', 'NonCallableMock') or
-                hasattr(val, '_mock_return_value')
-            )
-            if is_val_mock:
-                if name in fallback_map:
-                    return fallback_map[name]
-                if name == "constants" or name == "MODEL_CONFIGS":
-                    return {}
+        # qzqi: a value of the wrong type falls back, by type, not by
+        # sniffing for test mocks.
+        if name in ("constants", "MODEL_CONFIGS"):
+            return val if isinstance(val, dict) else {}
+        if name in fallback_map and val is not None:
+            want = fallback_map[name]
+            if isinstance(want, bool):
+                return val if isinstance(val, bool) else want
+            if isinstance(want, (int, float)):
+                return val if isinstance(val, (int, float)) and not isinstance(val, bool) else want
+            if isinstance(want, str):
+                return val if isinstance(val, str) else want
         return val
 
     def __setattr__(self, name, value):
@@ -4006,21 +3998,18 @@ class AgentCore:
             # When enabled=False (default), this block is a no-op.
             try:
                 _constants = self.config.constants
-                if _constants.__class__.__name__ == 'MagicMock' or hasattr(_constants, '_mock_return_value'):
+                if not isinstance(_constants, dict):
                     _outer_constants = getattr(self.ai_manager, 'constants', None)
-                    if _outer_constants and not (_outer_constants.__class__.__name__ == 'MagicMock' or hasattr(_outer_constants, '_mock_return_value')):
-                        _constants = _outer_constants
-                    else:
-                        _constants = {}
-                _delib_cfg = (_constants or {}).get("DELIBERATION", {}) or {}
-                if _delib_cfg.__class__.__name__ == 'MagicMock' or hasattr(_delib_cfg, '_mock_return_value'):
+                    _constants = _outer_constants if isinstance(_outer_constants, dict) else {}
+                _delib_cfg = _constants.get("DELIBERATION", {}) or {}
+                if not isinstance(_delib_cfg, dict):
                     _delib_cfg = {}
                 _has_image_att = any(
                     (getattr(a, "mime", "") or "").startswith("image/")
                     for a in (packet.content.attachments or [])
                 )
                 _delib_enabled = _delib_cfg.get("enabled", False)
-                if isinstance(_delib_enabled, (bool, int)) and not (_delib_enabled.__class__.__name__ == 'MagicMock' or hasattr(_delib_enabled, '_mock_return_value')):
+                if isinstance(_delib_enabled, (bool, int)):
                     _delib_enabled = bool(_delib_enabled)
                 else:
                     _delib_enabled = False

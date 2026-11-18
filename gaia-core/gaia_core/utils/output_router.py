@@ -41,9 +41,7 @@ def _strip_think_tags_robust(text: str) -> str:
     if not text:
         return ""
     if not isinstance(text, str):
-        if hasattr(text, '_mock_return_value') or text.__class__.__name__ == 'MagicMock':
-            return ""
-        text = str(text)
+        text = text.decode("utf-8", "replace") if isinstance(text, bytes) else str(text)
 
     result = text
 
