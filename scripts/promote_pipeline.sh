@@ -206,12 +206,49 @@ check_health() {
 # Track whether we shut down live (for safety trap and conditional logic)
 LIVE_STOPPED=false
 
+# Poll the live services in SERVICE_LIST every 10s, up to $1 seconds (default
+# 180: covers gaia-prime's 120s start_period). Sets LIVE_WAITED; returns 0
+# when all are healthy.
+wait_live_healthy() {
+    local max_wait=${1:-180}
+    local healthy_count total_count svc port
+    LIVE_WAITED=0
+    while [ $LIVE_WAITED -lt $max_wait ]; do
+        sleep 10
+        LIVE_WAITED=$((LIVE_WAITED + 10))
+        healthy_count=0
+        total_count=0
+        for svc in "${SERVICE_LIST[@]}"; do
+            port="${LIVE_PORTS[$svc]:-}"
+            if [ -n "$port" ]; then
+                total_count=$((total_count + 1))
+                if check_health "$svc" "$port" 5; then
+                    healthy_count=$((healthy_count + 1))
+                fi
+            fi
+        done
+        log "    ${DIM}[${LIVE_WAITED}s] $healthy_count/$total_count services healthy${RESET}"
+        if [ "$healthy_count" -eq "$total_count" ] && [ "$total_count" -gt 0 ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 restart_live_if_down() {
     if [ "$LIVE_STOPPED" = true ]; then
         log "  ${YELLOW}Restarting live services...${RESET}"
         cd "$GAIA_ROOT"
         docker compose up -d 2>/dev/null || true
         LIVE_STOPPED=false
+        # oibw: the failure path restarted live and never looked again; a
+        # rollback that left live down reported nothing.
+        if wait_live_healthy 180; then
+            log "  ${GREEN}✓${RESET} Live services back and healthy (${LIVE_WAITED}s)"
+        else
+            log "  ${RED}${BOLD}✗ Live services NOT healthy ${LIVE_WAITED}s after the rollback restart — check them now${RESET}"
+            return 1
+        fi
     fi
 }
 
@@ -941,31 +978,13 @@ else
         cd "$GAIA_ROOT"
         docker compose up -d 2>&1 | while read -r line; do log "    $line"; done
 
-        # Poll for health every 10s, max 180s (covers gaia-prime's 120s start_period)
         log "  Waiting for live services to become healthy (max 180s)..."
-        max_wait=180
-        waited=0
         all_healthy=false
-        while [ $waited -lt $max_wait ]; do
-            sleep 10
-            waited=$((waited + 10))
-            healthy_count=0
-            total_count=0
-            for svc in "${SERVICE_LIST[@]}"; do
-                port="${LIVE_PORTS[$svc]:-}"
-                if [ -n "$port" ]; then
-                    total_count=$((total_count + 1))
-                    if check_health "$svc" "$port" 5; then
-                        healthy_count=$((healthy_count + 1))
-                    fi
-                fi
-            done
-            log "    ${DIM}[${waited}s] $healthy_count/$total_count services healthy${RESET}"
-            if [ "$healthy_count" -eq "$total_count" ] && [ "$total_count" -gt 0 ]; then
-                all_healthy=true
-                break
-            fi
-        done
+        max_wait=180
+        if wait_live_healthy "$max_wait"; then
+            all_healthy=true
+        fi
+        waited=$LIVE_WAITED
 
         LIVE_STOPPED=false
         # Clear the safety trap now that live is back up
