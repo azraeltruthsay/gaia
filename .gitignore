@@ -104,6 +104,7 @@ tools/
 !.claude/slash-commands/
 .gemini/
 CLAUDE.md
+!.claude/agents/**/CLAUDE.md
 GAIA_Specialist_Agent_Mesh*.md
 
 # --- Standalone root files (not part of SOA services) ---
