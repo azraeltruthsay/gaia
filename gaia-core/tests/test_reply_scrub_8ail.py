@@ -348,3 +348,14 @@ def test_world_question_reads_the_top_page(monkeypatch):
     read = kr._read_top_result("How did Talos die?", [top])
     assert read is not None and "Medea" in read.content and read.url == "https://x/Talos"
     assert kr._read_top_result("How are you today?", [top]) is None
+
+
+@pytest.mark.parametrize("text,bad", [
+    ("Splendid. Do you know where he got the sword?", "Splendid"),
+    ("Who was his queen then? Ok now true love I've", "I've"),
+])
+def test_probe_skips_greetings_and_the_speaker(text, bad):
+    """mlx8: 'Splendid.' fetched Dottyback and Tripadvisor pages."""
+    from gaia_core.cognition.semantic_probe import extract_candidate_phrases
+    assert bad not in extract_candidate_phrases(text)
+    assert "Rogue's End" in extract_candidate_phrases("I visited Rogue's End today.")

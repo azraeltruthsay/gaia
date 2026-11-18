@@ -359,8 +359,11 @@ def extract_candidate_phrases(text: str) -> List[str]:
         text
     ):
         # Not across a sentence end: "Mission Control. It", "Discord. Andy".
-        for part in re.split(r"(?<=[a-z]{2})\.\s+", m.group(1)):
-            if " " in part.strip() or part.strip()[:1].isupper():
+        # mlx8: a part left as one word is a sentence's first word ("Splendid.
+        # Do you know..." searched Splendid); single words are step 3's,
+        # which skips sentence-initial ones.
+        for part in re.split(r"(?<=[a-z]{2})[.!?]\s+", m.group(1)):
+            if " " in part.strip():
                 _add(part)
 
     # 3. Single capitalized words that aren't sentence-initial
@@ -383,6 +386,9 @@ def extract_candidate_phrases(text: str) -> List[str]:
             continue
         # Skip if it's a common word (case-insensitive)
         if clean.lower() in _COMMON_WORDS:
+            continue
+        # "I've", "I'm", "I'd": the speaker, not a name (mlx8).
+        if re.match(r"^I['’]", clean):
             continue
         _add(clean)
 
