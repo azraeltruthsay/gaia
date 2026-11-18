@@ -1,24 +1,31 @@
 """Tests for gaia-audio FastAPI endpoints."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client():
-    """Create test client with mocked engines."""
-    # We need to mock the heavy dependencies before importing main
-    with patch("gaia_audio.main.AudioConfig") as MockConfig:
+def client(monkeypatch):
+    """Test client: no models loaded, service auth in dev mode (qvo6: the
+    startup loaded real models from MagicMock paths, and the HMAC
+    middleware answered 401 to every non-public route)."""
+    from gaia_common.utils import service_auth
+    monkeypatch.setattr(service_auth, "_load_secret", lambda: None)
+    with patch("gaia_audio.main.GPUManager.startup", AsyncMock()), \
+         patch("gaia_audio.main.RefinerEngine.load", MagicMock()), \
+         patch("gaia_audio.main.MusicEngine.load", MagicMock()), \
+         patch("gaia_audio.main.AudioConfig") as MockConfig:
         mock_cfg = MagicMock()
-        mock_cfg.stt_model = "tiny.en"
-        mock_cfg.tts_engine = "system"
-        mock_cfg.tts_voice = None
+        mock_cfg.listener_model_path = "/nonexistent/asr"
+        mock_cfg.listener_device = "cpu"
+        mock_cfg.nano_speaker_model_path = "/nonexistent/nano"
+        mock_cfg.prime_speaker_model_path = "/nonexistent/prime"
+        mock_cfg.voice_ref_audio = None
+        mock_cfg.voice_ref_text = None
+        mock_cfg.prime_speaker_timeout = 30
         mock_cfg.vram_budget_mb = 5600
-        mock_cfg.core_endpoint = "http://gaia-core:6415"
-        mock_cfg.web_endpoint = "http://gaia-web:6414"
-        mock_cfg.orchestrator_endpoint = "http://gaia-orchestrator:6410"
         MockConfig.from_constants.return_value = mock_cfg
 
         from gaia_audio.main import app
@@ -47,8 +54,8 @@ def test_config(client):
     resp = client.get("/config")
     assert resp.status_code == 200
     data = resp.json()
-    assert "stt_model" in data
-    assert "tts_engine" in data
+    assert "listener_model" in data
+    assert "nano_speaker_model" in data
 
 
 def test_voices(client):

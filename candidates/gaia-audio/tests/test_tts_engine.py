@@ -1,44 +1,40 @@
-"""Tests for TTSEngine — RealtimeTTS wrapper."""
+"""Tests for the three speakers (qvo6: rewritten for NanoSpeaker /
+PrimeSpeaker / EspeakFallback; the old TTSEngine is gone)."""
 
 import pytest
 
-from gaia_audio.tts_engine import ENGINE_VRAM_MB, TTSEngine
+from gaia_audio.tts_engine import EspeakFallback, NanoSpeaker, PrimeSpeaker, _sanitize_for_speech
 
 
-def test_engine_starts_unloaded():
-    engine = TTSEngine(engine_type="system")
-    assert not engine.loaded
-    assert engine.vram_mb == 0
+@pytest.mark.parametrize("cls,vram", [(NanoSpeaker, 0), (PrimeSpeaker, None)])
+def test_speakers_start_unloaded(cls, vram):
+    s = cls(model_path="/nonexistent")
+    assert not s.loaded
+    if vram is not None:
+        assert s.vram_mb == vram
 
 
-def test_engine_vram_estimates():
-    assert ENGINE_VRAM_MB["system"] == 0
-    assert ENGINE_VRAM_MB["coqui"] == 3000
-    assert ENGINE_VRAM_MB["elevenlabs"] == 0
-
-
-def test_synthesize_sync_raises_when_not_loaded():
-    engine = TTSEngine(engine_type="system")
+@pytest.mark.parametrize("cls", [NanoSpeaker, PrimeSpeaker])
+def test_synthesize_raises_when_not_loaded(cls):
     with pytest.raises(RuntimeError, match="not loaded"):
-        engine.synthesize_sync("Hello world")
+        cls(model_path="/nonexistent").synthesize_sync("Hello world")
 
 
-def test_list_voices_system():
-    engine = TTSEngine(engine_type="system")
-    voices = engine.list_voices()
-    assert len(voices) == 1
-    assert voices[0]["engine"] == "system"
-    assert voices[0]["voice_id"] == "default"
+def test_espeak_not_ready_until_loaded():
+    e = EspeakFallback()
+    assert not e.loaded and e.vram_mb == 0
+    with pytest.raises(RuntimeError, match="not ready"):
+        e.synthesize_sync("Hello")
 
 
-def test_list_voices_coqui():
-    engine = TTSEngine(engine_type="coqui")
-    voices = engine.list_voices()
-    assert len(voices) == 1
-    assert voices[0]["engine"] == "coqui"
+def test_voices_offer_clone_only_with_reference():
+    assert [v["voice_id"] for v in NanoSpeaker(model_path="/x").list_voices()] == ["default"]
+    with_ref = NanoSpeaker(model_path="/x", voice_ref_audio="/ref.wav").list_voices()
+    assert [v["voice_id"] for v in with_ref] == ["default", "clone"]
+    assert all(v["engine"] == "nano_speaker" for v in with_ref)
 
 
-def test_unknown_engine_raises():
-    engine = TTSEngine(engine_type="nonexistent")
-    with pytest.raises(ValueError, match="Unknown TTS engine"):
-        engine.load()
+def test_sanitize_strips_markdown_and_tier_tags():
+    out = _sanitize_for_speech("## Title\n**Bold** [Prime] text\n- item")
+    assert "#" not in out and "*" not in out and "[Prime]" not in out
+    assert "Bold" in out and "item" in out
