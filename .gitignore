@@ -95,7 +95,13 @@ nvidia_post_debug.txt
 
 # --- Tools / config not tracked ---
 tools/
-.claude/
+# cb2d: .claude/ settings and locks stay local; the rules, commands and
+# agents CLAUDE.md points to as canonical are tracked.
+.claude/*
+!.claude/rules/
+!.claude/commands/
+!.claude/agents/
+!.claude/slash-commands/
 .gemini/
 CLAUDE.md
 GAIA_Specialist_Agent_Mesh*.md
@@ -222,6 +228,7 @@ gaia-engine/
 # Antigravity (agy) teamwork swarm workspace — transient, not project state
 .agents/
 agents/
+!.claude/agents/
 PROJECT.md
 
 # Ad-hoc debug scratch dirs (throwaway repro scripts)
