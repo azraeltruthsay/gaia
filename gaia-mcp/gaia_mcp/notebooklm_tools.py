@@ -32,7 +32,6 @@ Approval bypass for operator-initiated writes:
     docker exec gaia-mcp python3 -c "from gaia_mcp.notebooklm_tools import ..."
 """
 
-import base64
 import logging
 import os
 import tempfile
@@ -349,36 +348,6 @@ async def notebooklm_download_audio(params: dict) -> dict:
             "download_path": str(download_path),
         }
 
-        # Transcribe via gaia-audio STT relay.
-        # Contract: POST /transcribe expects TranscribeRequest schema:
-        #   {"audio_base64": str, "sample_rate": int (default 16000), "language": str|None}
-        # Returns: {"text": str, ...} on 200, 400 if audio_base64 missing, 423 if muted.
-        # NOTE: For large files (>~10MB), the base64 payload may exceed server limits.
-        #       In that case, split audio into chunks externally and transcribe each.
-        if httpx is not None:
-            try:
-                audio_bytes = Path(download_path).read_bytes()
-                audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
-
-                async with httpx.AsyncClient(timeout=120) as http:
-                    resp = await http.post(
-                        f"{_GAIA_AUDIO_URL}/transcribe",
-                        json={"audio_base64": audio_b64, "sample_rate": 16000},
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        result["transcription"] = data.get("text", data.get("transcription", ""))
-                        result["transcribed"] = True
-                    else:
-                        result["transcribed"] = False
-                        result["transcribe_error"] = f"gaia-audio returned {resp.status_code}"
-            except Exception as e:
-                result["transcribed"] = False
-                result["transcribe_error"] = f"Transcription relay failed: {e}"
-        else:
-            result["transcribed"] = False
-            result["transcribe_error"] = "httpx not available for transcription relay"
-
         # Persist to save_path if requested, otherwise clean up temp file
         save_path = (params.get("save_path") or "").strip()
         if save_path:
@@ -392,6 +361,36 @@ async def notebooklm_download_audio(params: dict) -> dict:
             Path(download_path).unlink(missing_ok=True)
         except Exception:
             pass
+
+        # tj0a: the whole episode (~88 MB) went base64 to /transcribe, unsigned
+        # and far past its limit, so no episode was ever transcribed. gaia-audio
+        # now transcribes the saved file in chunks in the background and writes
+        # transcript_path; the caller picks it up on a later cycle.
+        transcript_path = (params.get("transcript_path") or "").strip()
+        if not (save_path and result.get("saved_path") and transcript_path):
+            result["transcribed"] = False
+            result["transcribe_error"] = "pass save_path and transcript_path to transcribe"
+        elif httpx is None:
+            result["transcribed"] = False
+            result["transcribe_error"] = "httpx not available for transcription relay"
+        else:
+            try:
+                from gaia_common.utils.service_auth import auth_headers
+                async with httpx.AsyncClient(timeout=30) as http:
+                    resp = await http.post(
+                        f"{_GAIA_AUDIO_URL}/transcribe_file",
+                        json={"path": save_path, "out_path": transcript_path},
+                        headers=auth_headers("POST", "/transcribe_file"),
+                    )
+                result["transcribed"] = False
+                if resp.status_code == 202:
+                    result["transcription_started"] = resp.json().get("status")
+                    result["transcript_path"] = transcript_path
+                else:
+                    result["transcribe_error"] = f"gaia-audio returned {resp.status_code}: {resp.text[:200]}"
+            except Exception as e:
+                result["transcribed"] = False
+                result["transcribe_error"] = f"Transcription relay failed: {e}"
 
         return result
 

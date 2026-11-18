@@ -124,6 +124,21 @@ def _strip_think(text: str) -> str:
     return text.strip()
 
 
+def _start_transcription(audio_path: str, transcript: Path) -> Optional[str]:
+    """Ask gaia-audio to transcribe the episode in the background (tj0a)."""
+    import httpx
+    from gaia_common.utils.service_auth import auth_headers
+    url = os.environ.get("GAIA_AUDIO_URL", "http://gaia-audio:8080")
+    try:
+        r = httpx.post(f"{url}/transcribe_file",
+                       json={"path": audio_path, "out_path": str(transcript)},
+                       headers=auth_headers("POST", "/transcribe_file"), timeout=15)
+        return r.json().get("status") if r.status_code == 202 else None
+    except Exception as e:
+        logger.debug("Penpal: transcription request failed: %s", e)
+        return None
+
+
 def _get_transcript(artifact: Dict, state: dict) -> Optional[str]:
     """A real transcript for the episode, or None.
 
@@ -141,6 +156,12 @@ def _get_transcript(artifact: Dict, state: dict) -> Optional[str]:
 
     awaiting = state["awaiting_transcript"]
     if episode_id in awaiting:
+        # tj0a: gaia-audio may have restarted mid-job; asking again is cheap
+        # (it answers "running" for a job it still has) and needs no
+        # re-download: the audio is on disk.
+        audio = (awaiting[episode_id] or {}).get("audio_path") or ""
+        if audio and Path(audio).exists():
+            _start_transcription(audio, tfile)
         return None
 
     audio_path = EPISODE_DIR / f"{episode_id}.mp4"
@@ -151,6 +172,7 @@ def _get_transcript(artifact: Dict, state: dict) -> Optional[str]:
             "notebook_id": NOTEBOOK_ID,
             "artifact_id": episode_id,
             "save_path": str(audio_path),
+            "transcript_path": str(tfile),
         })
         text = (download.get("transcription") or download.get("transcript") or "").strip()
         if download.get("transcribe_error"):

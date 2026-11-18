@@ -89,3 +89,9 @@ def test_transcribe_rejects_when_muted(client):
     resp = client.post("/transcribe", json={"audio_base64": "aGVsbG8="})
     assert resp.status_code == 423
     client.post("/unmute")
+
+
+def test_transcribe_file_refuses_paths_outside_penpal(client):
+    """tj0a: the endpoint takes paths, so only /shared/penpal is readable."""
+    resp = client.post("/transcribe_file", json={"path": "/etc/passwd", "out_path": "/tmp/x.txt"})
+    assert resp.status_code == 403

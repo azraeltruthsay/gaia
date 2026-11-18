@@ -288,6 +288,32 @@ async def transcribe(request: TranscribeRequest):
         raise HTTPException(500, f"Transcription failed: {e}") from e
 
 
+@app.post("/transcribe_file", status_code=202)
+async def transcribe_file(body: dict):
+    """Transcribe a long file on /shared/penpal in the background (tj0a):
+    {"path": ..., "out_path": ..., "language": optional}. The transcript is
+    written to out_path when done; poll for it."""
+    from gaia_audio import file_transcriber as ft
+
+    if not gpu_manager or not stt_engine:
+        raise HTTPException(503, "Audio service not initialized")
+    path, out_path = body.get("path") or "", body.get("out_path") or ""
+    if not path or not out_path:
+        raise HTTPException(400, "path and out_path are required")
+    if not (ft.allowed(path) and ft.allowed(out_path)):
+        raise HTTPException(403, f"only files under {ft.ALLOWED_ROOT}")
+    if not os.path.isfile(path):
+        raise HTTPException(404, f"no file at {path}")
+    language = body.get("language")
+
+    async def _chunk(samples):
+        result = await gpu_manager.run_stt(stt_engine.transcribe_sync, audio_array=samples,
+                                           sample_rate=ft.SAMPLE_RATE, language=language)
+        return result.get("text", "")
+
+    return {"status": ft.start(path, out_path, _chunk), "out_path": out_path}
+
+
 # ── Audio Analysis (Music/Environment) ─────────────────────────────
 
 

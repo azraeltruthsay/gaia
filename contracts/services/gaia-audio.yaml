@@ -51,6 +51,22 @@ provides:
         context_markers: list
     consumers: [gaia-web]
 
+  - endpoint: /transcribe_file
+    method: POST
+    description: "Transcribe a long file under /shared/penpal in the background, in 2-minute chunks; writes out_path when done. No wake signal (tj0a)."
+    request_schema:
+      fields:
+        path: string (file under /shared/penpal)
+        out_path: string (under /shared/penpal; written atomically)
+        language: string (optional)
+    response_schema:
+      status_code: 202
+      fields:
+        status: "started | running"
+        out_path: string
+    errors: [400 missing path, 403 outside /shared/penpal, 404 no file, 503 not initialized]
+    consumers: [gaia-mcp, gaia-core]
+
   # ── Audio Analysis ─────────────────────────────────────────────────
   - endpoint: /analyze
     method: POST
