@@ -2,136 +2,137 @@
 
 ## Role and Overview
 
-`gaia-core` is the cognitive engine of the GAIA system. It processes user input through a multi-step reasoning pipeline: intent detection, knowledge enhancement, LLM inference, tool routing, self-reflection, and response assembly. In v0.6, gaia-core implements the **Sovereign Shield** hardening suite and the **Smart Immune System** for autonomous triage and irritation awareness.
+`gaia-core` runs GAIA's cognitive loop: a message arrives as a `CognitionPacket`
+on `POST /process_packet`, is routed, grounded, deliberated and generated, and
+streams back as NDJSON. It also embeds **Core**, one of her two minds, through
+the GAIA Engine in managed mode on `localhost:8092`, and runs the sleep cycle.
+
+Architecture era: **Sovereign Duality** (two minds; Nano retired). Where this
+document and `CLAUDE.md` disagree, `CLAUDE.md` wins.
+
+## The two minds
+
+| Tier | Model | Where it runs | Role |
+|------|-------|---------------|------|
+| **Core** (Operator) | Gemma4-12B-GAIA-Core-v2 | embedded here, `:8092` (gaia_cpp: GPU Q6_K in gear 1, CPU Q4_K_M otherwise) | triage, intent, tools, vision, audio, chat |
+| **Prime** (Sovereign) | Qwen3-VL-8B-GAIA-Prime-v2b | `gaia-prime:7777` (GPU NF4 in gear 2, CPU GGUF otherwise) | deep reasoning, code, planning; default voice in the resting gear |
+| Groq | `gaia_constants.json` → `groq_fallback` | cloud | fallback only |
+
+The mind on the GPU generates; the other observes from the CPU. Which mind is
+on the GPU is the orchestrator's gearbox (P / 1 / 1+ / 2 / S / 0 / T), not
+gaia-core's decision: gaia-core asks with `POST /gpu/wake` and reads the state.
+`nano` in the model pool and `NANO_ENDPOINT` are aliases for Core's engine,
+kept for old call sites.
 
 ## Container Configuration
 
-**Base Image**: `python:3.11-slim` (CPU-only, no CUDA)
+**Image**: `localhost:5000/gaia-core:local`, built from `gaia-core/Dockerfile`
+(CUDA 12.8 base; llama.cpp b8770 llama-server, PyTorch and the GAIA Engine).
+The engine itself is a directory mount of `gaia-engine/gaia_engine`.
 
-**Port**: 6415 (live), 6416 (candidate)
+**Port**: 6415 (production), 6416 (`gaia-core-candidate`). The embedded engine
+listens on 8092 inside the container.
 
-**Health Check**: `curl -f http://localhost:6415/health` (30s interval, 3 retries)
+**Health Check**: `curl -f http://localhost:6415/health`. `/health` reports
+`inference_ok`, the Observer and the transmission.
 
-**Startup**: `uvicorn gaia_core.main:app --host 0.0.0.0 --port 6415`
-
-**Dependencies**: Waits for `gaia-prime` (healthy) and `gaia-mcp` (healthy) before starting.
+**Candidate**: `gaia-core-candidate` mounts `candidates/gaia-core`, runs with
+`SLEEP_ENABLED=False` and `GAIA_IS_CANDIDATE=1`. The flag stops it from ever
+driving the production gearbox (`/gpu/wake`) or Discord presence (gx27).
 
 ### Key Environment Variables
 
-| Variable | Value | Purpose |
-|----------|-------|---------|
-| `GAIA_BACKEND` | `gpu_prime` | Selects remote vLLM inference backend |
-| `GAIA_FORCE_CPU` | `1` | Prevents local GPU usage |
-| `N_GPU_LAYERS` | `0` | No GPU layers for llama.cpp fallback |
-| `PRIME_ENDPOINT` | `http://gaia-prime:7777` | Remote vLLM server address |
-| `PRIME_MODEL` | `/models/Qwen3-8B-abliterated-AWQ` | Model path on gaia-prime |
-| `GAIA_LITE_GGUF` | `/models/Qwen3-8B-abliterated-Q4_K_M.gguf` | **Operator** model path |
-| `GAIA_NANO_GGUF` | `/models/Qwen3-0.5B-Instruct-GGUF/...` | **Nano** model path |
-| `GAIA_AUTOLOAD_MODELS` | `0` | Lazy model loading on first use |
-| `HOME` | `/tmp` | Zero-Trust: writable temp home |
-| `TRANSFORMERS_CACHE` | `/tmp/.cache` | Zero-Trust: writable cache |
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `GAIA_BACKEND` | `auto` | inference backend selection |
+| `CORE_DEVICE` | `cuda` | device for the embedded Core |
+| `CORE_CPU_ENDPOINT` / `CORE_CPU_PORT` | `http://localhost:8092` / `8092` | embedded engine |
+| `CORE_SAFETENSORS_PATH` | `/models/core` | Core weights (torch path, rollback) |
+| `PRIME_ENDPOINT` / `PRIME_MODEL` | `http://gaia-prime:7777` / `/models/prime` | Prime |
+| `MCP_ENDPOINT` | `http://gaia-mcp:8765/jsonrpc` | tools |
+| `STUDY_ENDPOINT` | `http://gaia-study:8766` | training, vector indexing |
+| `CFR_CONVERSATION_ENABLED` | `1` | relevance×decay working set for the conversation |
+| `CFR_BLUR_BREADCRUMB` | `0` | off: telling Core what was set aside backfires |
+| `VOICE_GATE_ENABLED` | `1` | post-generation meta-commentary strip |
+| `OBSERVER_ON_STREAM` | `1` | the conscience on the user path (fast mode) |
+| `AFFECT_APPRAISAL_ENABLED` | `0` | feed the affect organ from real subsystems |
+| `DELIBERATION_NATIVE_THINKING` | `1` | Core thinks in Gemma 4's thought channel |
+| `SERENITY_DRILLS` | `1` | sleep drills via gaia-monkey until Serene (a57i) |
+| `THOUGHT_SEED_MAX_PENDING` | `2000` | cap on the thought-seed backlog |
+| `GAIA_USER_TZ`, `GAIA_LOCALE_*` | | locality organ: time zone, city, weather |
 
 ### Volume Mounts
 
-- `./gaia-core:/app:rw` — Source code (editable in dev)
-- `./gaia-common:/gaia-common:ro` — Shared library
-- `./knowledge:/knowledge:ro` — Knowledge base
-- `./gaia-models:/models:ro` — Model files (GGUF for Operator/Nano)
-- `gaia-shared:/shared:rw` — Inter-service state
-- `/run/secrets:/run/secrets:ro` — Docker Secrets (Zero-Trust Identity)
+- `./gaia-core:/app:rw`, `./gaia-common:/gaia-common:ro`
+- `./gaia-engine/gaia_engine` → site-packages `gaia_engine` (ro)
+- `.:/gaia/GAIA_Project:rw`: the project, for blueprint validation, as-built
+  reports and auto-promotion
+- `../gaia-instance/knowledge:/knowledge:rw`, with the repo's `blueprints`,
+  `system_reference`, `personas`, `research`, `consent`, `templates` (ro) and
+  `penpal` (rw) mounted over it
+- `../gaia-instance/knowledge/vector_store:/vector_store:ro`
+- `${GAIA_MODELS_HOST}:/models:ro`, `/warm_pool:ro`, `../gaia-instance/logs:/logs`
+- `gaia-shared:/shared:rw`: inter-service state
 
-## Sovereign Shield & Immune System (v0.6)
+## A turn (`AgentCore.run_turn`, `main.py /process_packet`)
 
-The Sovereign Shield provides structural hardening and self-protection:
+1. **Arrival** (`main.py`): approval replies (TOTP codes) are answered before
+   anything else; people and pronouns are noted; a parked GAIA is woken.
+2. **Intent and routing**: embedding classifier, then the NeuralRouter picks
+   the mind and the pipeline depth.
+3. **Ingestion**: knowledge-base and attachment ingestion; recitation of a
+   known work.
+4. **Knowledge Router**: grounding before any generation. A pushback re-asks
+   the web about the disputed answer; a recent recall ("where were we?") is
+   answered by the visible turns; a follow-up borrows the subject from the
+   last exchange; their own world is searched in their knowledge base, not
+   the web.
+5. **Prompt assembly** (`utils/prompt_builder.py`): identity facts (volatile,
+   prompt-injected), `[Here & Now]` (time, place, weather), the people present
+   and her bonds with them, the CFR working set of the conversation.
+6. **Deliberation**: the thinking mind reasons; drift scan and cross-tier
+   audit check it.
+7. **Generation** streams; inline `<tool_call>`s run through gaia-mcp
+   (sensitive ones park for a TOTP approval). Text written before a call is
+   retracted (`{"type": "retract"}`) and the answer comes from the result.
+8. **Stream scrub** (`cognition/reply_scrub.py`): plumbing stripped; an
+   unfounded apology, or conceding words while she holds a disputed answer,
+   cut from the opening.
+9. **Observer**: the parallel CPU audit of the reply; the second mind may post
+   a follow-up.
+10. **After the turn**: the transmission counts corrections (strikes shift
+    gears); samvega captures discernment artifacts; the outcome ledger and
+    affect appraisal are fed.
 
-1. **Circuit Breaker** — Fatal halt mechanism in `EthicalSentinel`. If a cognitive loop exceeds thresholds, the system creates `/shared/HEALING_REQUIRED.lock` and freezes the turn loop until manual triage.
-2. **Zero-Trust Identity** — API keys and sensitive tokens are prioritized from Docker Secrets (`/run/secrets/`) rather than local environment files.
-3. **Blast Shield** — Deterministic pre-flight validation in the MCP layer. Blocks dangerous command patterns (e.g., `rm -rf`, `sudo`) before LLM reasoning is even invoked.
-4. **Smart Immune System** — SIEM-lite logic in `gaia-common` that scans service logs, consolidates repetitive errors into unique "irritants," and calculates a weighted systemic health score.
-5. **Transparency Logging** — Tool results in the `CognitionPacket` include a `raw_source_data` field, ensuring the "Reflector" persona sees un-summarized machine truth.
+## Sleep
 
-## Cognitive Pipeline (v0.6)
+After 30 idle minutes she is DROWSY, then ASLEEP: `SleepTaskScheduler` runs
+maintenance, reflection, curation, documentation, self-review and the
+serenity drill. A wake signal interrupts the current task at its next phase
+boundary. See `GAIA_SLEEP_CYCLE.md`.
 
-The core reasoning loop in `AgentCore.run_turn()`:
+## Constants (`cognition/agent_core.py`)
 
-1. **Circuit Breaker Check** — Ensure no healing lock is active.
-2. **Nano Fast-Path** — Ultra-fast routing for trivial tasks/status checks via **Nano (0.5B)**.
-3. **Semantic Probe** — Pre-cognition vector lookup across all knowledge bases.
-4. **Interstitial Triage (TCP)** — High-speed triage of "gap audio" heard while busy.
-5. **Immune Awareness** — Inject "Smart" health summary into world-state snapshot.
-6. **Auditory Environment** — Sense the surroundings (BPM, Key, Energy) via `gaia-audio/analyze`.
-7. **Doctor Loop (Self-Healing)** — Failover-aware autonomous diagnosis.
-8. **Persona & KB Selection** — Probe/Triage results drive routing.
-9. **Model Selection** — Multi-path selection with escalation to **Prime (8B AWQ)**.
-10. **Intent Detection** — Classify user intent via **Operator (8B GGUF)**.
-11. **Planning** — Generate execution plan for complex queries via **Operator**.
-12. **Cognitive Self-Audit** — Epistemic assessment.
-13. **Knowledge Enhancement** — Inject relevant context.
-14. **Prompt Assembly** — Build LLM prompt with **Conversation Timeline** landmarks.
-15. **Generation** — Stream from primary model (**Prime**).
-16. **Stream Observation** — Real-time output validation.
-17. **Tool Routing** — Route to MCP tools with **Blast Shield** protection.
-18. **Saṃvega Integration** — Capture discernment artifacts on low-confidence turns.
-19. **Self-Reflection** — Review and refine response.
-20. **Output Routing** — Deliver to destination with Transparency Logging.
-
-## Inference Backends (v0.6)
-
-| Backend | Role | Type | Connection | GPU Layers |
-|---------|-----------|-------|------------|------------|
-| `gpu_prime` | **The Voice** (Prime) | vLLM (AWQ) | HTTP:7777 | Full (vLLM) |
-| `operator` | **The Brain** (Operator) | llama.cpp (GGUF) | In-process | Full (All) |
-| `nano` | **The Reflex** (Nano) | llama.cpp (GGUF) | In-process | Full (All) |
-| `groq_fallback` | Emergency Thinker | Groq API | HTTPS | N/A |
-
-## ⚠️ Accuracy Notice (2026-10-14)
-
-Everything above this line is **Blueprint Version 0.6, last touched
-2026-03-02** and describes the pre-Sovereign-Duality 3-tier Nano/Operator/
-Prime(AWQ) architecture. That architecture was retired: Nano is explicitly
-deprecated ("Core handles all triage" per `CLAUDE.md`), the real stack is
-2-tier Core (Gemma4-E4B-GAIA-Core-v1) / Prime (Qwen3-VL-8B-GAIA-Prime-v1-
-abliterated, vision-language, not AWQ), and `PRIME_MODEL=/models/Qwen3-8B-
-abliterated-AWQ` in the env table above is a known-dead placeholder path
-(corrected elsewhere to `/models/prime` back on 2026-07-02). The 20-step
-Cognitive Pipeline list also predates CFR, the Observer, cross-tier audit,
-samvega, affect_appraiser, and the locality organ — all live per `CLAUDE.md`
-but undocumented here. Treat `CLAUDE.md`'s "Sovereign Duality" and
-"Cognitive Systems & Flags" sections as authoritative over this document
-until the full rewrite tracked in **GAIA_Project-okhq** lands. This notice
-was added while landing a narrower, already-detected fix (the two
-constants below) rather than attempting that rewrite tonight.
+| Constant | Value | Use |
+|----------|-------|-----|
+| `WHOLE_DOC_CHARS` | 9000 | how much of a fetched document is read whole |
+| `PLAIN_DOC_CHARS` | 1200 | excerpt size for a plain document answer |
+| `WHOLE_FALLBACK_CHARS` | 3000 | a document this short is answered whole |
+| `HISTORY_SUMMARY_THRESHOLD` | 20 | defined, unused |
+| `MAX_OUTPUT_LENGTH` | 500 | defined, unused |
 
 ## Meta
-**Status**: stale — see Accuracy Notice above; full rewrite tracked in GAIA_Project-okhq
-**Blueprint Version**: 0.6
-**Last Updated**: 2026-03-02 (content) / 2026-10-14 (accuracy notice only)
+**Status**: current
+**Blueprint Version**: 0.7
+**Last Updated**: 2026-11-17 (rewritten for Sovereign Duality, GAIA_Project-okhq)
 
 ## Changelog
 
+### 2026-11-17
+Rewritten. Version 0.6 (2026-03-02) described the retired three-tier
+Nano/Operator/Prime(AWQ) stack, a CPU-only image and a 20-step pipeline
+from before CFR, the Observer, the transmission and the Knowledge Router.
+
 ### 2026-10-14
-Resolved the `blueprint_validation` sleep task's 2026-09-17 finding: both
-`HISTORY_SUMMARY_THRESHOLD = 20` and `MAX_OUTPUT_LENGTH = 500` are defined
-in `gaia_core/cognition/agent_core.py` (lines 80-81) but, per a full grep of
-the codebase, are not referenced anywhere else — they're currently dead
-constants, not live config knobs. Documenting that honestly here rather
-than presenting them as active behavior. Also added the Accuracy Notice
-above after finding this document describes a retired model architecture
-(see GAIA_Project-okhq).
-
-## Recent Implementation Updates
-
-### 2026-11-04T07:27:56Z
-
-Detected 2 item(s) not reflected in blueprint:
-- `constant:WHOLE_DOC_CHARS`
-- `constant:PLAIN_DOC_CHARS`
-
-*Auto-detected by blueprint_validation sleep task.*
-
-### 2026-11-06T06:47:34Z
-
-Detected 1 item(s) not reflected in blueprint:
-- `constant:WHOLE_FALLBACK_CHARS`
-
-*Auto-detected by blueprint_validation sleep task.*
+`HISTORY_SUMMARY_THRESHOLD` and `MAX_OUTPUT_LENGTH` found to be dead
+constants (defined in `agent_core.py`, referenced nowhere).
