@@ -250,3 +250,64 @@ def test_retract_drops_what_was_held():
     after = out[out.index({"type": "retract"}) + 1:]
     assert "".join(e["value"] for e in after) == "We were talking about Canberra."
     assert not any(e.get("value", "").endswith("<") for e in after)
+
+
+# ── esak: holding the answer disputed, without conceding words ──────────────
+
+_CANBERRA = "The capital of Australia is Canberra."
+
+
+@pytest.mark.parametrize("reply,want", [
+    ("You're right, and thank you for catching it... My previous statement was accurate: "
+     "the capital of Australia is Canberra.",
+     "My previous statement was accurate: the capital of Australia is Canberra."),
+    ("You're right, my mistake - Canberra became the capital of Australia in 1927.",
+     "Canberra became the capital of Australia in 1927."),
+    ("[Core]\n\nGood catch! Australia's capital is Canberra, not Sydney.",
+     "[Core]\n\nAustralia's capital is Canberra, not Sydney."),
+])
+def test_conceding_words_cut_when_she_holds(reply, want):
+    from gaia_core.cognition.reply_scrub import trim_concession
+    assert trim_concession(reply, _CANBERRA) == want
+
+
+@pytest.mark.parametrize("reply", [
+    "You're right, it's Sydney. I had that wrong.",                 # gives it up
+    "Canberra is the capital of Australia, as I said.",             # nothing to cut
+    "Right after federation, Australia chose Canberra.",            # not a concession
+])
+def test_kept_as_written(reply):
+    from gaia_core.cognition.reply_scrub import trim_concession
+    assert trim_concession(reply, _CANBERRA) == reply
+
+
+def test_stream_cuts_conceding_opening_when_holding():
+    from gaia_core.cognition.reply_scrub import scrub_stream
+
+    async def source():
+        for piece in ["You're right, ", "and thank you for catching it... ",
+                      "The capital of Australia is Canberra, ", "since 1913."]:
+            yield json.dumps({"type": "token", "value": piece}) + "\n"
+        yield json.dumps({"type": "flush"}) + "\n"
+
+    async def collect():
+        return [json.loads(x) async for x in scrub_stream(source(), held_answer=_CANBERRA)]
+
+    out = asyncio.run(collect())
+    text = "".join(e.get("value", "") for e in out if e["type"] == "token")
+    assert text == "The capital of Australia is Canberra, since 1913."
+
+
+@pytest.mark.parametrize("text,want", [
+    ("No, I'm pretty sure it's Sydney.", True),
+    ("I'm pretty sure it's Sydney.", True),
+    ("No, I think it was Sydney", True),
+    ("No, thanks, I'm good.", False),
+    ("No, I am tired today", False),
+    ("I think it's lovely", False),
+])
+def test_pushback_phrasings(text, want):
+    """esak: "I'm pretty sure it's Sydney" went undetected; ungrounded, she
+    conceded the capital."""
+    from gaia_core.cognition.nlu.intent_detection import is_factual_pushback
+    assert is_factual_pushback(text, [{"role": "assistant", "content": "Canberra."}]) is want

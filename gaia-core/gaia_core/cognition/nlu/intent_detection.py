@@ -834,7 +834,10 @@ _PUSHBACK_NEG_AUX_RE = re.compile(
 _PUSHBACK_PHRASE_RE = re.compile(
     r"\b(?:i thought (?:it|he|she|they|that|the)\b"
     r"|are you sure\b"
-    r"|(?:i'?m |i am )?(?:pretty |fairly |quite )?sure (?:it|he|she|they|that) (?:was|is|were|did)\b"
+    # esak: "I'm pretty sure it's Sydney" missed the contraction; Core,
+    # ungrounded, conceded: "My mistake — you're right, it is."
+    r"|(?:i'?m |i am )?(?:pretty |fairly |quite )?(?:sure|certain|positive) (?:it|he|she|they|that)(?:'s|'re| was| is| were| did)\b"
+    r"|^\s*no\b[,.!]*\s+(?:i (?:think|believe)|i'?m (?:pretty |fairly |quite )?(?:sure|certain|positive))\b"
     r"|i heard (?:it|that|he|she|they)\b"
     r"|^\s*no,? (?:it|he|she|they|that)(?:'s| was| is| were| did)\b"
     r"|^\s*actually,? (?:it|he|she|they|that)\b"

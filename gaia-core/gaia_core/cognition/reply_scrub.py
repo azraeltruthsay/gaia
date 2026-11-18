@@ -11,7 +11,7 @@ stream, holding back only as much as it needs to decide.
 """
 import json
 import re
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 _TAG_RE = re.compile(r"</?(?:nooutput|blockquote)>", re.IGNORECASE)
 _CLOCK_RE = re.compile(r"\[Clock:[^\]\n]*\]\s*")
@@ -328,12 +328,39 @@ def trim_apology(text: str) -> str:
     return m.group("lead") + rest[:1].upper() + rest[1:]
 
 
-async def scrub_stream(lines: AsyncIterator[str], drop_apology: bool = False) -> AsyncIterator[str]:
+# esak: conceding words opening a reply that holds the answer disputed.
+_CONCEDE_OPEN_RE = re.compile(
+    r"^(?P<lead>\s*(?:\[[^\]\n]{1,40}\]\s*)?)"
+    r"(?:(?:(?:you'?re|you\s+are)\s+(?:absolutely\s+|quite\s+)?(?:right|correct)"
+    r"|my\s+(?:mistake|apologies|bad)|(?:i'?m\s+)?sorry"
+    r"|(?:and\s+)?thank(?:s|\s+you)\s+for\s+(?:catching|pointing\s+out|flagging)\s+(?:it|that|this)"
+    r"|good\s+catch)[^\u2014\u2013.!:\n,]{0,20}(?:[,\u2014\u2013.!:]+|\s-\s|\.\.\.)\s*)+",
+    re.IGNORECASE)
+
+
+def trim_concession(text: str, disputed: str) -> str:
+    """`text` without conceding words at its opening when it still holds the
+    answer disputed ("You're right, and thank you for catching it... the
+    capital is Canberra"). A reply that gives the answer up keeps them."""
+    from gaia_core.cognition.transmission import conceded
+    m = _CONCEDE_OPEN_RE.match(text or "")
+    if not m or conceded(disputed, text):
+        return text
+    rest = text[m.end():]
+    return m.group("lead") + rest[:1].upper() + rest[1:]
+
+
+async def scrub_stream(lines: AsyncIterator[str], drop_apology: bool = False,
+                       held_answer: Optional[str] = None) -> AsyncIterator[str]:
     """The /process_packet NDJSON stream with its token events scrubbed; every
     other event passes through, after anything held back. With `drop_apology`,
-    the opening of her reply is held until an apology there can be cut."""
+    the opening of her reply is held until an apology there can be cut; with
+    `held_answer` (the answer the person disputed), until conceding words
+    there can be cut if she holds it (esak)."""
     scrubber = HeadScrubber()
-    hold = [""] if drop_apology else None   # reply text held while it may open with one
+    trim = trim_apology if drop_apology else (
+        (lambda t: trim_concession(t, held_answer)) if held_answer else None)
+    hold = [""] if trim else None   # reply text held while it may open with one
 
     def _release(final: bool = False) -> str:
         text = hold[0]
@@ -346,7 +373,7 @@ async def scrub_stream(lines: AsyncIterator[str], drop_apology: bool = False) ->
         if not final and len(text) < _APOLOGY_HOLD:
             return ""
         hold.clear()           # decided, once
-        return trim_apology(text)
+        return trim(text)
 
     def _out(text: str) -> str:
         if hold is None or not hold:

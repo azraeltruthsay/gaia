@@ -2613,6 +2613,7 @@ async def process_packet(packet_data: Dict[str, Any]):
 
     from gaia_core.cognition.reply_scrub import scrub_stream, unfounded_apology
     _drop_apology = False
+    _held_answer = None
     try:
         # Read before the turn runs: her last reply is still the last one kept.
         _sid = ((packet_data or {}).get("header") or {}).get("session_id") or ""
@@ -2620,6 +2621,13 @@ async def process_packet(packet_data: Dict[str, Any]):
         _last = next((m.get("content") or "" for m in reversed(_agent_core.session_manager.get_history(_sid) or [])
                       if isinstance(m, dict) and m.get("role") == "assistant"), "") if _sid else ""
         _drop_apology = unfounded_apology(_asked, _last)
+        # esak: disputed, she may hold her answer yet open with "You're right,
+        # thank you for catching it": the opening is held and those words cut
+        # when the reply still says what she said before.
+        if not _drop_apology and _last:
+            from gaia_core.cognition.nlu.intent_detection import is_factual_pushback
+            if is_factual_pushback(_asked, [{"role": "assistant", "content": _last}]):
+                _held_answer = _last
         # i4vn: who they are and their pronouns, kept as the message arrives so
         # this turn is told them. Saved by code, so "I've noted your pronouns"
         # is a write that happened, not one to correct.
@@ -2647,7 +2655,8 @@ async def process_packet(packet_data: Dict[str, Any]):
             logger.info("session=%s: corrected about what her last reply never said; an opening apology is cut", _sid)
     except Exception:
         logger.debug("Apology check unavailable (non-fatal)", exc_info=True)
-    return StreamingResponse(scrub_stream(_run_loop(), drop_apology=_drop_apology),
+    return StreamingResponse(scrub_stream(_run_loop(), drop_apology=_drop_apology,
+                                          held_answer=_held_answer),
                              media_type="application/x-ndjson")
 
 
