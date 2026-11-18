@@ -277,6 +277,9 @@ async def discord_test(req: DiscordTestRequest):
                                 else:
                                     full_response += val
 
+                        elif event_type == "retract":
+                            full_response = ""
+
                         elif event_type == "flush":
                             if full_response.strip():
                                 discord_messages.append({"type": "flush", "content": full_response.strip()})

@@ -237,3 +237,16 @@ def test_a_note_to_herself_never_reaches_the_person(size):
 
 def test_the_words_thought_seed_in_a_sentence_are_left_alone():
     assert scrub_reply("The word THOUGHT_SEED: is a directive.") == "The word THOUGHT_SEED: is a directive."
+
+
+def test_retract_drops_what_was_held():
+    """zdrj: text before a tool call is taken back, held text included."""
+    out = _run([
+        {"type": "token", "value": "We weren't talking about anything <"},
+        {"type": "retract"},
+        {"type": "token", "value": "We were talking about Canberra."},
+    ])
+    assert {"type": "retract"} in out
+    after = out[out.index({"type": "retract"}) + 1:]
+    assert "".join(e["value"] for e in after) == "We were talking about Canberra."
+    assert not any(e.get("value", "").endswith("<") for e in after)

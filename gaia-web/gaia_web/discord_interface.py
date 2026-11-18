@@ -846,6 +846,10 @@ class DiscordInterface:
                                         # Accumulate Operator/Thinker tokens to send as a block
                                         full_response += val
                             
+                            elif event_type == "retract":
+                                # zdrj: the text before a tool call, taken back
+                                full_response = ""
+
                             elif event_type in ("flush", "reply_done"):
                                 # Flush current buffer immediately. reply_done:
                                 # her reply is complete and the other mind now

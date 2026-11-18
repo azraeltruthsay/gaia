@@ -365,6 +365,14 @@ async def scrub_stream(lines: AsyncIterator[str], drop_apology: bool = False) ->
             if text:
                 yield json.dumps({"type": "token", "value": text}) + "\n"
             continue
+        if isinstance(event, dict) and event.get("type") == "retract":
+            # zdrj: the text so far is taken back; what is held goes with it.
+            scrubber.flush()
+            scrubber = HeadScrubber()
+            if hold:
+                hold[0] = ""
+            yield line
+            continue
         held = _out(scrubber.flush())
         if hold and hold[0]:
             held += _release(final=True)

@@ -19,6 +19,7 @@ provides:
         - type: token   # {"type": "token", "value": "..."}
         - type: flush   # {"type": "flush"}
         - type: tool_status  # {"type": "tool_status", "tool": "web", "action": "fetch", "state": "calling|ok|failed"} — never reply text
+        - type: retract  # {"type": "retract"} — drop the reply text received so far (her guess before a tool call); the answer follows (zdrj)
         - type: packet  # {"type": "packet", "value": <CognitionPacket dict>}
         - type: error   # {"type": "error", "value": "..."}
     consumers: [gaia-web]

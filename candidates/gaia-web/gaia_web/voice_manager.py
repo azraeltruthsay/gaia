@@ -745,6 +745,8 @@ class VoiceManager:
                 continue
             if event.get("type") == "token":
                 response_text += event.get("value", "")
+            elif event.get("type") == "retract":
+                response_text = ""
             elif event.get("type") == "packet":
                 candidate = event.get("value", {}).get("response", {}).get("candidate")
                 if candidate:

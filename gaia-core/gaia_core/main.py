@@ -1854,6 +1854,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                                     else:
                                         # Status is its own event, never reply text (8ail):
                                         # it went to the chat, to history-less voice, everywhere.
+                                        # zdrj: retract the guess before this flush
+                                        # sends it to Discord as a message of its own.
+                                        if "".join(response_pieces).strip():
+                                            response_pieces.clear()
+                                            yield json.dumps({"type": "retract"}) + "\n"
                                         yield json.dumps({"type": "tool_status", "tool": pe.tool_name, "action": pe.tool_action, "state": "calling"}) + "\n"
                                         yield json.dumps({"type": "flush"}) + "\n"
                                     _pending_tool_calls.append(pe)
@@ -1936,6 +1941,16 @@ async def process_packet(packet_data: Dict[str, Any]):
 
             # ── Execute pending tool calls and generate continuation ───
             if _pending_tool_calls:
+                # zdrj: what she wrote before the call was a guess made
+                # without the result; the reply after it answers with it,
+                # and both were shown ("we weren't talking about anything...
+                # we were talking about the capital of Australia"). Take the
+                # guess back; clients clear what they hold for this reply.
+                if "".join(response_pieces).strip():
+                    logger.info("Retracting %d chars written before the tool call",
+                                len("".join(response_pieces)))
+                    response_pieces.clear()
+                    yield json.dumps({"type": "retract"}) + "\n"
                 for tc in _pending_tool_calls:
                     _is_invalid_tool = id(tc) in _invalid_tool_ids
                     _tc_t0 = _time.time()

@@ -829,6 +829,14 @@ function chatPanel() {
                 responseText = '';
                 continue;
               }
+              if (chunk.type === 'retract') {
+                // zdrj: what she wrote before a tool call, taken back; the
+                // answer with the tool's result follows.
+                responseText = '';
+                const msg = messages.find(m => m.id === streamId);
+                if (msg) msg.text = '';
+                continue;
+              }
               if (chunk.type === 'status') {
                 // She was asleep: say so while she wakes, until her first word
                 // replaces it (the bubble sat empty, and looked stuck).
