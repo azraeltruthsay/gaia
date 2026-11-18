@@ -41,6 +41,7 @@ class GroundingResult:
     score: float = 0.0
     question_match: float = 0.0
     memory_id: str = ""
+    read: bool = False    # e8hf: the section of a page that answers the question
     # 6afh: how close the question is to one this record answered well /
     # failed to answer before (lookup memory feedback).
     confirmed_match: float = 0.0
@@ -476,7 +477,7 @@ def _read_top_result(question: str, web_results: List[GroundingResult]) -> Optio
         return GroundingResult(
             source="web", trust_tier="looked_up",
             content=f"{title} (the part that answers the question):\n{excerpt_for(text, question, READ_CHARS)}",
-            url=top.url, utility_score=top.utility_score, query=question, title=title)
+            url=top.url, utility_score=top.utility_score, query=question, title=title, read=True)
     except Exception as e:
         logger.debug("Reading the top result failed: %s", e)
         return None
@@ -638,18 +639,21 @@ def ground_query(
     if not skip_web and not local_has_answer and elapsed < max_total_ms * 0.8:
         try:
             web_results = _query_web(query)
-            # e8hf: a search result is a page's lead; "how did Talos die?"
-            # isn't in it, and both minds made the death up. For a question
-            # about the world, the part of the top page that answers it.
-            read = _read_top_result(query, web_results)
-            if read:
-                web_results.insert(0, read)
             ctx.results.extend(web_results)
             ctx.sources_queried.append("web")
             if web_results:
                 logger.info("KnowledgeRouter: Web returned %d results", len(web_results))
         except Exception:
             pass
+
+    # e8hf: a search result or a remembered lookup is a page's lead; "how
+    # did Talos die?" isn't in it, and both minds made the death up. For a
+    # question about the world, the part of that page that answers it goes
+    # first (a remembered lead skipped the search, and with it the reading).
+    if not skip_web:
+        read = _read_top_result(query, [r for r in ctx.results if r.source in ("web", "memory")])
+        if read:
+            ctx.results.insert(0, read)
 
     ctx.elapsed_ms = (time.time() - t0) * 1000
     logger.info("KnowledgeRouter: %d results from %s in %.0fms",

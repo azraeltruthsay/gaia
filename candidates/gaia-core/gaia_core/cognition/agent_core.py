@@ -3945,7 +3945,8 @@ class AgentCore:
                                  "conversation": True, "retrieved_at": r.retrieved_at}
                                 if r.source == "conversation" else
                                 {"title": r.source, "snippet": r.content, "url": r.url,
-                                 "memory_id": r.memory_id, "trust": r.trust_tier}
+                                 "memory_id": r.memory_id, "trust": r.trust_tier,
+                                 "read": getattr(r, "read", False)}
                                 for r in weakest_last(_grounding_ctx.results)[:3]],
                             "source": f"knowledge_router:{','.join(_grounding_ctx.sources_queried)}",
                             "query": user_input[:120],

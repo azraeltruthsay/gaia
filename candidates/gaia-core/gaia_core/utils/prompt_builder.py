@@ -1903,6 +1903,11 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                                     parts.append(f"- {snippet[:600]} ({_cite}{_note}; {url})")
                                 elif r.get("trust") == "own_record":
                                     parts.append(f"- {snippet[:_snip]} ({TRUST_WORDS['own_record']})")
+                                elif r.get("read"):
+                                    # e8hf: the section of the page that answers
+                                    # the question; cut to 200 it was the lead
+                                    # again, and Prime made the rest up.
+                                    parts.append(f"- {snippet[:1600]} ({url})")
                                 else:
                                     parts.append(f"- {title}: {snippet[:_snip]} ({url})")
                     if _n_remembered and _n_remembered == _n_shown and not disputed:
