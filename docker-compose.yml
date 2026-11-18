@@ -290,6 +290,11 @@ services:
       # mode (no LLM — cheap rule/embedding checks only). Was bypassed there. Set 0
       # to disable. Remediation is a follow-up; for now it observes + logs + health.
       - OBSERVER_ON_STREAM=${OBSERVER_ON_STREAM:-1}
+      # a57i: the sleep resilience drill asks gaia-monkey for a container drill
+      # on the candidates until she is Serene. Serene unlocks code_evolution's
+      # sibling tasks: initiative_cycle and auto-promote of NON-vital services
+      # (web, study, audio, orchestrator, doctor). Turned on by Azrael 2026-11-17.
+      - SERENITY_DRILLS=${SERENITY_DRILLS:-1}
       # h1ok: Core deliberates in Gemma 4's own thought channel (<|think|>,
       # core_thinking_v1 adapter) instead of following <think> instructions it
       # ignored ~94% of the time and leaked into replies. Held-out eval: thought
