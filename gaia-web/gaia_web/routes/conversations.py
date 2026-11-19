@@ -197,6 +197,24 @@ async def retract_message(session_id: str, request: Request):
     return {"retracted": text is not None, "text": text}
 
 
+@router.post("/{session_id}/edit")
+async def edit_message(session_id: str, request: Request):
+    """Edit her own latest message containing `containing` in a Discord channel
+    session to `text`. Her history is updated by gaia-core (revise.py)."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not session_id.startswith("discord_channel_"):
+        return JSONResponse(status_code=400, content={"error": "only Discord channel sessions"})
+    containing, text = (body or {}).get("containing", ""), (body or {}).get("text", "")
+    if not containing.strip() or not text.strip():
+        return JSONResponse(status_code=400, content={"error": "need 'containing' and 'text'"})
+    from gaia_web.discord_interface import edit_own_message
+    old = await edit_own_message(session_id[len("discord_channel_"):], containing, text)
+    return {"edited": old is not None, "old": old}
+
+
 @router.post("/{session_id}/pool-summary")
 async def generate_pool_summary(session_id: str):
     """Generate a context pool summary for this conversation."""

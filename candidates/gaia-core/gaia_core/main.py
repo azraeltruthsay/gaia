@@ -1185,6 +1185,24 @@ async def record_post(request: Request, session_id: str):
     return {"ok": True, "session_id": session_id}
 
 
+@app.post("/api/sessions/{session_id}/revise")
+async def revise_message(request: Request, session_id: str):
+    """Edit a message she already sent (revise.py): minor in place, major with
+    a note saying what changed; her history keeps the new text."""
+    if _ai_manager is None:
+        return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
+    data = await request.json()
+    from gaia_core.cognition.revise import revise
+    loop = asyncio.get_running_loop()
+    try:
+        final = await loop.run_in_executor(None, lambda: revise(
+            _ai_manager.session_manager, session_id, data.get("containing") or "", data.get("text") or "",
+            data.get("reason") or "", major=bool(data.get("major")), note=data.get("note") or ""))
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+    return {"revised": final is not None, "text": final}
+
+
 @app.post("/api/sessions/{session_id}/missed")
 async def missed_message(session_id: str):
     """After a quiet spell in a channel: the message since her last reply she
