@@ -10,11 +10,12 @@ the file is part of what she reads:
     reading it. In the background her CFR store reads the rest (sections and
     summaries, whichever mind is loaded). When it's done she looks at what
     she was asked, the summaries and the sections that matter for it, and
-    says more only if she has something worth adding; otherwise nothing is
-    posted. The file stays in her CFR store for cfr_focus later.
+    asks herself, in her inner voice, whether she has anything to add;
+    otherwise nothing is posted. The file stays in her CFR store for cfr_focus later.
 
 Her model proposes, code checks: section numbers she names are kept only if
-they exist; a follow-up of NONE (or empty) posts nothing.
+they exist; whether she follows up is asked in her inner voice
+(inner_monologue), and only a real SAY line is posted.
 """
 from __future__ import annotations
 
@@ -41,15 +42,6 @@ PICK_SYSTEM = (
     "they said when they sent it and a summary of each section. Which sections "
     "do you need to look at closely to answer them? Reply with up to {n} section "
     "numbers, or NONE.")
-
-FOLLOW_SYSTEM = (
-    "You are GAIA, in a conversation. Someone sent you the file {name}; when it "
-    "arrived you had only read its beginning, and you said: \"{said}\". You have "
-    "now read all of it. If you have something worth adding -- an answer to what "
-    "they asked that you couldn't give before, or something notable in the file "
-    "-- say it briefly, in your own voice, using only what the file says. If not, "
-    "reply with exactly NONE.")
-
 
 def attached_text(value: Dict) -> str:
     """The file's extracted text: all of it when gaia-web saved it, else the preview."""
@@ -113,17 +105,25 @@ def pick_sections(asked: str, sections: List[Dict], generate: Callable[[List[dic
 
 
 def follow_up(name: str, asked: str, said: str, sections: List[Dict],
-              generate: Callable[[List[dict]], str]) -> Optional[str]:
-    """What she adds once she's read it all, or None."""
+              generate: Callable[[List[dict]], str], session_id: str = "") -> Optional[str]:
+    """What she adds once she's read it all, or None. Whether to speak is her
+    own call, asked in her inner voice (inner_monologue): a model seldom
+    volunteers to speak again, and the question must not read as a person's."""
+    from gaia_core.cognition.inner_monologue import ask_myself
     picks = pick_sections(asked, sections, generate)
+    m = re.match(r"^([^:\n]{1,64}):\s", asked or "")
+    who, words = (m.group(1), asked[m.end():]) if m else ("someone", asked or "")
     summaries = "\n".join(f"Section {i}: {s['summary'][:500]}" for i, s in enumerate(sections, 1))
-    close = "\n\n".join(f"Section {i + 1} in full:\n{sections[i]['text']}" for i in picks)
-    out = (generate([{"role": "system", "content": FOLLOW_SYSTEM.format(name=name, said=said[:300])},
-                     {"role": "user", "content": f"They said: {asked}\n\nThe file, section by "
-                                                 f"section:\n{summaries}\n\n{close}"}]) or "").strip()
-    if not out or out.upper().startswith("NONE"):
-        return None
-    return out
+    close = "\n\n".join(f"Section {i + 1}, which I looked at closely:\n{sections[i]['text']}"
+                         for i in picks)
+    thought = (
+        f"I've finished reading {name}, which {who} sent me. When it arrived I had only read "
+        f"the beginning, and I told them: \"{said[:300]}\". When they sent it they said: "
+        f"\"{words[:300]}\"\n\nWhat's in it, section by section:\n{summaries}\n\n{close}\n\n"
+        f"Now that I've read all of it, do I have anything worth adding, like an answer I "
+        f"couldn't give before, or something notable in it? If I do, I'll say it to {who}, "
+        f"using only what the file says. If not, I'll leave it.")
+    return ask_myself(thought, generate, about=f"finished reading {name}", session_id=session_id)["say"]
 
 
 def push(session_id: str, text: str) -> bool:
@@ -147,7 +147,7 @@ def finish_reading(session_id: str, name: str, text: str, asked: str, said: Call
         from gaia_common.utils.cfr_manager import CFRManager
         cfr = CFRManager()
     sections = _sections(text, cfr)
-    out = follow_up(name, asked, said() or "", sections, generate)
+    out = follow_up(name, asked, said() or "", sections, generate, session_id)
     logger.info("long_read: finished %s (%d sections); %s", name, len(sections),
                 "following up" if out else "nothing to add")
     if out and send(session_id, out):

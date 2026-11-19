@@ -50,11 +50,12 @@ SECTIONS = [("Definitions of terms.", "Full definitions."),
 
 def _run(tmp_path, monkeypatch, answers, sent_ok=True):
     monkeypatch.setattr(lr, "SOURCES", tmp_path)
+    monkeypatch.setenv("SHARED_DIR", str(tmp_path))
     seen, posted, recorded = [], [], []
     def gen(messages):
         seen.append(messages)
         return answers.pop(0)
-    out = lr.finish_reading("discord_channel_1", "wac.pdf", "x" * 9000, "What must a seal show?",
+    out = lr.finish_reading("discord_channel_1", "wac.pdf", "x" * 9000, "Andy: What must a seal show?",
                             said=lambda: "I'm reading it now.", generate=gen,
                             record=recorded.append, cfr=FakeCFR(SECTIONS),
                             send=lambda sid, t: posted.append((sid, t)) or sent_ok)
@@ -63,18 +64,20 @@ def _run(tmp_path, monkeypatch, answers, sent_ok=True):
 
 def test_follow_up_reads_the_sections_she_picks_and_posts(tmp_path, monkeypatch):
     out, seen, posted, recorded = _run(tmp_path, monkeypatch,
-                                       ["2, 9", "A seal shows the certificate number, name and state."])
+                                       ["2, 9", "THOUGHT: Now I can answer him.\nSAY: A seal shows the certificate number, name and state."])
     assert posted == [("discord_channel_1", out)] and recorded == [out]
+    assert out == "A seal shows the certificate number, name and state."
     final = seen[1][1]["content"]
     assert "Full seal rules" in final and "Full fee table" not in final     # 9 doesn't exist
-    assert "I'm reading it now." in seen[1][0]["content"]
+    assert "I'm reading it now." in final and "Andy sent me" in final
+    assert final.startswith("(My own thought") and "inner monologue" in seen[1][0]["content"]
 
 
 def test_nothing_to_add_posts_nothing(tmp_path, monkeypatch):
-    out, seen, posted, recorded = _run(tmp_path, monkeypatch, ["NONE", "NONE"])
+    out, seen, posted, recorded = _run(tmp_path, monkeypatch, ["NONE", "THOUGHT: Nothing new.\nSAY: NOTHING"])
     assert out is None and posted == [] and recorded == []
 
 
 def test_failed_post_is_not_recorded(tmp_path, monkeypatch):
-    out, seen, posted, recorded = _run(tmp_path, monkeypatch, ["1", "Something."], sent_ok=False)
+    out, seen, posted, recorded = _run(tmp_path, monkeypatch, ["1", "THOUGHT: x\nSAY: Something."], sent_ok=False)
     assert posted and recorded == []
