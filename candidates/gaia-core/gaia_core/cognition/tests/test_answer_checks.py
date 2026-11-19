@@ -150,3 +150,13 @@ def test_other_mind_rewrites_when_first_cannot():
              "t the brake reaction time of 2.5 seconds and a the deceleration rate of 11.2 ft/s2.")
     out, v = ac.check_page("SSD formula?", wrong, [PAGE], lambda m: wrong, lambda m: right)
     assert v == "rewritten" and out.startswith("The page gives")
+
+
+def test_pointer_without_answer():
+    stub = ("My notes on Washington WAC 196-23: Stamping and seals, from "
+            "https://app.leg.wa.gov/wac/default.aspx?cite=196-23&full=true cover that — it outlines the rules "
+            "for the use of professional seals and signatures in the state of Washington.")
+    assert ac.points_without_answering(stub)
+    assert not ac.points_without_answering("WAC 196-23 covers seals. Before sealing someone else's work, the PE "
+                                           "must fully review it and seal a report of that review.")
+    assert not ac.points_without_answering("My notes on WAC 196-23 don't cover that.")

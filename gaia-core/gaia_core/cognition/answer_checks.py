@@ -244,3 +244,21 @@ def cite_notes(answer: str, results: Iterable, min_overlap: float = 0.3) -> str:
         return answer
     where = f"{title}, {url}" if title and url else (title or url)
     return f"{answer.rstrip()}\n\n*(From my study notes: {where})*"
+
+
+# ── an answer that only points at her notes ─────────────────────────────
+
+_POINTER_RE = re.compile(r"^\s*(?:\[\w+\]\s*)?My notes on\b.{0,200}?(?<!n't\s)(?<!not\s)\b(?:cover|covers|address|discuss)\s+(?:that|this|it)\b",
+                         re.IGNORECASE | re.DOTALL)
+
+
+def points_without_answering(answer: str) -> bool:
+    """"My notes on WAC 196-23: Stamping and seals, from <url> cover that -- it
+    outlines the rules ..." and nothing else: the v5 adapter's "My notes on X"
+    opening (learned from its "don't cover that" answers) firing on a question
+    the notes do answer (2026-11-19, Azrael's quiz)."""
+    m = _POINTER_RE.match(answer or "")
+    if not m or re.search(r"\b(?:don'?t|doesn'?t|do not|does not)\s+cover", answer[:m.end()], re.IGNORECASE):
+        return False
+    rest = re.sub(r"https?://\S+", "", answer[m.end():])
+    return len(rest.split()) < 40

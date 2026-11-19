@@ -4242,10 +4242,42 @@ class AgentCore:
                             _final_clean, _arith = _checks.check_arithmetic(user_input, _final_clean, _same_mind)
                             if _arith != "ok":
                                 logger.info("answer checks: arithmetic %s", _arith)
+                            if _eng_kind == "notes" and _same_mind is not None \
+                                    and _checks.points_without_answering(_final_clean):
+                                # the adapter named her notes and stopped; the
+                                # same prompt without it answers from them
+                                _redo = (_same_mind(_delib_messages) or "").strip()
+                                if _redo and not _checks.points_without_answering(_redo):
+                                    logger.info("answer checks: notes answer only pointed at the notes; re-answered without the adapter")
+                                    _final_clean = _strip_mind_tag(strip_think_tags(_redo)).strip()
                             if _eng_kind == "notes":
                                 _final_clean = _checks.cite_notes(_final_clean, _gr_results)
                         except Exception:
                             logger.debug("arithmetic/citation check failed", exc_info=True)
+                    # wtfr: she said she'd look it up; now she does, after the
+                    # turn, and posts what she found in this conversation
+                    if _final_clean and source not in ("initiative", "heartbeat", "inner_voice") \
+                            and not (getattr(packet, "metadata", None) or {}).get("inner_voice"):
+                        try:
+                            from gaia_core.cognition import promises as _promises
+                            if _promises.made_promise(_final_clean, packet.content.original_prompt or user_input or ""):
+                                from gaia_core.cognition import long_read as _lr
+                                _sm, _sid = self.session_manager, session_id
+                                _hist = list(_sm.get_history(_sid) or [])
+                                _asked = packet.content.original_prompt or user_input or ""
+                                if not _hist or _hist[-1].get("content") != _asked:
+                                    _hist.append({"role": "user", "content": _asked})
+                                _hist.append({"role": "assistant", "content": _final_clean})
+                                _who = re.match(r"^\s*([A-Z][\w.-]{1,30}):", _asked)
+                                _promises.start(
+                                    _sid, _hist, _who.group(1) if _who else "",
+                                    same=_same_mind,
+                                    other=_eng_mode.other_mind(self.model_pool, _ans_role),
+                                    send=_lr.push,
+                                    record=lambda text: _sm.add_message(_sid, "assistant", text))
+                                logger.info("promises: she said she'd look it up; doing it after the turn")
+                        except Exception:
+                            logger.debug("promise keeping failed to start", exc_info=True)
                     if _delib_result and _final_clean:
                         logger.info(
                             "[DELIBERATION] %s | model=%s forbidden=%d confab=%d retried=%s elapsed=%.0fms",
