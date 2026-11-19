@@ -91,6 +91,7 @@ _SOURCE_NAMES = {
     "web": "searched the web", "mempalace": "checked my memory palace", "journal": "read my journals",
     "kg": "checked my knowledge graph", "vector": "searched my knowledge base",
     "memory": "remembered an earlier lookup", "system": "checked my own state",
+    "study": "read my study notes",
 }
 
 

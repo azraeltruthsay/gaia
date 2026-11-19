@@ -333,6 +333,10 @@ def _local_answers(results: List[GroundingResult], query: str) -> bool:
     journal line mentioning a word in the question switched off the web."""
     if any(r.trust_tier == "observed" and len(r.content) > 50 for r in results):
         return True
+    # oeql: a strong match in her study notes (checked against the page she
+    # read, cited by it): the web would only crowd out what she studied
+    if any(r.source == "study" and r.score >= STUDY_STRONG for r in results):
+        return True
     return bool(_ABOUT_HER_RE.search(query or "")) and any(
         r.trust_tier == "own_record" and len(r.content) > 50 for r in results)
 

@@ -38,3 +38,12 @@ def test_prompt_cites_study_notes_by_topic_and_page():
              "url": "https://app.leg.wa.gov/x", "study": True, "trust": "looked_up"}]}}))
     text = "\n".join(m["content"] for m in build_from_packet(pkt))
     assert "(my study notes on Washington WAC 196-23: Stamping and seals, from https://app.leg.wa.gov/x)" in text
+
+
+def test_strong_study_note_saves_the_web_and_is_named_in_her_trace():
+    from gaia_core.cognition import inner_voice
+    strong = kr.GroundingResult(source="study", trust_tier="looked_up", content="x" * 80, score=0.6)
+    weak = kr.GroundingResult(source="study", trust_tier="looked_up", content="x" * 80, score=0.46)
+    assert kr._local_answers([strong], "What does a seal show?")
+    assert not kr._local_answers([weak], "What does a seal show?")
+    assert "read my study notes" in inner_voice.trace(model="prime", sources=["study"])
