@@ -164,6 +164,15 @@ class SessionManager:
         """
         if role == "assistant":
             content = _strip_mind_tag(_strip_think_tags_robust(content))
+            # A note to herself ("THOUGHT_SEED: ...") is cut from the stream but
+            # several reply paths keep the raw text; kept, she copies it into
+            # every following reply (2026-11-19, three in a row on Discord).
+            try:
+                from gaia_core.cognition.reply_scrub import SeedLineFilter
+                _seeds = SeedLineFilter()
+                content = (_seeds.feed(content) + _seeds.flush()).lstrip("\n")
+            except Exception:
+                logger.debug("seed-line scrub failed", exc_info=True)
             # 0ait: an approval card is kept as one line; whole, she copies it.
             try:
                 from gaia_core.cognition.approval_reply import compact

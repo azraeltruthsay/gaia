@@ -15,6 +15,13 @@ got silently dropped by the cheap gate before a judgment call could even
 consider it). This doesn't skip the judgment itself — a question on
 cooldown can still get a NO — it only stops the cooldown from deciding
 that on its own, content-blind.
+
+A reply to her is not ambient (2026-11-19: she asked Andy what he'd expect
+from an intern; he answered without naming her and the judgment call said
+NO, so she sat silent until he asked "any comments on my last post?"). When
+the new message comes from the person she just answered, with no one else
+in between and within EXCHANGE_WINDOW_S, she is in a conversation with them:
+it gets a reply, no cooldown, no judgment call.
 """
 from __future__ import annotations
 
@@ -28,6 +35,8 @@ from typing import Callable, Dict, List, Optional
 from gaia_core.cognition.told_facts import is_question
 
 DEFAULT_COOLDOWN_S = 600
+EXCHANGE_WINDOW_S = 900
+_SPEAKER_RE = re.compile(r"^([^:\n]{1,64}):\s")
 _STATE_FILE = "ambient_interject.json"
 _YES_RE = re.compile(r"^\s*yes\b", re.IGNORECASE)
 _HISTORY_WINDOW = 10
@@ -37,7 +46,8 @@ SYSTEM = (
     "addressed -- like being in the room while people talk nearby. Based on the "
     "recent messages, would you naturally want to say something? Only answer YES "
     "if you'd genuinely add something -- a real thought, not just because you "
-    "technically could. Answer with exactly one word: YES or NO."
+    "technically could -- or if the new message answers or continues something "
+    "you said. Answer with exactly one word: YES or NO."
 )
 
 
@@ -73,7 +83,53 @@ def mark_interjected(key: str, base: Optional[Path] = None, now: Optional[float]
     _save(state, base)
 
 
+def _speaker(content: str) -> str:
+    m = _SPEAKER_RE.match(content or "")
+    return m.group(1).strip().lower() if m else ""
+
+
+def _epoch(ts) -> Optional[float]:
+    from datetime import datetime
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _split_new(history: List[Dict], user_input: str):
+    """History without the new message (the caller keeps it before asking),
+    and the new message's speaker as the channel recorded it."""
+    history = list(history or [])
+    if history and history[-1].get("role") == "user" and user_input.strip() and \
+            (history[-1].get("content") or "").rstrip().endswith(user_input.strip()):
+        return history[:-1], _speaker(history[-1].get("content") or "")
+    return history, _speaker(user_input)
+
+
+def in_exchange(history: List[Dict], user_input: str, window_s: float = EXCHANGE_WINDOW_S,
+                now: Optional[float] = None) -> bool:
+    """Whether the new message is the person she just answered talking back
+    to her: her reply is the last thing said by anyone but them, it answered
+    them, and it is recent."""
+    earlier, who = _split_new(history, user_input)
+    if not who:
+        return False
+    i = len(earlier) - 1
+    while i >= 0 and earlier[i].get("role") == "user" and _speaker(earlier[i].get("content") or "") == who:
+        i -= 1              # their own messages since her reply
+    if i < 0 or earlier[i].get("role") != "assistant":
+        return False
+    when = _epoch(earlier[i].get("timestamp"))
+    if when is None or (now if now is not None else time.time()) - when > window_s:
+        return False
+    j = i - 1
+    while j >= 0 and earlier[j].get("role") != "user":
+        j -= 1
+    return j >= 0 and _speaker(earlier[j].get("content") or "") == who
+
+
 def _conversation(history: List[Dict], user_input: str) -> str:
+    history, _ = _split_new(history, user_input)
     recent = history[-_HISTORY_WINDOW:] if history else []
     lines = [f"{h.get('role', '?')}: {h.get('content', '')}" for h in recent]
     lines.append(f"(new message) user: {user_input}")
@@ -89,6 +145,9 @@ def should_interject(key: str, history: List[Dict], user_input: str,
     message is a question (is_question): the cooldown can't tell a genuine
     question from idle chatter, so it no longer gets the last word on its
     own -- the judgment call still can, and often will, still say no."""
+    if in_exchange(history, user_input):
+        mark_interjected(key, base)
+        return True
     if on_cooldown(key, cooldown_s, base) and not is_question(user_input):
         return False
     messages = [{"role": "system", "content": SYSTEM},
