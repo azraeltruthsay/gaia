@@ -1020,9 +1020,25 @@ class DiscordInterface:
             seen.popitem(last=False)
         return True
 
+    def _mention_addressed(self, message_obj: Any, content: str) -> str:
+        """People she addresses by name in a channel are @mentioned; the
+        author she is answering is pinged by the reply itself."""
+        try:
+            from gaia_common.utils.people import PeopleRegistry
+            from gaia_web.mentions import channel_people, mention_names
+            sid = f"discord_channel_{message_obj.channel.id}"
+            author = getattr(getattr(message_obj, "author", None), "id", None)
+            return mention_names(content, channel_people(PeopleRegistry().everyone(), sid),
+                                 skip_ids=[author] if author else [])
+        except Exception:
+            logger.debug("Addressed-name mentions unavailable", exc_info=True)
+            return content
+
     async def _send_response(self, message_obj: Any, content: str, is_dm: bool):
         """Send response back to Discord."""
         try:
+            if not is_dm:
+                content = self._mention_addressed(message_obj, content)
             # Split long messages (Discord 2000 char limit)
             messages = self._split_message(content)
             for msg in messages:
