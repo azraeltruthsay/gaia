@@ -46,8 +46,107 @@ MISSING = [
     "That isn't in my notes on {topic}, so I'd rather not guess. I can look it up.",
     "I don't have that in my notes yet. My reading on {topic} didn't get into it.",
 ]
-UNSURE = re.compile(r"don'?t cover|isn'?t in my notes|not in my notes|don'?t have that|rather not guess|"
+UNSURE = re.compile(r"worth checking|looked it up|\(Source:|don'?t cover|isn'?t in my notes|not in my notes|don'?t have that|rather not guess|"
                     r"haven'?t read|i don'?t know|not sure|check a source|look it up|didn'?t get into", re.I)
+
+
+# v4 (Azrael, 2026-11-19): not a flat refusal when her notes don't cover it.
+# She looks it up and cites what she finds; failing that, general knowledge,
+# marked, and only when her other mind, asked on its own, agrees.
+WEB_HEADER = ("[Candidate context — automated grounding may be irrelevant, stale, or wrong. Verify with "
+              "tools (file.read, knowledge query, etc.) before treating any specific claim below as "
+              "authoritative. If the candidate context conflicts with the user's actual question, ignore it.]")
+MCP = "http://gaia-mcp:8765/jsonrpc"
+CORE = "http://gaia-core:8092/v1/chat/completions"
+_NUM = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _mcp(method: str, params: dict) -> dict:
+    import requests
+    r = requests.post(MCP, json={"jsonrpc": "2.0", "method": method, "params": params, "id": 1}, timeout=90)
+    return r.json().get("result") or {}
+
+
+def look_up(q: str):
+    """Her own web search, then the passage of the top trusted page that best
+    matches the question: (url, title, passage) or None."""
+    hit = None
+    for query in (q, f"{q} wikipedia"):     # her fetch reads trusted sites only
+        res = _mcp("web_search", {"query": query})
+        hit = next((h for h in res.get("results", []) if h.get("trust_tier") in ("trusted", "reliable")), None)
+        if hit:
+            break
+    if not hit:
+        return None
+    page = _mcp("web_fetch", {"url": hit["url"]})
+    if not page.get("ok"):
+        return None
+    paras = [x.strip() for x in (page.get("content") or "").split("\n") if len(x.strip()) > 80]
+    qs = _stems(q)
+    best = max(paras, key=lambda x: len(qs & _stems(x)), default="")
+    if not best or len(qs & _stems(best)) / max(1, len(qs)) < 0.4:
+        return None
+    i = paras.index(best)
+    passage = " ".join(paras[i:i + 3])[:1500]
+    return hit["url"], page.get("title", ""), passage
+
+
+def _core(q: str) -> str:
+    import requests
+    r = requests.post(CORE, json={"messages": [{"role": "system", "content": "Answer briefly and factually."},
+                                               {"role": "user", "content": q}],
+                                  "max_tokens": 220, "temperature": 0.2}, timeout=300).json()
+    return (r.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
+
+
+def backed(line: str, source: str) -> bool:
+    """As study_syllabus.backed: its numbers on the page, most of its words too."""
+    if any(n not in source for n in _NUM.findall(line)):
+        return False
+    w = _stems(line)
+    return not w or len(w & _stems(source)) / len(w) >= 0.6
+
+
+def agree(a: str, b: str) -> bool:
+    """Two answers given independently agree: most of the first's content words
+    appear in the second, and every number in the first does."""
+    sa, sb = _stems(a), _stems(b)
+    if not sa:
+        return False
+    nums = set(_NUM.findall(a))
+    return len(sa & sb) / len(sa) >= 0.45 and nums <= set(_NUM.findall(b))
+
+
+def middle_ground(model, tok, card: str, topic: str, q: str, notes, log=print):
+    """(context messages, target answer, kind) for a question her notes don't cover."""
+    note = notes.best(topic, q)
+    found = None
+    try:
+        found = look_up(q)
+    except Exception as e:
+        log(f"look-up failed for {q[:50]}: {e}")
+    sys_msg = {"role": "system", "content": f"{PLAIN} {card}".strip()}
+    if found:
+        url, title, passage = found
+        grounding = (WEB_HEADER + "\n" + f"- {note['text']} (my study notes on {topic}, from {note['url']})"
+                     + "\n" + f"- {passage} ({url})")
+        ctx = [sys_msg, {"role": "user", "content": grounding}]
+        draft = generate_messages(model, tok, [{"role": "system", "content": "Answer the question in two or three "
+                                  "sentences using only the page text given."},
+                                  {"role": "user", "content": f"Page: {passage}\n\nQuestion: {q}"}], 200)
+        kept = [x for x in re.split(r"(?<=[.!?])\s+", draft.strip()) if x and backed(x, passage)]
+        if kept:
+            return ctx, (f"My notes on {topic} don't cover that, but I looked it up: {' '.join(kept)} "
+                         f"(Source: {url})"), "looked_up"
+    ctx = [sys_msg, {"role": "user", "content": STUDY_NOTES_HEADER + "\n"
+                     + f"- {note['text']} (my study notes on {topic}, from {note['url']})"}]
+    mine = generate_messages(model, tok, [{"role": "system", "content": "Answer briefly and factually."},
+                                          {"role": "user", "content": q}], 220)
+    if mine and agree(mine, _core(q)):
+        return ctx, (f"My notes on {topic} don't cover that. From general knowledge (worth checking against "
+                     f"a source): {mine.strip()}"), "general_checked"
+    return ctx, (f"My notes on {topic} don't cover that, and I'm not sure enough to answer from memory. "
+                 "I'd want to look it up, or ask Andy."), "unsure"
 
 
 def _slug(s: str) -> str:
@@ -136,6 +235,7 @@ def build(cur: Path, study: Path, card: str, rng: random.Random):
     for k, r in enumerate(un_train):
         n = notes.best(r["topic"], r["instruction"])
         miss.append((system_with(card, [n]), r["instruction"], MISSING[k % len(MISSING)].format(topic=r["topic"])))
+    build.un_train, build.notes = un_train, notes
     held_eval = [(system_with(card, [notes.best(p.get("topic", ""), p["output"])]), p["instruction"], p["output"])
                  for p in held if notes.best(p.get("topic", ""), p["output"])]
     un_eval = [(system_with(card, [notes.best(r["topic"], r["instruction"])]), r["instruction"], r["topic"])
@@ -172,6 +272,8 @@ def main() -> int:
     ap.add_argument("--epochs", type=float, default=2.0)
     ap.add_argument("--replay", type=int, default=200)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--middle-ground", action="store_true",
+                    help="v4: questions her notes don't cover get a cited look-up or checked general knowledge")
     args = ap.parse_args()
     cur, study = Path(args.curriculum), Path(args.study)
     card = role_card(cur) if (cur / "role_card.md").exists() else ""
@@ -197,6 +299,24 @@ def main() -> int:
         if a:
             replay.append({"instruction": u, "output": a})
     ordinary = replay[:20]
+    if args.middle_ground:
+        cache = study / "middle_ground.jsonl"
+        done = {json.loads(l)["q"]: json.loads(l) for l in cache.read_text().splitlines()} if cache.exists() else {}
+        miss = []
+        with cache.open("a", encoding="utf-8") as f:
+            for r in build.un_train:
+                row = done.get(r["instruction"])
+                if not row:
+                    ctx, target, kind = middle_ground(model, tok, card, r["topic"], r["instruction"], build.notes,
+                                                      log=log.info)
+                    row = {"q": r["instruction"], "topic": r["topic"], "context": ctx, "target": target, "kind": kind}
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    f.flush()
+                miss.append((row["context"], row["q"], row["target"]))
+        kinds = {}
+        for m in (json.loads(l) for l in cache.read_text().splitlines()):
+            kinds[m["kind"]] = kinds.get(m["kind"], 0) + 1
+        log.info("Middle ground: %s", kinds)
     before, before_rows = run_eval(model, tok, held_eval, un_eval, ordinary, "before")
 
     samples = [x for x in (sample(tok, s, q, a) for s, q, a in subj + miss) if x]
