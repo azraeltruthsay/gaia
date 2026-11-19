@@ -57,3 +57,38 @@ units:
     - {topic: "Washington WAC 196-25: Business practices", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-25&full=true", parts: 12, drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
     - {topic: "Washington WAC 196-27A: Rules of professional conduct and practice", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-27A&full=true", parts: 12, drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
     - {topic: "Washington WAC 196-29: Professional practices", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-29&full=true", drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
+
+# Round 2 (2026-11-19): Andy's field -- piping and mechanical practice, nuclear and
+# radiological safety, risk and quality -- and the statute WAC 196 implements.
+  Mechanical and piping practice:
+    - {topic: "Net positive suction head", url: "https://en.wikipedia.org/wiki/Net_positive_suction_head"}
+    - {topic: "Water hammer", url: "https://en.wikipedia.org/wiki/Water_hammer"}
+    - {topic: "Pressure vessel", url: "https://en.wikipedia.org/wiki/Pressure_vessel"}
+    - {topic: "Heat exchanger", url: "https://en.wikipedia.org/wiki/Heat_exchanger"}
+    - {topic: "Euler–Bernoulli beam theory", url: "https://en.wikipedia.org/wiki/Euler%E2%80%93Bernoulli_beam_theory"}
+    - {topic: "Mohr's circle", url: "https://en.wikipedia.org/wiki/Mohr%27s_circle"}
+    - {topic: "Buckling", url: "https://en.wikipedia.org/wiki/Buckling"}
+    - {topic: "Thermal expansion", url: "https://en.wikipedia.org/wiki/Thermal_expansion"}
+    - {topic: "Welding", url: "https://en.wikipedia.org/wiki/Welding"}
+    - {topic: "Nondestructive testing", url: "https://en.wikipedia.org/wiki/Nondestructive_testing"}
+    - {topic: "Hydrostatic test", url: "https://en.wikipedia.org/wiki/Hydrostatic_test"}
+  Nuclear and radiological safety:
+    - {topic: "Criticality accident", url: "https://en.wikipedia.org/wiki/Criticality_accident"}
+    - {topic: "Nuclear criticality safety", url: "https://en.wikipedia.org/wiki/Nuclear_criticality_safety"}
+    - {topic: "Radiation protection", url: "https://en.wikipedia.org/wiki/Radiation_protection"}
+    - {topic: "Sievert", url: "https://en.wikipedia.org/wiki/Sievert"}
+    - {topic: "Radioactive decay", url: "https://en.wikipedia.org/wiki/Radioactive_decay"}
+    - {topic: "Ion exchange", url: "https://en.wikipedia.org/wiki/Ion_exchange"}
+    - {topic: "Deep geological repository", url: "https://en.wikipedia.org/wiki/Deep_geological_repository"}
+    - {topic: "Waste Isolation Pilot Plant", url: "https://en.wikipedia.org/wiki/Waste_Isolation_Pilot_Plant"}
+    - {topic: "Low-level waste", url: "https://en.wikipedia.org/wiki/Low-level_waste"}
+  Risk and quality practice:
+    - {topic: "Quality assurance", url: "https://en.wikipedia.org/wiki/Quality_assurance"}
+    - {topic: "Configuration management", url: "https://en.wikipedia.org/wiki/Configuration_management"}
+    - {topic: "Probabilistic risk assessment", url: "https://en.wikipedia.org/wiki/Probabilistic_risk_assessment"}
+    - {topic: "Fault tree analysis", url: "https://en.wikipedia.org/wiki/Fault_tree_analysis"}
+    - {topic: "Safety integrity level", url: "https://en.wikipedia.org/wiki/Safety_integrity_level"}
+    - {topic: "Lockout–tagout", url: "https://en.wikipedia.org/wiki/Lockout%E2%80%93tagout"}
+    - {topic: "Process safety management", url: "https://en.wikipedia.org/wiki/Process_safety_management"}
+  Washington engineering law (RCW 18.43):
+    - {topic: "Washington RCW 18.43: Engineers and land surveyors", url: "https://app.leg.wa.gov/RCW/default.aspx?cite=18.43&full=true", parts: 12, drop: '\[\s*\d{4} c [^\]]*\]'}
