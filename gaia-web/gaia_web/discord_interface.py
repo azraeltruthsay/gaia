@@ -795,7 +795,8 @@ class DiscordInterface:
                 if att.get("text_content"):
                     packet.content.data_fields.append(DataField(
                         key="attachment_text",
-                        value={"filename": att["filename"], "text_preview": att["text_content"][:2000]},
+                        value={"filename": att["filename"], "text_preview": att["text_content"][:2000],
+                               "text_path": att.get("text_path", "")},
                         type="json",
                     ))
 

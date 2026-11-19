@@ -43,6 +43,7 @@ from gaia_core.cognition.knowledge_enhancer import enhance_packet
 from gaia_core.cognition.knowledge_ingestion import run_explicit_save, run_auto_detect, run_update_detect, run_attachment_ingestion
 from gaia_core.cognition import kb_approval
 from gaia_core.cognition import research_router
+from gaia_core.cognition import long_read
 
 # [GCP v0.3] Import new packet structure
 from gaia_common.protocols.cognition_packet import (
@@ -3123,6 +3124,7 @@ class AgentCore:
 
             # ── Attachment Ingestion Pipeline ─────────────────────────────
             # Process file attachments (PDFs, text files, etc.) sent via Discord
+            _read_files = 0
             if packet.content.attachments:
                 for att in packet.content.attachments:
                     # Image attachments flow into the multimodal model via prompt_builder
@@ -3135,12 +3137,31 @@ class AgentCore:
                     for df in packet.content.data_fields:
                         if df.key == "attachment_text" and isinstance(df.value, dict):
                             if df.value.get("filename") == att.name:
-                                att_text = df.value.get("text_preview", "")
+                                att_text = long_read.attached_text(df.value)
                                 break
 
                     if not att_text:
                         self.logger.info("Attachment '%s' has no extracted text — skipping ingestion", att.name)
                         continue
+
+                    # She reads the file (2026-11-19: its text never reached her
+                    # turn). A long one: the opening now, the rest in the
+                    # background; she may come back to it when she's done.
+                    try:
+                        packet.content.original_prompt = (packet.content.original_prompt or "") + \
+                            long_read.reading_block(att.name, att_text)
+                        _read_files += 1
+                        if len(att_text) > long_read.LONG_CHARS:
+                            from gaia_core.cognition.self_review import chat_generator
+                            _sm, _sid = self.session_manager, session_id
+                            long_read.start(
+                                _sid, att.name, att_text, user_input,
+                                said=lambda: next((m.get("content", "") for m in reversed(_sm.get_history(_sid))
+                                                   if m.get("role") == "assistant"), ""),
+                                generate=chat_generator(self.model_pool, max_tokens=600),
+                                record=lambda text: _sm.add_message(_sid, "assistant", text))
+                    except Exception:
+                        self.logger.warning("long_read: could not read %s", att.name, exc_info=True)
 
                     try:
                         result = run_attachment_ingestion(
@@ -3175,8 +3196,8 @@ class AgentCore:
                             f"**[GAIA-CORE-079]** Failed to process attachment **{att.name}**: {e}"
                         )}
 
-                # If the message was ONLY attachments (no real user text), we're done
-                if user_input.startswith("[Attached:"):
+                # If the message was ONLY attachments she couldn't read, we're done
+                if user_input.startswith("[Attached:") and not _read_files:
                     return
             # ── End Attachment Ingestion Pipeline ─────────────────────────
 

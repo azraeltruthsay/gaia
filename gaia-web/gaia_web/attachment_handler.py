@@ -138,10 +138,24 @@ async def process_attachments(message: Any) -> list[dict]:
         }
         mime = mime_map.get(ext, attachment.content_type or "application/octet-stream")
 
+        # The whole extracted text, where gaia-core can read it (same /shared):
+        # the packet only carries a preview (2026-11-19: files were cut to 2,000
+        # characters and she never read past them).
+        text_path = ""
+        if text_content:
+            try:
+                text_path = local_path + ".txt"
+                with open(text_path, "w", encoding="utf-8") as f:
+                    f.write(text_content)
+            except OSError as e:
+                logger.warning("Could not save extracted text of %s: %s", filename, e)
+                text_path = ""
+
         results.append({
             "filename": filename,
             "mime": mime,
             "path": local_path,
+            "text_path": text_path,
             "text_content": text_content,
             "size_bytes": size_bytes,
             "content_hash": chash,
