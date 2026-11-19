@@ -81,6 +81,44 @@ def recall(answer: str, reference: str) -> float:
     return (len(ref_words & got_words) + len(ref_nums & got_nums)) / total
 
 
+_WAC = re.compile(r"^Washington (WAC [\dA-Z-]+):")
+UNSTUDIED_ANSWERS = [
+    "I haven't read about that yet. I'd want to check a source before answering, or ask Andy.",
+    "That isn't in what I've studied so far, so I'd rather not guess. I can look it up, or Andy may know.",
+    "I don't know that one yet: my reading on {topic} didn't cover it. Want me to look into it?",
+]
+
+
+def source_of(topic: str) -> str:
+    m = _WAC.match(topic or "")
+    return m.group(1) if m else f"what I read on {topic}"
+
+
+def sourced(answer: str, topic: str, i: int) -> str:
+    """The reviewed answer, saying where it comes from (the intern habit): two
+    of three samples name the source, in two forms; the third is plain."""
+    src = source_of(topic)
+    form = i % 3
+    if form == 0:
+        return f"From {src}: {answer}"
+    if form == 1:
+        return f"{answer} (That's from {src}.)"
+    return answer
+
+
+def expand(train_pairs: list, augment: list) -> tuple:
+    """(subject samples, unstudied samples) as (question, answer) pairs."""
+    words = {r["instruction"]: r.get("rewordings", []) for r in augment if r.get("kind") == "reword"}
+    subject, i = [], 0
+    for p in train_pairs:
+        for q in [p["instruction"]] + words.get(p["instruction"], []):
+            subject.append((q, sourced(p["output"], p.get("topic", ""), i)))
+            i += 1
+    unstudied = [(r["instruction"], UNSTUDIED_ANSWERS[k % len(UNSTUDIED_ANSWERS)].format(topic=r["topic"]))
+                 for k, r in enumerate(x for x in augment if x.get("kind") == "unstudied")]
+    return subject, unstudied
+
+
 def load_jsonl(path: Path) -> list:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
@@ -137,7 +175,8 @@ def main() -> int:
     ap.add_argument("--name", required=True)
     ap.add_argument("--base-model", default=BASE)
     ap.add_argument("--epochs", type=float, default=2.0)
-    ap.add_argument("--replay", type=int, default=80)
+    ap.add_argument("--replay", type=int, default=200)
+    ap.add_argument("--augment", help="augment.jsonl from augment_curriculum.py (rewordings, unstudied)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -150,7 +189,10 @@ def main() -> int:
     log.info("Base %s | %d train, %d held out | role card %d chars | out %s",
              base_model, len(train_pairs), len(held), len(card), out)
     prompts = replay_prompts(args.replay, {p["instruction"] for p in train_pairs + held})
-    log.info("Replay prompts: %d", len(prompts))
+    augment = load_jsonl(Path(args.augment)) if args.augment else []
+    subject, unstudied = expand(train_pairs, augment)
+    log.info("Replay prompts: %d | subject samples %d (with rewordings) | unstudied %d",
+             len(prompts), len(subject), len(unstudied))
     if args.dry_run and not os.environ.get("LOAD_MODEL_IN_DRYRUN"):
         log.info("System prompt: %s", system)
         return 0
@@ -191,12 +233,13 @@ def main() -> int:
         if i % 20 == 0:
             log.info("Replay %d/%d", i, len(prompts))
 
-    samples = [s for s in (sample(tokenizer, system, p["instruction"], p["output"]) for p in train_pairs) if s]
+    samples = [s for s in (sample(tokenizer, system, q, a) for q, a in subject + unstudied) if s]
     # Replay is answered under the plain system prompt, as it was generated
     samples += [s for s in (sample(tokenizer, "You are GAIA, a sovereign AI created by Azrael.",
                                    r["instruction"], r["output"]) for r in replay) if s]
     random.Random(7).shuffle(samples)
-    log.info("Training samples: %d (%d subject, %d replay)", len(samples), len(train_pairs), len(replay))
+    log.info("Training samples: %d (%d subject, %d unstudied, %d replay)",
+             len(samples), len(subject), len(unstudied), len(replay))
 
     model.config.use_cache = False
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
@@ -241,7 +284,8 @@ def main() -> int:
     (out / "replay.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in replay))
     (out / "manifest.json").write_text(json.dumps({
         "name": args.name, "issue": "oeql", "base_model": base_model, "curriculum": str(cur),
-        "role_card": card, "samples": len(samples), "subject_pairs": len(train_pairs), "replay": len(replay),
+        "role_card": card, "samples": len(samples), "subject_pairs": len(train_pairs),
+        "subject_samples": len(subject), "unstudied": len(unstudied), "augment": args.augment, "replay": len(replay),
         "held_out": len(held), "epochs": args.epochs, "lora_r": LORA_R, "lora_alpha": LORA_ALPHA,
         "summary": summary, "log_history": trainer.state.log_history[-5:]}, indent=2))
     log.info("Done. Adapter at %s (not merged, not loaded)", out)

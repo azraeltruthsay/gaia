@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from train_knowledge_adapter import (generate, load_jsonl, recall, role_card, system_prompt, BASE)
 
 UNSURE = re.compile(r"\b(i don'?t know|not sure|haven'?t (read|seen|studied)|i'?d have to (check|look)|"
-                    r"let me (check|look)|i can look|i'?m not certain|i don'?t have)\b", re.I)
+                    r"let me (check|look)|i can look|i'?m not certain|i don'?t have|rather not guess|look (it|into it) up|isn't in what i)\b", re.I)
 
 
 def reword(q):
