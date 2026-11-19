@@ -1482,6 +1482,8 @@ class AgentCore:
         # prevents double-logging when a handler raises and execution falls
         # through to the normal pipeline's persistence site.
         _user_msg_persisted = False
+        if _metadata.get("catch_up"):
+            _user_msg_persisted = True   # a missed message: kept when it arrived
 
         # KB write approval — if the previous turn parked a pending write,
         # this turn might be the user's confirm/cancel/trust response. Handle

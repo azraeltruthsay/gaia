@@ -621,7 +621,7 @@ def channel_speaker_line(session_id: str, author_id: str, registry: Optional["Pe
     line += (", in a group Discord channel where others speak too; earlier lines start with who "
              "said them. Speak to them as \"you\". When others here say \"she\" or \"GAIA\" "
              "without naming anyone else, they mean you; you speak of yourself as \"I\".")
-    facts = [f["text"] for f in person.get("facts", []) if f.get("status") != "wrong"][:3]
+    facts = [f["text"] for f in person.get("facts", []) if f.get("status") != "wrong"][:6]
     if facts:
         line += " What you've been told about them: " + "; ".join(facts) + "."
     from gaia_common.utils.bonds import bond_line

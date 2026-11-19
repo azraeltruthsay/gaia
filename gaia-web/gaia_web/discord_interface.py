@@ -195,6 +195,10 @@ class DiscordInterface:
                 )
             )
             logger.info("Discord bot presence set, bot is READY")
+            if os.environ.get("DISCORD_MISSED_SWEEP", "1") == "1" and not getattr(self, "_sweep_task", None):
+                for ch in self.ambient_channel_ids:   # a restart may have swallowed one
+                    self._quiet_since[ch] = time.time() - MISSED_QUIET_S
+                self._sweep_task = asyncio.create_task(self._missed_sweep_loop(bot))
 
         @bot.event
         async def on_disconnect():
@@ -339,18 +343,22 @@ class DiscordInterface:
 
                 if content:
                     logger.info(f"Discord processing message from {message.author.display_name}: {content[:50]}")
-                    await self._handle_message(
-                        content=content,
-                        channel_id=str(message.channel.id),
-                        user_id=str(message.author.id),
-                        guild_id=str(message.guild.id) if message.guild else None,
-                        author_name=message.author.display_name,
-                        message_id=str(message.id),
-                        is_dm=is_dm,
-                        message_obj=message,
-                        attachments=attachments,
-                        addressed_to_gaia=should_respond,
-                    )
+                    self._note_activity(str(message.channel.id), +1)
+                    try:
+                        await self._handle_message(
+                          content=content,
+                          channel_id=str(message.channel.id),
+                          user_id=str(message.author.id),
+                          guild_id=str(message.guild.id) if message.guild else None,
+                          author_name=message.author.display_name,
+                          message_id=str(message.id),
+                          is_dm=is_dm,
+                          message_obj=message,
+                          attachments=attachments,
+                          addressed_to_gaia=should_respond,
+                        )
+                    finally:
+                        self._note_activity(str(message.channel.id), -1)
 
             if not is_dm:
                 await bot.process_commands(message)
@@ -626,6 +634,7 @@ class DiscordInterface:
         message_obj: Any,
         attachments: Optional[list] = None,
         addressed_to_gaia: bool = True,
+        catch_up: bool = False,
     ):
         """Handle incoming Discord message by forwarding to gaia-core as a CognitionPacket.
 
@@ -743,7 +752,7 @@ class DiscordInterface:
                         channel_id=channel_id,
                         user_id=user_id,
                         reply_to_message_id=message_id,
-                        metadata={"is_dm": is_dm, "author_name": author_name}
+                        metadata={"is_dm": is_dm, "author_name": author_name, "catch_up": catch_up}
                     ),
                     source_destination=OutputDestination.DISCORD,
                     addressed_to_gaia=addressed_to_gaia,
@@ -931,6 +940,60 @@ class DiscordInterface:
         finally:
             # Return to idle presence after message processing completes
             await self._set_presence("idle", "over the studio")
+
+    # ── Missed messages (missed_sweep in gaia-core) ──────────────────────
+    @property
+    def _quiet_since(self) -> dict:
+        return self.__dict__.setdefault("_quiet_map", {})
+
+    def _note_activity(self, channel_id: str, delta: int) -> None:
+        """A message arrived (+1) or its turn ended (-1): the channel isn't
+        quiet, and a sweep waits until no turn is running there."""
+        busy = self.__dict__.setdefault("_busy_map", {})
+        busy[channel_id] = max(0, busy.get(channel_id, 0) + delta)
+        self._quiet_since[channel_id] = time.time()
+
+    async def _missed_sweep_loop(self, bot) -> None:
+        """After a quiet spell in an ambient channel, answer the message since
+        her last reply she should have, if any. Once per quiet spell."""
+        swept = {}
+        while True:
+            await asyncio.sleep(15)
+            for ch in list(self.ambient_channel_ids):
+                try:
+                    last = self._quiet_since.get(ch)
+                    busy = self.__dict__.get("_busy_map", {}).get(ch, 0)
+                    if last is None or busy or time.time() - last < MISSED_QUIET_S or swept.get(ch) == last:
+                        continue
+                    swept[ch] = last
+                    await self._answer_missed(bot, ch)
+                except Exception:
+                    logger.warning("Missed-message sweep failed for %s", ch, exc_info=True)
+
+    async def _answer_missed(self, bot, channel_id: str) -> None:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(f"{self.core_endpoint}/api/sessions/discord_channel_{channel_id}/missed")
+        pick = (resp.json() or {}).get("pick") if resp.status_code == 200 else None
+        if not pick:
+            return
+        channel = bot.get_channel(int(channel_id)) or await bot.fetch_channel(int(channel_id))
+        message = await find_missed_message(channel, bot.user, pick.get("text") or "")
+        if message is None:
+            logger.info("Discord: missed message picked but not found in channel %s", channel_id)
+            return
+        content = message.content
+        for mention in message.mentions:
+            content = content.replace(f"<@{mention.id}>", "").replace(f"<@!{mention.id}>", "")
+        logger.info("Discord: answering a missed message from %s", message.author.display_name)
+        self._note_activity(channel_id, +1)
+        try:
+            await self._handle_message(
+                content=content.strip(), channel_id=channel_id, user_id=str(message.author.id),
+                guild_id=str(message.guild.id) if message.guild else None,
+                author_name=message.author.display_name, message_id=str(message.id), is_dm=False,
+                message_obj=message, attachments=None, addressed_to_gaia=True, catch_up=True)
+        finally:
+            self._note_activity(channel_id, -1)
 
     async def _wait_for_core(self, client, deadline_s: float = 120.0) -> bool:
         """Whether gaia-core answers its health check, waiting up to
@@ -1184,6 +1247,29 @@ class DiscordInterface:
         if summary:
             return f"```\n{summary}\n```"
         return ""
+
+
+MISSED_QUIET_S = 45
+
+
+def _plain(text: str) -> str:
+    from gaia_web.link_notes import GIF_NOTE
+    return re.sub(r"<@!?\d+>", "", (text or "").replace(GIF_NOTE, "")).strip()
+
+
+async def find_missed_message(channel, me, text: str, within: int = 40):
+    """The Discord message her history holds as `text`: newest first, only
+    after her own last message there."""
+    want = _plain(text)
+    if not want:
+        return None
+    async for msg in channel.history(limit=within):
+        if msg.author.id == me.id:
+            return None
+        have = _plain(msg.content)
+        if have and (have == want or want.startswith(have) or have.startswith(want)):
+            return msg
+    return None
 
 
 async def retract_own_message(channel_id: str, containing: str = "", within: int = 20) -> Optional[str]:

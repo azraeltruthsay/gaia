@@ -1185,6 +1185,23 @@ async def record_post(request: Request, session_id: str):
     return {"ok": True, "session_id": session_id}
 
 
+@app.post("/api/sessions/{session_id}/missed")
+async def missed_message(session_id: str):
+    """After a quiet spell in a channel: the message since her last reply she
+    should have answered, if any (missed_sweep). Each is looked at once."""
+    if _ai_manager is None:
+        return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
+    from gaia_core.cognition.missed_sweep import pick_missed
+    from gaia_core.cognition.self_review import chat_generator
+    history = _ai_manager.session_manager.get_history(session_id) or []
+    loop = asyncio.get_running_loop()
+    pick = await loop.run_in_executor(None, lambda: pick_missed(
+        history, session_id, chat_generator(_ai_manager.model_pool, max_tokens=8, temperature=0.0)))
+    if pick:
+        logger.info("session=%s: a missed message to answer, from %s", session_id, pick.get("speaker") or "someone")
+    return {"pick": pick}
+
+
 @app.put("/api/sessions/{session_id}/meta")
 async def update_session_meta(request: Request, session_id: str):
     """Update session metadata (title, etc.)."""
@@ -1428,6 +1445,8 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # to reply at all; _build_output_routing reads this same
                         # key back out for the (possibly silent) reply's routing.
                         "addressed_to_gaia": routing.addressed_to_gaia,
+                        # A missed message answered late: already in her history.
+                        "catch_up": bool((routing.primary.metadata or {}).get("catch_up")),
                     }
 
             # v0.5: Pass audio_payloads through metadata for NeuralRouter (Proposal 11)
