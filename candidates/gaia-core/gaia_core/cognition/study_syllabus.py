@@ -151,19 +151,27 @@ def _slug(s: str) -> str:
 
 
 def study(syllabus: Dict, out_dir: Path, generate: Callable[[List[dict]], str],
-          redo: bool = False, log=print) -> Dict:
+          redo: bool = False, log=print, max_pages: int = 0) -> Dict:
+    """max_pages: pages to read this run (0 = all). Her web_fetch allows 50 an
+    hour, shared with her live lookups, so a run leaves her room (2026-11-19:
+    one run used it all)."""
     subject = syllabus["subject"]
     for sub in ("sources", "notes"):
         (out_dir / sub).mkdir(parents=True, exist_ok=True)
     report_path = out_dir / "report.json"
     report = json.loads(report_path.read_text()) if report_path.exists() and not redo else {}
     pairs_path = out_dir / "pairs.jsonl"
+    read = 0
     for unit, topics in syllabus["units"].items():
         for item in topics:
             topic = item["topic"]
             key = _slug(topic)
             if key in report and report[key].get("pairs_kept") is not None:
                 continue
+            if max_pages and read >= max_pages:
+                log(f"read {read} pages this run; the rest wait for the next")
+                return report
+            read += 1
             t0 = time.time()
             try:
                 url = item.get("url") or search_url(topic)
@@ -193,6 +201,9 @@ def study(syllabus: Dict, out_dir: Path, generate: Callable[[List[dict]], str],
                 log(f"{topic}: notes {len(kept)} kept / {len(dropped)} dropped, "
                     f"pairs {len(pairs)} kept / {len(bad)} dropped ({time.time() - t0:.0f}s)")
             except Exception as e:  # one bad page doesn't end the study
+                if "Rate limit" in str(e):
+                    log(f"{topic}: her web reading limit is reached; stopping")
+                    return report
                 report[key] = {"topic": topic, "error": str(e)[:200]}
                 log(f"{topic}: FAILED {e}")
             report_path.write_text(json.dumps(report, indent=1, ensure_ascii=False))
@@ -204,7 +215,8 @@ def main(argv: List[str]) -> None:
     syllabus = yaml.safe_load(Path(argv[1]).read_text())
     out = Path(os.environ.get("STUDY_DIR", "/knowledge/studies")) / syllabus["slug"]
     study(syllabus, out, http_generator(), redo="--redo" in argv,
-          log=lambda m: print(m, flush=True))
+          log=lambda m: print(m, flush=True),
+          max_pages=int(os.environ.get("STUDY_MAX_PAGES", "20")))
 
 
 if __name__ == "__main__":

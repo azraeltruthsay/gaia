@@ -50,3 +50,20 @@ def test_section_starts_at_the_anchor_heading():
     assert ss.section(page, "https://x/wiki/P#United_States") == "United States\nUS text"
     assert ss.section(page, "https://x/wiki/P") == page
     assert ss.section(page, "https://x/wiki/P#Nowhere") == page
+
+
+def _syl(n):
+    return {"subject": "PE", "slug": "pe", "units": {"U": [{"topic": f"T{i}", "url": "u"} for i in range(n)]}}
+
+
+def test_max_pages_and_rate_limit_stop_the_run(tmp_path, monkeypatch):
+    calls = []
+    def fetch(url):
+        calls.append(url)
+        raise RuntimeError("Rate limit exceeded for web_fetch. Try again later.")
+    monkeypatch.setattr(ss, "fetch", fetch)
+    rep = ss.study(_syl(5), tmp_path, lambda m: "", log=lambda m: None)
+    assert len(calls) == 1 and rep == {}          # stopped, nothing marked failed
+    monkeypatch.setattr(ss, "fetch", lambda url: ("t", "short"))
+    rep = ss.study(_syl(5), tmp_path, lambda m: "", log=lambda m: None, max_pages=2)
+    assert len(rep) == 2
