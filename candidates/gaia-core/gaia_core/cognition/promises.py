@@ -28,7 +28,7 @@ _PROMISE_RE = re.compile(
     r"\b(?:I'?ll|I\s+will|let\s+me|I'?m\s+going\s+to)\s+(?:go\s+|quickly\s+|just\s+|now\s+)?"
     r"(?:look\s+(?:it|that|this|them)\s+up|look\s+(?:\w+\s+)?(?:up|into|for)|"
     r"check(?:\s+\w+){0,3}|search(?:\s+for)?|find\s+(?:out|it|that)|dig\s+into|research|"
-    r"double[- ]check|verify|confirm)"
+    r"double[- ]check|re-?verify|re-?check|re-?calculate|re-?do|re-?work|verify|confirm)"
     r"|\bget\s+back\s+to\s+you\b|\bgive\s+me\s+a\s+(?:sec|second|moment|minute)\b",
     re.IGNORECASE)
 # "Can you check and get back to me?" -- "I can check." agrees to it
@@ -75,23 +75,36 @@ def made_promise(reply: str, asked: str = "") -> bool:
     return not re.search(r"\b(?:want|would\s+you\s+like)\s+me\s+to\b[^.!]*\?\s*$", text, re.IGNORECASE)
 
 
+def _is_question(q: str) -> bool:
+    return q.rstrip().endswith("?") or bool(re.match(
+        r"^\s*(?:what|which|who|when|where|why|how|is|are|does|do|can|should|calculate|find|determine)\b", q, re.I))
+
+
 def promised_question(history: List[dict], generate: Optional[Generate]) -> str:
-    """The question she promised to answer, standalone."""
+    """The question she promised to answer, standalone. A calculation asked
+    earlier in the conversation is taken as written; a model's restatement is
+    used only if it is a question (one restated "I was wrong, the flow is
+    0.576 cfs" and that was searched, 2026-11-19)."""
+    from gaia_core.cognition.nlu.intent_detection import is_worked_problem
     turns = [m for m in history if m.get("role") in ("user", "assistant")][-8:]
+    asked = [re.sub(r"^\w[\w ]{0,30}:\s*", "", m.get("content") or "").strip() for m in turns
+             if m.get("role") == "user"]
+    for a in reversed(asked):
+        if is_worked_problem(a):
+            return a
     if generate is not None:
         convo = "\n".join(f"{m['role']}: {(m.get('content') or '')[:600]}" for m in turns)
         try:
             q = (generate([{"role": "system", "content": QUESTION_SYSTEM},
                            {"role": "user", "content": convo}]) or "").strip().splitlines()
             q = q[0].strip(" \"'") if q else ""
-            if len(q) > 10:
+            if len(q) > 10 and _is_question(q):
                 return q
         except Exception:
             logger.debug("promised question: generation failed", exc_info=True)
     # the question itself, not the pushback after it ("Are you sure?")
-    asked = [m.get("content") or "" for m in turns if m.get("role") == "user"
-             and "?" in (m.get("content") or "") and len((m.get("content") or "").split()) > 6]
-    return re.sub(r"^\w[\w ]{0,30}:\s*", "", asked[-1]).strip() if asked else ""
+    real = [a for a in asked if "?" in a and len(a.split()) > 6]
+    return real[-1] if real else ""
 
 
 def keep(session_id: str, history: List[dict], who: str, same: Optional[Generate],
@@ -108,6 +121,13 @@ def keep(session_id: str, history: List[dict], who: str, same: Optional[Generate
     if not question:
         logger.info("promises: couldn't tell what she promised to look up in %s", session_id)
         return None
+    from gaia_core.cognition.nlu.intent_detection import is_worked_problem
+    if is_worked_problem(question):
+        # a calculation she promised to re-check: computed, not searched
+        text, verdict = ac.check_computation(question, "", same or other, other)
+        if verdict == "rewritten":
+            text, _ = ac.check_arithmetic(question, text, None)
+            return _post(session_id, question, "I re-checked the calculation: " + text, "computed", send, record)
     results = ground(question) or []
     pages = ac.web_pages(results)
     text, verdict = None, "not_found"
@@ -132,6 +152,10 @@ def keep(session_id: str, history: List[dict], who: str, same: Optional[Generate
         text, _ = ac.check_arithmetic(question, text, None)
     except Exception:
         pass
+    return _post(session_id, question, text, verdict, send, record)
+
+
+def _post(session_id, question, text, verdict, send, record) -> str:
     delivered = send(session_id, text)
     if delivered:
         record(text)

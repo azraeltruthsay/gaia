@@ -160,3 +160,39 @@ def test_pointer_without_answer():
     assert not ac.points_without_answering("WAC 196-23 covers seals. Before sealing someone else's work, the PE "
                                            "must fully review it and seal a report of that review.")
     assert not ac.points_without_answering("My notes on WAC 196-23 don't cover that.")
+
+
+def test_computation_catches_unworked_wrong_answer():
+    q = "A 6-inch inside-diameter pipe carries water at 3 ft/s. What is the flow in cfs and gpm?"
+    steps = ("D = 6 / 12  # ft\nA = pi * D**2 / 4  # ft2\nQ = A * 3  # cfs\ngpm = Q * 448.831  # gpm")
+    fixed = "A = 0.196 ft2, Q = 0.589 cfs, about 264.4 gpm."
+
+    def gen(m):
+        return steps if m[0]["content"].startswith("Work this problem") else fixed
+    out, v = ac.check_computation(q, "The flow rate is 5.76 cfs and 261.8 gpm.", gen)
+    assert v == "rewritten" and out == fixed
+    out, v = ac.check_computation(q, "About 0.589 cfs, or 264.4 gpm.", gen)
+    assert v == "ok"
+    assert ac.check_computation("How are you?", "Fine", gen) == ("Fine", "skipped")
+
+
+def test_run_steps():
+    vals = {n: v for n, v, _ in ac.run_steps("x = 2\ny = sqrt(x * 8)  # units\nz = bogus(1)\nw = 5")}
+    assert vals == {"x": 2.0, "y": 4.0}
+
+
+def test_computation_needs_two_agreeing_tries():
+    q = "A 6-inch inside-diameter pipe carries water at 3 ft/s. What is the flow in cfs and gpm?"
+    tries = iter(["D = 3\nQ = pi * D**2 / 4 * 3", "D = 0.5\nQ = pi * D**2 / 4 * 3"])
+    out, v = ac.check_computation(q, "0.589 cfs", lambda m: next(tries))
+    assert v == "unsure" and out == "0.589 cfs"
+
+
+def test_given_values_with_units():
+    vals = {n: v for n, v, _ in ac.run_steps("I0 = 400 mR/hr # start\nd = 2 m\nI = I0 * (d / 4)**2 * 0.5**3")}
+    assert vals["I"] == 12.5
+
+
+def test_pi_in_steps():
+    assert ac.arithmetic_errors("A = π * (0.0833 ft)^2 ≈ 0.1963 ft²")
+    assert ac.arithmetic_errors("A = π * (0.25 ft)^2 ≈ 0.1963 ft²") == []

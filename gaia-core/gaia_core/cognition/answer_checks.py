@@ -42,6 +42,8 @@ _OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
 
 def _normalise(seg: str) -> str:
     s = seg.replace("×", "*").replace("·", "*").replace("÷", "/").replace("−", "-")
+    s = re.sub(r"π|\bpi\b", " 3.141592653589793 ", s, flags=re.IGNORECASE)
+    s = re.sub(r"(?<=\d)\s+(?=3\.141592653589793)", " * ", s)
     s = s.replace("²", "^2").replace("³", "^3")
     s = re.sub(r"(?<=\d),(?=\d{3}\b)", "", s)
     s = s.replace("$", "").replace("%", "")
@@ -262,3 +264,140 @@ def points_without_answering(answer: str) -> bool:
         return False
     rest = re.sub(r"https?://\S+", "", answer[m.end():])
     return len(rest.split()) < 40
+
+
+# ── worked problems: the numbers computed in code ───────────────────────
+
+import math as _math
+
+_FUNCS = {"sqrt": _math.sqrt, "log": _math.log, "log10": _math.log10, "ln": _math.log, "exp": _math.exp,
+          "sin": _math.sin, "cos": _math.cos, "tan": _math.tan, "abs": abs, "radians": _math.radians}
+_CONSTS = {"pi": _math.pi, "e": _math.e}
+_STEP_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^#\n]+?)\s*(?:#\s*(.*))?$")
+
+STEPS = ("Work this problem as steps a calculator will run, one per line, written exactly as\n"
+         "name = expression  # what it is, with units\n"
+         "First write one line for each given value in consistent units, with any conversion shown "
+         "(a diameter of 6 inches is D = 6 / 12  # ft). Then the formula steps. Use only numbers, names "
+         "from earlier lines, + - * / ** ( ), pi, sqrt, log, exp; units go in the # comment. Convert "
+         "results with explicit factors (448.831 gpm per cfs, 7.48052 gal per ft3). One line per "
+         "quantity asked for. No other text.\n\nProblem: {question}")
+REWRITE_CALC = ("Your answer's numbers don't match the calculation. These steps were computed exactly:\n"
+                "{steps}\n\nAnswer the problem again with these values: show the steps briefly and give "
+                "the result with units. Reply with the answer only.\n\nProblem: {question}\n\n"
+                "Your first answer:\n{answer}")
+
+
+def _eval_named(expr: str, env: dict) -> Optional[float]:
+    expr = expr.replace("^", "**").replace("×", "*").replace("÷", "/").replace("−", "-")
+    expr = re.sub(r"(?<=\d),(?=\d{3}\b)", "", expr)
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return None
+
+    def ev(n):
+        if isinstance(n, ast.Expression):
+            return ev(n.body)
+        if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
+            return float(n.value)
+        if isinstance(n, ast.Name):
+            if n.id in env:
+                return env[n.id]
+            if n.id in _CONSTS:
+                return _CONSTS[n.id]
+            raise ValueError(n.id)
+        if isinstance(n, ast.BinOp) and type(n.op) in _OPS:
+            a, b = ev(n.left), ev(n.right)
+            if isinstance(n.op, ast.Pow) and abs(b) > 10:
+                raise ValueError("exponent")
+            return _OPS[type(n.op)](a, b)
+        if isinstance(n, ast.UnaryOp) and type(n.op) in _OPS:
+            return _OPS[type(n.op)](ev(n.operand))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in _FUNCS and not n.keywords:
+            return float(_FUNCS[n.func.id](*[ev(a) for a in n.args]))
+        raise ValueError("unsupported")
+    try:
+        return ev(tree)
+    except (ValueError, ZeroDivisionError, OverflowError, TypeError):
+        return None
+
+
+def run_steps(text: str) -> List[Tuple[str, float, str]]:
+    """(name, value, comment) for each step that computes; stops at one that doesn't."""
+    env, out = {}, []
+    for line in (text or "").splitlines():
+        line = line.strip().strip("`").strip()
+        m = _STEP_RE.match(line)
+        if not m:
+            continue
+        expr = m.group(2)
+        val = _eval_named(expr, env)
+        if val is None:
+            # a given value with its unit written in: "I0 = 400 mR/hr"
+            lit = re.match(r"^\s*(-?\d[\d,]*(?:\.\d+)?)\s*[A-Za-z°%µ][\w/°%²³^.\- ]*$", expr)
+            val = float(lit.group(1).replace(",", "")) if lit else None
+        if val is None:
+            break
+        env[m.group(1)] = val
+        out.append((m.group(1), val, (m.group(3) or "").strip()))
+    return out
+
+
+_ANS_NUM = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?")
+
+
+def _numbers(text: str) -> List[float]:
+    return [float(x.replace(",", "")) for x in _ANS_NUM.findall(text or "")]
+
+
+def check_computation(question: str, answer: str, generate: Optional[Generate],
+                      second: Optional[Generate] = None) -> Tuple[str, str]:
+    """A worked problem answered without working (or with it): she writes the
+    calculation as steps, code runs them, and an answer whose results aren't
+    among the computed values is rewritten from them. Verdicts: 'skipped',
+    'ok', 'rewritten', 'noted'. (2026-11-19: "5.76 cfs" for a 6-inch pipe at
+    3 ft/s, which is 0.589.)"""
+    from gaia_core.cognition.nlu.intent_detection import is_worked_problem
+    if generate is None or not is_worked_problem(question):
+        return answer, "skipped"
+    # Two tries at the calculation; it counts only when they agree (one try
+    # set a 6-inch pipe up as 3 ft and "corrected" her to 21 cfs).
+    runs = []
+    for gen in (generate, second or generate):
+        steps_run = []
+        for g in (gen, generate):      # her other mind may be unloaded
+            try:
+                steps_run = run_steps(g([{"role": "user", "content": STEPS.format(question=question)}]) or "")
+            except Exception:
+                logger.debug("computation steps failed", exc_info=True)
+            if steps_run:
+                break
+        runs.append(steps_run)
+    if not all(runs):
+        return answer, "skipped"
+    a, b = runs[0][-1][1], runs[1][-1][1]
+    if abs(a - b) > max(_REL_TOL * max(abs(a), abs(b)), 0.01):
+        logger.info("answer checks: two calculations disagree (%s vs %s); leaving the answer", _fmt(a), _fmt(b))
+        return answer, "unsure"
+    steps = runs[0]
+    given = set(_numbers(question))
+    finals = [v for _, v, _ in steps[-3:]]
+    stated = [x for x in _numbers(answer) if x not in given]
+
+    def near(x, ys):
+        return any(abs(x - y) <= max(_REL_TOL * abs(y), 0.01) for y in ys)
+    if finals and all(near(f, stated) for f in finals[-1:]) and all(near(x, [v for _, v, _ in steps] + list(given))
+                                                                      for x in stated[-2:]):
+        return answer, "ok"
+    shown = "\n".join(f"{n} = {_fmt(v)}" + (f"  ({c})" if c else "") for n, v, c in steps)
+    logger.info("answer checks: computed %s; her answer said %s", shown.replace("\n", "; ")[:300],
+                stated[-3:])
+    try:
+        new = (generate([{"role": "user", "content": REWRITE_CALC.format(
+            steps=shown, question=question, answer=answer)}]) or "").strip()
+    except Exception:
+        new = ""
+    if new and near(finals[-1], _numbers(new)):
+        return new, "rewritten"
+    return f"{answer.rstrip()}\n\n*(Checked by calculation: {shown.replace(chr(10), '; ')}.)*", "noted"

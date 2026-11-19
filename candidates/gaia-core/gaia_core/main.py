@@ -2686,6 +2686,25 @@ async def process_packet(packet_data: Dict[str, Any]):
                     _agent_core._lookup_feedback(full_response, packet)
                 except Exception:
                     logger.debug("Lookup feedback after inline tool call failed", exc_info=True)
+                # wtfr: "I'll re-verify and get back to you" said after a
+                # tool call is a promise too
+                if source in ("web", "discord"):
+                    try:
+                        from gaia_core.cognition import promises as _promises
+                        if _promises.made_promise(full_response, user_input or ""):
+                            from gaia_core.cognition import long_read as _lr
+                            from gaia_core.cognition.self_review import chat_generator as _cg
+                            _sm = _agent_core.session_manager
+                            import re as _re
+                            _who = _re.match(r"^\s*([A-Z][\w.-]{1,30}):", user_input or "")
+                            _promises.start(
+                                session_id, list(_sm.get_history(session_id) or []), _who.group(1) if _who else "",
+                                same=_cg(_agent_core.model_pool, roles=("prime", "core"), max_tokens=900, temperature=0.2),
+                                other=_cg(_agent_core.model_pool, roles=("core", "prime"), max_tokens=900, temperature=0.2),
+                                send=_lr.push, record=lambda text, _s=session_id: _sm.add_message(_s, "assistant", text))
+                            logger.info("promises: she said she'd check after a tool call; doing it after the turn")
+                    except Exception:
+                        logger.debug("promise keeping after inline tool call failed", exc_info=True)
                 from gaia_common.protocols.cognition_packet import PacketState
                 packet.status.state = PacketState.COMPLETED
                 packet.response.candidate = full_response

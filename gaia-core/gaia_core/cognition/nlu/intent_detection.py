@@ -931,7 +931,12 @@ def is_world_question(text: str) -> bool:
         m.group(0) not in _NOT_WORLD_NAMES for m in _WORLD_NAME_RE.finditer(stripped))
 
 
-_QUANTITY_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:%|°|[a-zA-Z]{1,6}\b(?:/[a-zA-Z]+)?)")
+_UNITS = (r"in|inch|inches|ft|feet|foot|yd|mi|m|cm|mm|km|mph|kph|fps|s|sec|secs|seconds?|min|mins|minutes?|"
+          r"hr|hrs|hours?|days?|lb|lbs|lbf|kip|kips|psi|psf|ksi|pa|kpa|mpa|gpm|gph|cfs|cfm|mgd|gal|gallons?|"
+          r"l|liters?|n|kn|w|kw|mw|hp|v|kv|a|amps?|ohms?|°f|°c|f|c|k|deg|degrees?|mr|rem|mrem|sv|msv|ci|bq|"
+          r"kg|g|tons?|btu|j|kj|kwh|ac|acres?|sf|sq|%")
+_QUANTITY_RE = re.compile(r"\d+(?:\.\d+)?\s*-?\s*(?:" + _UNITS + r")\b(?:\s*/\s*[a-z]+)?|\d+(?:\.\d+)?\s*%",
+                          re.IGNORECASE)
 _PROBLEM_RE = re.compile(r"\b(?:problem|answer choices|calculate|compute|determine|solve|required|"
                          r"formula|equation|design speed|per\s+[A-Z]{3,})\b", re.IGNORECASE)
 
@@ -942,8 +947,7 @@ def is_worked_problem(text: str) -> bool:
     sight distance per AASHTO?" Long, so is_world_question passes it by, and
     answered as chat it was answered from memory (2026-11-19)."""
     t = text or ""
-    return ("?" in t or bool(_PROBLEM_RE.search(t))) and len(_QUANTITY_RE.findall(t)) >= 2 \
-        and bool(_PROBLEM_RE.search(t) or re.search(r"\b[A-Z]{3,}\b", t))
+    return ("?" in t or bool(_PROBLEM_RE.search(t))) and len(_QUANTITY_RE.findall(t)) >= 2
 
 
 # im6c: "Write me a haiku about autumn rain" was grounded like a question

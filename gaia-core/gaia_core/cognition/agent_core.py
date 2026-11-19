@@ -4250,6 +4250,14 @@ class AgentCore:
                             logger.debug("engineering cross-check failed", exc_info=True)
                     if _final_clean and _checks:
                         try:
+                            try:
+                                _other_calc = _eng_mode.other_mind(self.model_pool, _ans_role)
+                            except Exception:
+                                _other_calc = None
+                            _final_clean, _calc = _checks.check_computation(user_input, _final_clean, _same_mind,
+                                                                             _other_calc)
+                            if _calc != "skipped":
+                                logger.info("answer checks: computation %s", _calc)
                             _final_clean, _arith = _checks.check_arithmetic(user_input, _final_clean, _same_mind)
                             if _arith != "ok":
                                 logger.info("answer checks: arithmetic %s", _arith)

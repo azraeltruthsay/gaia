@@ -52,3 +52,35 @@ def test_says_so_when_nothing_found():
 
 def test_question_falls_back_to_last_user_question():
     assert p.promised_question(HIST, None) == "GAIA, what code year of the IBC has Washington adopted?"
+
+
+def test_reverify_is_a_promise():
+    assert p.made_promise("I'll re-verify the number rather than rubber-stamp it. One moment.")
+
+
+def test_promised_calculation_is_computed_not_searched():
+    hist = [{"role": "user", "content": "Azrael: A 6-inch inside-diameter pipe carries water at 3 ft/s. What is the flow in cfs and gpm?"},
+            {"role": "assistant", "content": "5.76 cfs and 261.8 gpm."},
+            {"role": "user", "content": "Azrael: I think your cfs is off by a factor of 10"},
+            {"role": "assistant", "content": "I'll re-verify and get back to you."}]
+    q = "A 6-inch inside-diameter pipe carries water at 3 ft/s. What is the flow in cfs and gpm?"
+
+    def gen(m):
+        c = m[-1]["content"]
+        if m[0]["role"] == "system":
+            return q
+        if c.startswith("Work this problem"):
+            return "D = 0.5\nQ = pi * D**2 / 4 * 3\ngpm = Q * 448.831"
+        return "Q = 0.589 cfs, 264.4 gpm."
+    sent = []
+    out = p.keep("discord_channel_1", hist, "Azrael", gen, None, send=lambda s, t: sent.append(t) or True,
+                 record=lambda t: None, ground=lambda q: (_ for _ in ()).throw(AssertionError("no search")))
+    assert out.startswith("I re-checked the calculation") and "0.589" in out and sent
+
+
+def test_restated_answer_is_not_a_question():
+    hist = [{"role": "user", "content": "Azrael: GAIA, what code year of the IBC has Washington adopted?"},
+            {"role": "assistant", "content": "2024."},
+            {"role": "user", "content": "Azrael: Are you sure?"}]
+    assert p.promised_question(hist, lambda m: "I was wrong, it is the 2021 IBC.") == \
+        "GAIA, what code year of the IBC has Washington adopted?"
