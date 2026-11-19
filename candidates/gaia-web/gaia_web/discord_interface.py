@@ -1,4 +1,5 @@
 import json
+import collections
 """
 Discord Interface for GAIA Web Gateway
 
@@ -1005,12 +1006,34 @@ class DiscordInterface:
             logger.debug("VoiceGate(Discord) call failed (non-fatal): %s", e)
         return text
 
+    def _first_reply_to(self, message_obj: Any) -> bool:
+        """True the first time it is asked about a message: her answer pings
+        its author once, not on every part (a poem, then her line)."""
+        mid = getattr(message_obj, "id", None)
+        if mid is None or not hasattr(message_obj, "reply"):
+            return False
+        seen = self.__dict__.setdefault("_replied_to", collections.OrderedDict())
+        if mid in seen:
+            return False
+        seen[mid] = True
+        while len(seen) > 500:
+            seen.popitem(last=False)
+        return True
+
     async def _send_response(self, message_obj: Any, content: str, is_dm: bool):
         """Send response back to Discord."""
         try:
             # Split long messages (Discord 2000 char limit)
             messages = self._split_message(content)
             for msg in messages:
+                if not is_dm and self._first_reply_to(message_obj):
+                    # In a channel, her answer replies to the message it
+                    # answers and pings its author, once per message.
+                    try:
+                        await message_obj.reply(msg, mention_author=True)
+                        continue
+                    except Exception:
+                        logger.debug("Discord reply failed; sending plainly", exc_info=True)
                 await message_obj.channel.send(msg)
             logger.info(f"Discord: Sent {len(messages)} message(s) to {'DM' if is_dm else 'channel'}")
         except Exception as e:
