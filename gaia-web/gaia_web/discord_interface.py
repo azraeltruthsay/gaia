@@ -332,6 +332,11 @@ class DiscordInterface:
                         except ImportError:
                             logger.warning("Auto-translate failed: %s", _translate_exc)
 
+                # A GIF arrives as its address only: she is told so beside it.
+                if content:
+                    from gaia_web.link_notes import with_link_notes
+                    content = with_link_notes(content)
+
                 if content:
                     logger.info(f"Discord processing message from {message.author.display_name}: {content[:50]}")
                     await self._handle_message(
