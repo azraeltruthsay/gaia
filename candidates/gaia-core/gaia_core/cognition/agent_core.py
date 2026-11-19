@@ -4166,6 +4166,13 @@ class AgentCore:
                     _delib_deep = _delib_role == "prime" and inner_voice.wants_deep_focus(
                         _iv_thinking, _wants_focus_transition(
                             packet.content.original_prompt or user_input or "", source))
+                    # oeql: an engineering turn (her study notes are near
+                    # the question), and what its answer can stand on
+                    try:
+                        from gaia_core.cognition import engineering_mode as _eng_mode
+                        _eng_kind = _eng_mode.turn_kind(getattr(_grounding_ctx, "results", None) or [])
+                    except Exception:
+                        _eng_kind = None
                     _delib_result = run_deliberated_turn(
                         user_input=packet.content.original_prompt or user_input or "",
                         assembled_messages=_delib_messages,
@@ -4182,6 +4189,7 @@ class AgentCore:
                         # Deep focus: the person asked her to focus / think
                         # hard, so Prime thinks natively on this turn only.
                         deep_focus=_delib_deep,
+                        engineering=_eng_kind,
                     )
                     # Strip any residual <think> tags from the deliberation
                     # output before yielding. _split_think_and_response already
@@ -4197,6 +4205,16 @@ class AgentCore:
                     # under the real header (8xr4.19).
                     from gaia_core.memory.session_manager import _strip_mind_tag
                     _final_clean = _strip_mind_tag(_final_clean).strip()
+                    if _final_clean and _eng_kind == "memory":
+                        # Azrael: general knowledge is checked against
+                        # something -- her other mind answers on its own
+                        try:
+                            _final_clean, _eng_verdict = _eng_mode.check_general(
+                                user_input, _final_clean,
+                                _eng_mode.other_mind(self.model_pool, _delib_result.model_used or _delib_role))
+                            logger.info("engineering mode: general knowledge %s", _eng_verdict)
+                        except Exception:
+                            logger.debug("engineering cross-check failed", exc_info=True)
                     if _delib_result and _final_clean:
                         logger.info(
                             "[DELIBERATION] %s | model=%s forbidden=%d confab=%d retried=%s elapsed=%.0fms",

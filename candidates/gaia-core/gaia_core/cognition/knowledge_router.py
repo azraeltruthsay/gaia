@@ -704,6 +704,12 @@ def ground_query(
         try:
             from datetime import datetime as _dt
             web_results = _query_web(f"{query} {_dt.now().year}" if _current else query)
+            # oeql: an engineering question her notes don't cover; the page
+            # she can read and cite is on a trusted site, so ask once more
+            # toward Wikipedia when the first search found none there
+            if any(r.source == "study" for r in ctx.results) and \
+                    not any("wikipedia.org" in (r.url or "") for r in web_results):
+                web_results = _query_web(f"{query} wikipedia")[:1] + web_results
             ctx.results.extend(web_results)
             ctx.sources_queried.append("web")
             if web_results:

@@ -846,8 +846,13 @@ def run_deliberated_turn(
     use_adapter: bool = True,
     offer_tools: bool = True,
     deep_focus: bool = False,
+    engineering: Optional[str] = None,
 ) -> DeliberationResult:
     """Full deliberated-turn orchestration with confabulation safety net.
+
+    ``engineering`` (engineering_mode.turn_kind: 'notes', 'web', 'memory' or
+    None): on an engineering turn Prime answers with the engineering adapter,
+    if one is switched on, and the intern role card.
 
     ``use_adapter=False`` deliberates on the bare tier. Turns carrying
     on-subject search results use it: the deliberation adapter recites the
@@ -910,6 +915,16 @@ def run_deliberated_turn(
         adapter_name = _native_thinking_adapter(cfg, _is_prime_tier)
         max_tokens = int(cfg.get("prime_native_max_tokens" if _is_prime_tier else "native_max_tokens",
                                  3072 if _is_prime_tier else 2048))
+    if engineering and _is_prime_tier and not native_thinking:
+        from gaia_core.cognition import engineering_mode
+        _eng_adapter, _card = engineering_mode.adapter(), engineering_mode.role_card()
+        if _eng_adapter:
+            adapter_name = _eng_adapter
+            logger.info("[DELIBERATION] engineering turn (%s): adapter %s", engineering, _eng_adapter)
+            if _card and assembled_messages and assembled_messages[0].get("role") == "system":
+                assembled_messages = [{**assembled_messages[0],
+                                       "content": assembled_messages[0]["content"].rstrip() + "\n\n" + _card}] \
+                    + list(assembled_messages[1:])
     temperature = float(cfg.get("temperature", 0.55))
     # Autonomic affect capacity (3rr): affect shapes HOW the deliberated response
     # is generated — warmer/roomier when eager/curious, cooler/terser when worn or
