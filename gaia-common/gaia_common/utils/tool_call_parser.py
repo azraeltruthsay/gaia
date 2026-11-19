@@ -280,6 +280,15 @@ class ToolCallParser:
 
         return events
 
+    def drain(self) -> str:
+        """The plain text held back in case it opens a tool call, handed over
+        now (a flush in the stream: that message is complete). Nothing while
+        a call is open: that stays for the parser to finish."""
+        if self._in_tool_call or self._in_tool_calling_header:
+            return ""
+        text, self._buffer = self._buffer, ""
+        return text
+
     def flush(self) -> List[ParseEvent]:
         """Flush any remaining buffered text."""
         events = []

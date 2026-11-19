@@ -1977,6 +1977,15 @@ async def process_packet(packet_data: Dict[str, Any]):
                             yield json.dumps({"type": "token", "value": event["value"] + "\n\n"}) + "\n"
                             yield json.dumps({"type": "flush"}) + "\n"
                     elif event.get("type") == "flush":
+                        # The text the tool-call parser holds back belongs to
+                        # the message this flush completes; sent after it, the
+                        # end of a long reply arrived as a message of its own
+                        # (" his lost love.", 2026-11-19).
+                        if _tc_enabled and _tc_parser:
+                            _held = _tc_parser.drain()
+                            if _held:
+                                response_pieces.append(_held)
+                                yield json.dumps({"type": "token", "value": _held}) + "\n"
                         yield json.dumps(event) + "\n"
                     elif event.get("type") == "packet":
                         final_packet_dict = event.get("value")

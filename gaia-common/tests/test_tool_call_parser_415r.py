@@ -172,3 +172,23 @@ def test_palace_status_counts_are_not_works():
     text = tool_result_text({"ok": True, "total_memories": 115, "works": 13,
                              "lookups": {"active": 2078}}, question="where were we?")
     assert "115" in text
+
+
+# --- drain(): a flush in the stream hands over the held-back text (2026-11-19) ---
+
+def test_drain_hands_over_plain_text_held_back():
+    from gaia_common.utils.tool_call_parser import ToolCallParser
+    p = ToolCallParser()
+    shown = "".join(e.text or "" for e in p.feed("the memory of his lost love."))
+    held = p.drain()
+    assert shown + held == "the memory of his lost love."
+    assert p.drain() == ""
+
+
+def test_drain_leaves_an_open_tool_call_alone():
+    from gaia_common.utils.tool_call_parser import ToolCallParser, ParseEventType
+    p = ToolCallParser()
+    p.feed('Let me check. <tool_call>{"tool": "web", "act')
+    assert p.drain() == ""
+    events = p.feed('ion": "search", "query": "x"}</tool_call>')
+    assert any(e.type == ParseEventType.TOOL_CALL_DETECTED for e in events)

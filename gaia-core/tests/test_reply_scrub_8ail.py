@@ -176,16 +176,16 @@ def _reading(events):
 
 def test_she_reads_the_words_as_her_own_turn_and_her_sentence_follows_them():
     reply, out, core = _reading([{"type": "token", "value": "It is about how power fades."}])
-    assert out == f"{reply}\n\nIt is about how power fades."
+    assert out == "It is about how power fades."
     messages = core.generate_continuation.call_args.kwargs["messages"]
     assert messages[2] == {"role": "assistant", "content": reply} and messages[3]["role"] == "user"
 
 
 def test_the_words_go_alone_when_her_response_cannot_stand_or_she_cannot_read():
     reply, out, _ = _reading([{"type": "token", "value": "I'm sorry, I didn't understand."}])
-    assert out == reply
+    assert out == ""
     reply, out, _ = _reading(RuntimeError("no model"))
-    assert out == reply
+    assert out == ""
 
 
 @pytest.mark.parametrize("reply", [

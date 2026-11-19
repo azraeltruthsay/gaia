@@ -3317,12 +3317,17 @@ class AgentCore:
                     self.logger.warning("Recitation pipeline failed", exc_info=True)
                     _recitation_doc = None
                 _reply = self._recitation_reply(_recite_q, _recitation_doc)
-                if _recitation_doc:
-                    _reply = self._after_reading(user_input, _reply, _recitation_doc, session_id)
+                _hers = (self._after_reading(user_input, _reply, _recitation_doc, session_id)
+                         if _recitation_doc else "")
                 self.logger.info("Recitation pipeline: direct streaming %d chars (source found: %s)",
                                  len(_reply), bool(_recitation_doc))
                 yield {"type": "token", "value": _reply}
                 yield {"type": "flush"}
+                if _hers:
+                    # Her own sentence, a message apart from the words.
+                    yield {"type": "token", "value": _hers}
+                    yield {"type": "flush"}
+                    _reply = f"{_reply}\n\n{_hers}"
 
                 # Finalize the packet and yield it for Discord/web consumers
                 import gaia_common.protocols.cognition_packet as _cp
@@ -3330,7 +3335,10 @@ class AgentCore:
                 packet.response.confidence = 1.0 if _recitation_doc else 0.0
                 packet.status.state = _cp.PacketState.COMPLETED
                 self.session_manager.add_message(session_id, "assistant", _reply)
-                yield {"type": "packet", "value": packet.to_dict()}
+                # Enums as their values: to_dict() left them as objects, and
+                # main.py's default=str wrote "PersonaRole.DEFAULT", which the
+                # Discord bridge can't read back (2026-11-19).
+                yield {"type": "packet", "value": packet.to_serializable_dict()}
                 return
 
             # Research Glance: for comprehension intents (and partial recitation
@@ -8339,7 +8347,11 @@ RESULT: COMPLEX (reason: <brief reason>)
         pass through her and not just past her (uyor). She can't copy a long
         text faithfully (refused 8/12, invented lines 3/12, 2026-11-03), so the
         palace keeps the words exact; hers come after, from a turn of their
-        own. Right after the words in the same turn she carried on the poem."""
+        own. Right after the words in the same turn she carried on the poem.
+
+        Returns her sentence alone ("" when it can't stand beside the words):
+        joined under the poem it read as one more stanza (The Raven,
+        2026-11-19), so it goes as a message of its own."""
         messages = [
             {"role": "system", "content": "You are GAIA."},
             {"role": "user", "content": user_input},
@@ -8353,10 +8365,10 @@ RESULT: COMPLEX (reason: <brief reason>)
                 if isinstance(event, dict) and event.get("type") == "token")
         except Exception:
             self.logger.warning("Recitation: she couldn't read it just now", exc_info=True)
-            return reply
+            return ""
         hers = own_words(said, f"{document.get('title', '')}\n{reply}")
         self.logger.info("Recitation: read; said %r; kept: %s", said[:120], bool(hers))
-        return f"{reply}\n\n{hers}" if hers else reply
+        return hers or ""
 
     # Marks a page as being ABOUT a work (a lesson plan, study guide,
     # discussion aid) rather than the work itself. Domain trust doesn't
