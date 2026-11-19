@@ -34,6 +34,8 @@ STRONG = 0.5     # knowledge_router.STUDY_STRONG: her notes answer it
 GENERAL = "From general knowledge (worth checking against a source): "
 UNSURE = ("I'm not sure enough to answer that from memory, and my notes don't cover it. "
           "I'd want to look it up, or ask Andy.")
+UNSURE_PLAIN = ("I'm not sure enough to answer that from memory, and I couldn't confirm it "
+                "against a source. I'd want to look into it further.")
 _WORD = re.compile(r"[a-z][a-z'-]{3,}")
 _NUM = re.compile(r"\d+(?:[.,]\d+)*")
 
@@ -77,9 +79,11 @@ def agree(a: str, b: str) -> bool:
     return len(sa & _stems(b)) / len(sa) >= 0.45 and set(_NUM.findall(a)) <= set(_NUM.findall(b))
 
 
-def check_general(question: str, answer: str, other: Optional[Callable[[List[dict]], str]]) -> Tuple[str, str]:
+def check_general(question: str, answer: str, other: Optional[Callable[[List[dict]], str]],
+                  engineering: bool = True) -> Tuple[str, str]:
     """(final text, verdict) for an answer from general knowledge. verdict:
-    'agreed', 'disagreed' or 'unchecked'."""
+    'agreed', 'disagreed' or 'unchecked'. Off an engineering turn, her not
+    being sure doesn't mention her notes or Andy."""
     body = answer.strip()
     if body.startswith(GENERAL.strip()[:20]):
         body = body[len(GENERAL):].strip() if body.startswith(GENERAL) else body
@@ -96,7 +100,7 @@ def check_general(question: str, answer: str, other: Optional[Callable[[List[dic
     if agree(body, second):
         return GENERAL + body, "agreed"
     logger.info("engineering mode: her two minds disagree on %r; not answering from memory", question[:60])
-    return UNSURE, "disagreed"
+    return (UNSURE if engineering else UNSURE_PLAIN), "disagreed"
 
 
 def other_mind(model_pool, model_role: str) -> Optional[Callable[[List[dict]], str]]:

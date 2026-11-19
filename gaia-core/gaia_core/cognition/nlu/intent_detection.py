@@ -876,7 +876,10 @@ def is_factual_pushback(text: str, history=None) -> bool:
 # with a wh-word and points back at a third party (he/she/it/they...) is one;
 # you/I/we questions are about the conversation or GAIA herself.
 _FOLLOWUP_WH_RE = re.compile(
-    r"^\s*(?:(?:and|so|but|ok(?:ay)?|then|oh)[,.!]?\s+)?"
+    # "GAIA, what code year of the IBC ..." is the same question (Andy,
+    # 2026-11-19: her name in front skipped the lookup)
+    r"^\s*(?:(?:hey|hi|ok(?:ay)?|so)[,.!]?\s+)?(?:gaia[,.!:]?\s+)?"
+    r"(?:(?:and|so|but|ok(?:ay)?|then|oh)[,.!]?\s+)?"
     r"(?:who|whom|whose|what|when|where|why|which|how)\b",
     re.IGNORECASE,
 )
@@ -926,6 +929,21 @@ def is_world_question(text: str) -> bool:
         return False
     return is_current_question(stripped) or any(
         m.group(0) not in _NOT_WORLD_NAMES for m in _WORLD_NAME_RE.finditer(stripped))
+
+
+_QUANTITY_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:%|°|[a-zA-Z]{1,6}\b(?:/[a-zA-Z]+)?)")
+_PROBLEM_RE = re.compile(r"\b(?:problem|answer choices|calculate|compute|determine|solve|required|"
+                         r"formula|equation|design speed|per\s+[A-Z]{3,})\b", re.IGNORECASE)
+
+
+def is_worked_problem(text: str) -> bool:
+    """A technical problem or question with quantities in it: "A two-lane rural
+    highway has a design speed of 50 mph ... what is the required stopping
+    sight distance per AASHTO?" Long, so is_world_question passes it by, and
+    answered as chat it was answered from memory (2026-11-19)."""
+    t = text or ""
+    return ("?" in t or bool(_PROBLEM_RE.search(t))) and len(_QUANTITY_RE.findall(t)) >= 2 \
+        and bool(_PROBLEM_RE.search(t) or re.search(r"\b[A-Z]{3,}\b", t))
 
 
 # im6c: "Write me a haiku about autumn rain" was grounded like a question
@@ -1231,8 +1249,28 @@ _VALID_INTENTS = {
 _SYSTEM_KEYWORD_OVERRIDE_INTENTS = {"chat", "greeting", "list_tools"}
 
 
+_GREETING_ONLY_WORDS = 14
+
+
+def is_greeting_only(text: str) -> bool:
+    """Whether a message is just a greeting or check-in. A message that opens
+    with her name and then sets out a problem ("GAIA\n\nExample 1: ... what is
+    the required stopping sight distance?") is not, though Core's classifier
+    called it one and she answered it in social mode, ungrounded (2026-11-19)."""
+    from gaia_core.utils.prompt_builder import is_check_in
+    t = (text or "").strip()
+    if is_check_in(t):
+        return True
+    words = re.findall(r"[A-Za-z0-9']+", t)
+    lines = [ln for ln in t.splitlines() if ln.strip()]
+    return len(words) <= _GREETING_ONLY_WORDS and len(lines) <= 2 and not re.search(r"\d", t)
+
+
 def model_intent_detection(text, config, lite_llm=None, full_llm=None, fallback_llm=None, probe_context="", embed_model=None, source=""):
     intent_str = _model_intent_detection_inner(text, config, lite_llm, full_llm, fallback_llm, probe_context, embed_model, source)
+    if intent_str == "greeting" and not is_greeting_only(text):
+        logger.info("Greeting intent on a substantive message; treating it as chat.")
+        intent_str = "chat"
     if intent_str in _SYSTEM_KEYWORD_OVERRIDE_INTENTS and text:
         lowered = text.lower()
         system_keywords = [

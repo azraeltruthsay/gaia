@@ -3862,8 +3862,8 @@ class AgentCore:
                     "how's it going", "hows it going", "how goes it",
                 ))
                 if _is_personal:
-                    from gaia_core.cognition.nlu.intent_detection import is_world_question
-                    if is_world_question(user_input or ""):
+                    from gaia_core.cognition.nlu.intent_detection import is_world_question, is_worked_problem
+                    if is_world_question(user_input or "") or is_worked_problem(user_input or ""):
                         # e8hf: classed as chat, but it asks about the world
                         # by name; ungrounded, both minds made the facts up.
                         _is_personal = False
@@ -4205,25 +4205,47 @@ class AgentCore:
                     # under the real header (8xr4.19).
                     from gaia_core.memory.session_manager import _strip_mind_tag
                     _final_clean = _strip_mind_tag(_final_clean).strip()
-                    if _final_clean and _eng_kind == "web":
+                    # 2026-11-19 (the SSD problem): checks by code on the
+                    # written answer. A fetched page must back it on any
+                    # turn, not just engineering ones; her arithmetic is
+                    # computed; an answer from her notes names them.
+                    _gr_results = getattr(_grounding_ctx, "results", None) or []
+                    _ans_role = (_delib_result.model_used if _delib_result else None) or _delib_role
+                    try:
+                        from gaia_core.cognition import answer_checks as _checks
+                        from gaia_core.cognition.self_review import chat_generator as _chat_gen
+                        _same_mind = _chat_gen(self.model_pool, roles=(
+                            "prime" if _ans_role in ("prime", "cpu_prime") else "core",), max_tokens=900, temperature=0.2)
+                    except Exception:
+                        _checks, _same_mind = None, None
+                    if _final_clean and _checks and _eng_kind != "notes" and _checks.web_pages(_gr_results):
                         try:
-                            _sources = " ".join(r.content for r in (getattr(_grounding_ctx, "results", None) or []))
-                            _final_clean, _eng_verdict = _eng_mode.check_web(
-                                user_input, _final_clean, _sources,
-                                _eng_mode.other_mind(self.model_pool, _delib_result.model_used or _delib_role))
-                            logger.info("engineering mode: web answer %s", _eng_verdict)
+                            _final_clean, _eng_verdict = _checks.check_page(
+                                user_input, _final_clean, _gr_results, _same_mind,
+                                _eng_mode.other_mind(self.model_pool, _ans_role),
+                                engineering=bool(_eng_kind))
+                            logger.info("answer checks: page %s", _eng_verdict)
                         except Exception:
-                            logger.debug("engineering web check failed", exc_info=True)
-                    if _final_clean and _eng_kind == "memory":
+                            logger.debug("page check failed", exc_info=True)
+                    elif _final_clean and _eng_kind == "memory":
                         # Azrael: general knowledge is checked against
                         # something -- her other mind answers on its own
                         try:
                             _final_clean, _eng_verdict = _eng_mode.check_general(
                                 user_input, _final_clean,
-                                _eng_mode.other_mind(self.model_pool, _delib_result.model_used or _delib_role))
+                                _eng_mode.other_mind(self.model_pool, _ans_role))
                             logger.info("engineering mode: general knowledge %s", _eng_verdict)
                         except Exception:
                             logger.debug("engineering cross-check failed", exc_info=True)
+                    if _final_clean and _checks:
+                        try:
+                            _final_clean, _arith = _checks.check_arithmetic(user_input, _final_clean, _same_mind)
+                            if _arith != "ok":
+                                logger.info("answer checks: arithmetic %s", _arith)
+                            if _eng_kind == "notes":
+                                _final_clean = _checks.cite_notes(_final_clean, _gr_results)
+                        except Exception:
+                            logger.debug("arithmetic/citation check failed", exc_info=True)
                     if _delib_result and _final_clean:
                         logger.info(
                             "[DELIBERATION] %s | model=%s forbidden=%d confab=%d retried=%s elapsed=%.0fms",

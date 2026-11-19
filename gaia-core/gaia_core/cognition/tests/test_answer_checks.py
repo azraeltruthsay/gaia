@@ -1,0 +1,152 @@
+"""answer_checks: arithmetic, page and notes-citation checks (2026-11-19, the SSD problem)."""
+from types import SimpleNamespace as R
+
+from gaia_core.cognition import answer_checks as ac
+from gaia_core.cognition.nlu.intent_detection import is_greeting_only
+
+HER_FIRST = """PRD = 73.33 ft/s × 2.5 s = 183.325 ft
+BD = (73.33^2 - 0) / (2 × 11.2) ≈ 224.94 ft
+SSD = PRD + BD = 183.325 ft + 224.94 ft ≈ 408.27 ft
+Rounding off, the closest answer choice is A: 400ft."""
+
+HER_RETRY = """V = 50 mph * (5280 ft/mile) / (3600 s/hour) ≈ 73.33 ft/s
+SSD = 1.47 * 73.33 * (1.5 + 1.0) + (73.33)^2 / (2 * 32.2 * (0.3 ± 0))
+SSD = 1.47 * 73.33 * 2.5 + (73.33)^2 / (2 * 32.2 * 0.3)
+SSD ≈ 275.0 + 224.94
+SSD ≈ 499.94 ft"""
+
+
+def test_finds_her_braking_distance_slip():
+    errs = ac.arithmetic_errors(HER_FIRST)
+    assert len(errs) == 1
+    expr, stated, actual = errs[0]
+    assert stated.startswith("224.94") and abs(actual - 240.06) < 0.1
+
+
+def test_finds_the_retry_slips_and_passes_right_steps():
+    errs = ac.arithmetic_errors(HER_RETRY)
+    stated = {s for _, s, _ in errs}
+    assert "275.0 + 224.94" in stated   # 1.47*73.33*2.5 + 73.33^2/19.32 is 547.8
+    assert not any("5280" in e for e, _, _ in errs)   # the conversion was right
+    assert ac.arithmetic_errors("PRD = 1.47 × 50 × 2.5 = 183.75 ft\nBD = 1.075 × 50² / 11.2 = 239.96 ft") == []
+
+
+def test_no_arithmetic_is_ok():
+    assert ac.check_arithmetic("q", "The FE exam is 6 hours = a long day.", None) == (
+        "The FE exam is 6 hours = a long day.", "ok")
+
+
+def test_rewrite_with_right_values_then_note_if_still_wrong():
+    fixed = "BD = (73.33^2) / (2 × 11.2) ≈ 240.06 ft, so SSD ≈ 423.4 ft: B."
+    seen = []
+    out, v = ac.check_arithmetic("SSD?", HER_FIRST, lambda m: seen.append(m) or fixed)
+    assert v == "fixed" and out == fixed and "240.1" in seen[0][0]["content"]
+    out, v = ac.check_arithmetic("SSD?", HER_FIRST, lambda m: HER_FIRST)
+    assert v == "noted" and "Checked by calculation" in out
+
+
+PAGE = R(source="web", read=True, url="https://en.wikipedia.org/wiki/Stopping_sight_distance",
+         content=("In US customary units stopping sight distance is SSD = 1.47 V t + 1.075 V^2 / a, "
+                  "where V is the design speed in mph, t is the brake reaction time of 2.5 seconds "
+                  "and a is the deceleration rate of 11.2 ft/s2."))
+
+
+def test_page_rewrite_when_answer_not_backed():
+    bad = ("The AASHTO formula uses perception time of 1.5 seconds and a separate reaction time of 1.0 second "
+           "with the friction factor of the tires.")
+    good = ("The page gives SSD = 1.47 V t + 1.075 V^2 / a, with V the design speed in mph, "
+            "t the brake reaction time of 2.5 seconds and a the deceleration rate of 11.2 ft/s2.")
+    out, v = ac.check_page("SSD formula?", bad, [PAGE], lambda m: good, None)
+    assert v == "rewritten" and PAGE.url in out
+    out, v = ac.check_page("SSD formula?", good, [PAGE], None, None)
+    assert v == "kept"
+
+
+def test_page_falls_back_to_general_check_without_engineering_wording():
+    bad = "The answer involves the friction factor for icy pavements in northern climates."
+    out, v = ac.check_page("q", bad, [PAGE], lambda m: bad, lambda m: "Something else entirely about bridges.",
+                           engineering=False)
+    assert v == "disagreed" and "Andy" not in out
+
+
+def test_cite_notes():
+    note = R(source="study", score=0.6, title="WAC 196-23 Stamping and seals",
+             url="https://app.leg.wa.gov/wac/default.aspx?cite=196-23",
+             content="Document Review: Reviewer must fully review, potentially draft a report with "
+                     "calculations/sketches, and then seal/stamp, sign, and date that report.")
+    ans = ("The reviewer must fully review the document, potentially draft a report with sketches "
+           "or calculations, and then seal, sign, and date that report.")
+    out = ac.cite_notes(ans, [note])
+    assert out.endswith("cite=196-23)*") and "WAC 196-23" in out
+    assert ac.cite_notes(ans + " (WAC 196-23)", [note]).count("study notes") == 0
+    assert ac.cite_notes("Unrelated chat about the weather today.", [note]) == "Unrelated chat about the weather today."
+
+
+def test_greeting_only():
+    assert is_greeting_only("Hey GAIA, how are you?")
+    assert is_greeting_only("Good evening GAIA!")
+    assert not is_greeting_only("GAIA\n\n\nExample 1: Transportation / Geometric Design (Stopping Sight "
+                                "Distance)\n\nProblem: A two-lane rural highway has a design speed of 50 mph.")
+
+
+def test_worked_problem_is_grounded():
+    from gaia_core.cognition.nlu.intent_detection import is_worked_problem
+    assert is_worked_problem("Problem: A two-lane rural highway has a design speed of 50 mph and a deceleration "
+                             "of 11.2 ft/s2. What is the required Stopping Sight Distance per AASHTO?")
+    assert not is_worked_problem("I had 2 coffees and 3 cookies today, how about you?")
+    assert not is_worked_problem("How has your evening been?")
+
+
+def test_clock_only_when_asked():
+    from gaia_core.cognition.knowledge_router import _query_system_context as sc
+    assert sc("What time is it?") and sc("what's the date today") and sc("How long have you been running?")
+    assert not sc("Assuming a driver perception-reaction time of 2.5 seconds, what is the SSD?")
+    assert not sc("How long is the FE exam?")
+    assert not sc("What did you do today?")
+
+
+def test_shielding_steps_are_right():
+    text = """Exposure rate after shielding = 120 mR/hr × (1/2)^4
+Exposure rate after shielding = 120 mR/hr × 1/16
+Exposure rate after shielding = 7.5 mR/hr
+Intensity2 = 7.5 mR/hr × (1/2)^2
+Intensity2 = 7.5 mR/hr × 1/4
+Intensity2 = 1.875 mR/hr"""
+    assert ac.arithmetic_errors(text) == []
+    assert len(ac.arithmetic_errors(text.replace("1.875", "2.5"))) == 1
+
+
+def test_snippets_are_not_pages():
+    snippet = R(source="web", url="https://x", content="Stopping sight distance is the sum of two distances " * 3)
+    assert ac.web_pages([snippet]) == []
+    assert ac.check_page("q", "B: 425 ft", [snippet], None, None) == ("B: 425 ft", "no_page")
+
+
+def test_her_name_in_front_is_still_a_world_question():
+    from gaia_core.cognition.nlu.intent_detection import is_world_question
+    assert is_world_question("GAIA, What code year of the IBC has the state of Washington adopted as of today?")
+    assert is_world_question("Hey GAIA, who wrote the WAC 196 rules?")
+    assert not is_world_question("GAIA, how are you?")
+
+
+def test_search_terms():
+    from gaia_core.cognition.knowledge_router import _ADDRESS_RE, _search_terms
+    q = _ADDRESS_RE.sub("", "GAIA, What code year of the IBC has the state of Washington adopted as of today?")
+    assert q.startswith("What code year")
+    assert _search_terms(q) == "code year IBC Washington adopted"
+
+
+def test_off_topic_search_results_dropped():
+    from gaia_core.cognition.knowledge_router import GroundingResult as G, _on_topic
+    q = "What code year of the IBC has the state of Washington adopted as of today?"
+    vs = G(source="web", trust_tier="searched", content="Visual Studio Code - Build what comes next", url="https://code.visualstudio.com/")
+    sb = G(source="web", trust_tier="searched", content="Codes in effect: 2021 IBC", url="https://sbcc.wa.gov/x", title="Statewide codes adopted in Washington")
+    assert _on_topic([vs, sb], q) == [sb]
+
+
+def test_other_mind_rewrites_when_first_cannot():
+    wrong = "Washington has adopted the 2024 International Building Code as of today."
+    right = ("The page gives SSD = 1.47 V t + 1.075 V^2 / a, with V the design speed in mph, "
+             "t the brake reaction time of 2.5 seconds and a the deceleration rate of 11.2 ft/s2.")
+    out, v = ac.check_page("SSD formula?", wrong, [PAGE], lambda m: wrong, lambda m: right)
+    assert v == "rewritten" and out.startswith("The page gives")

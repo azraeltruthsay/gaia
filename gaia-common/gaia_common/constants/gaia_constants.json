@@ -501,7 +501,9 @@
       "cppreference.com",
       "ocw.mit.edu",
       "mitocw.mit.edu",
-      "app.leg.wa.gov"
+      "app.leg.wa.gov",
+        "sbcc.wa.gov",
+        "wsdot.wa.gov"
     ],
     "reliable_domains": [
       "github.com",

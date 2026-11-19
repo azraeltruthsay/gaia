@@ -505,31 +505,71 @@ def _query_web(query: str, max_results: int = 2, snippet_chars: int = 250) -> Li
 READ_CHARS = 1500
 
 
+_ADDRESS_RE = re.compile(r"^\s*(?:(?:hey|hi|ok(?:ay)?|so)[,.!]?\s+)?gaia[,.!:]?\s+", re.IGNORECASE)
+_SEARCH_STOP = frozenset("""a an the of in on at to for from by with as is are was were be been has have had
+do does did what which who whom whose when where why how this that these those it its today now currently
+current as of please tell me you your can could would will should there their they them state""".split())
+
+
+def _search_terms(text: str) -> str:
+    """The content words of a question, for a search engine."""
+    words = re.findall(r"[A-Za-z0-9][A-Za-z0-9.'-]*", text or "")
+    return " ".join(w for w in words if w.lower() not in _SEARCH_STOP)[:200]
+
+
+def _on_topic(results: List[GroundingResult], question: str) -> List[GroundingResult]:
+    """Search results that share at least two of the question's terms (or its
+    only one). For "code year IBC Washington adopted" a search engine gave
+    Visual Studio Code and Code.org, which she then answered around."""
+    terms = {w.lower() for w in _search_terms(question).split() if not w.isdigit()}
+    if not terms:
+        return results
+    need = min(2, len(terms))
+    kept = []
+    for r in results or []:
+        text = f"{getattr(r, 'title', '')} {r.content} {r.url}".lower()
+        if sum(1 for t in terms if t in text) >= need:
+            kept.append(r)
+    if len(kept) < len(results or []):
+        logger.info("KnowledgeRouter: dropped %d off-topic search result(s)", len(results) - len(kept))
+    return kept
+
+
 def _read_top_result(question: str, web_results: List[GroundingResult]) -> Optional[GroundingResult]:
     """The section of the top web result that answers `question`, for a
     question about the world by name (e8hf). None otherwise or on failure."""
-    from gaia_core.cognition.nlu.intent_detection import is_world_question
-    top = next((r for r in web_results if r.url), None)
-    if top is None or not is_world_question(question):
+    from gaia_core.cognition.nlu.intent_detection import is_world_question, is_worked_problem
+    if not (is_world_question(question) or is_worked_problem(question)):
         return None
-    try:
-        from gaia_core.utils import mcp_client
-        from gaia_common.utils.doc_sections import excerpt_for
-        raw = mcp_client.call_jsonrpc("web_fetch", {"url": top.url}, timeout=10)
-        page = raw.get("response", raw) if isinstance(raw, dict) else {}
-        page = page.get("result", page) if isinstance(page, dict) else {}
-        text = (page.get("content") or "") if isinstance(page, dict) else ""
-        if len(text) < 200:
-            return None
-        title = page.get("title") or top.title or top.url
-        logger.info("KnowledgeRouter: read the part of %s that answers the question", top.url)
-        return GroundingResult(
-            source="web", trust_tier="looked_up",
-            content=f"{title} (the part that answers the question):\n{excerpt_for(text, question, READ_CHARS)}",
-            url=top.url, utility_score=top.utility_score, query=question, title=title, read=True)
-    except Exception as e:
-        logger.debug("Reading the top result failed: %s", e)
-        return None
+    from gaia_core.utils import mcp_client
+    from gaia_common.utils.doc_sections import excerpt_for
+    # The first result that reads: a page off the trusted list or a PDF that
+    # won't extract shouldn't leave her with only search snippets.
+    for top in [r for r in web_results if r.url][:3]:
+        try:
+            raw = mcp_client.call_jsonrpc("web_fetch", {"url": top.url}, timeout=10)
+            page = raw.get("response", raw) if isinstance(raw, dict) else {}
+            page = page.get("result", page) if isinstance(page, dict) else {}
+            text = (page.get("content") or "") if isinstance(page, dict) else ""
+            if len(text) < 200:
+                continue
+            title = page.get("title") or top.title or top.url
+            logger.info("KnowledgeRouter: read the part of %s that answers the question", top.url)
+            return GroundingResult(
+                source="web", trust_tier="looked_up",
+                content=f"{title} (the part that answers the question):\n{excerpt_for(text, question, READ_CHARS)}",
+                url=top.url, utility_score=top.utility_score, query=question, title=title, read=True)
+        except Exception as e:
+            logger.debug("Reading %s failed: %s", top.url, e)
+    return None
+
+
+_CLOCK_Q = re.compile(
+    r"\bwhat(?:'s|\s+is)?\s+(?:the\s+)?(?:current\s+)?(?:time|date|day)\b|\bwhat\s+time\b|\bwhat\s+day\b"
+    r"|\bcurrent\s+(?:time|date)\b|\btoday'?s\s+date\b|\bclock\b|\btime\s+is\s+it\b|\bwhat\s+date\b")
+_UPTIME_Q = re.compile(
+    r"\buptime\b|\bhow\s+long\s+(?:have\s+you|has\s+(?:gaia|the\s+system|it)|are\s+you)\s+been\s+(?:up|running|awake|on)\b"
+    r"|\bbeen\s+running\b")
 
 
 def _query_system_context(query: str) -> List[GroundingResult]:
@@ -540,10 +580,11 @@ def _query_system_context(query: str) -> List[GroundingResult]:
     """
     results = []
     q = query.lower()
-    time_signals = ["time", "clock", "date", "day", "what time", "current time"]
-    uptime_signals = ["uptime", "how long", "running"]
-
-    if any(s in q for s in time_signals):
+    # Asks for the clock or her uptime, not any message with "time" or "how
+    # long" in it: "perception-reaction time of 2.5 seconds" fetched the
+    # clock, which counts as a local answer and switched off the web search
+    # for an AASHTO problem (2026-11-19); "how long is the FE exam?" got uptime.
+    if _CLOCK_Q.search(q):
         from datetime import datetime, timezone, timedelta
         try:
             from gaia_common.utils.locality import local_now
@@ -561,7 +602,7 @@ def _query_system_context(query: str) -> List[GroundingResult]:
         except Exception as e:
             logger.warning("SystemContext: clock query failed: %s", e)
 
-    if any(s in q for s in uptime_signals):
+    if _UPTIME_Q.search(q):
         try:
             with open("/proc/uptime") as f:
                 uptime_secs = float(f.read().split()[0])
@@ -703,7 +744,15 @@ def ground_query(
     if not skip_web and not local_has_answer and (_current or elapsed < max_total_ms * 0.8):
         try:
             from datetime import datetime as _dt
-            web_results = _query_web(f"{query} {_dt.now().year}" if _current else query)
+            _wq = _ADDRESS_RE.sub("", query).strip() or query
+            web_results = _on_topic(_query_web(f"{_wq} {_dt.now().year}" if _current else _wq), _wq)
+            if not web_results:
+                # her whole message is a poor search: "GAIA, What code year of
+                # the IBC has ... as of today?" found nothing where the terms
+                # "IBC code year Washington" found five (Andy, 2026-11-19)
+                _kw = _search_terms(_wq)
+                if _kw and _kw.lower() != _wq.lower():
+                    web_results = _on_topic(_query_web(f"{_kw} {_dt.now().year}" if _current else _kw), _wq)
             # oeql: an engineering question her notes don't cover; the page
             # she can read and cite is on a trusted site, so ask once more
             # toward Wikipedia when the first search found none there
