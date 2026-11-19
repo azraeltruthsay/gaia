@@ -147,10 +147,11 @@ def section(page: str, url: str) -> str:
 
 
 def _cfr():
-    """Her CFR store, with her CPU mind writing the summaries (its configured
-    endpoint is Prime, which is unloaded while she rests)."""
+    """Her CFR store; its summaries come from whichever mind is loaded (Prime,
+    then Core). STUDY_CFR_URL pins one."""
     from gaia_common.utils.cfr_manager import CFRManager
-    return CFRManager(vllm_endpoint=os.environ.get("STUDY_CFR_URL", "http://localhost:8092"))
+    url = os.environ.get("STUDY_CFR_URL")
+    return CFRManager(vllm_endpoint=url) if url else CFRManager()
 
 
 def read_parts(body: str, doc_id: str, path: Path, most: int, cfr=None) -> List[Tuple[str, str]]:

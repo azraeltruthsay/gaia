@@ -165,11 +165,33 @@ class _Segmenter:
 # vLLM caller (stdlib only)
 # ---------------------------------------------------------------------------
 class _VLLMCaller:
-    """Thin synchronous wrapper for vLLM chat completions."""
+    """Chat completions from whichever of her minds is loaded.
 
-    def __init__(self, endpoint: str, model: str):
+    Tries each endpoint in order (Prime, then Core): a mind that is unloaded
+    answers 503 at once ("engine is in standby"), so the next one takes it.
+    2026-11-19: CFR only knew Prime, and every summary failed while she rested
+    with Prime unloaded and Core on the CPU.
+    """
+
+    def __init__(self, endpoint: str, model: str, fallbacks: Optional[List[str]] = None):
         self.endpoint = endpoint.rstrip("/")
         self.model = model
+        self.fallbacks = [f.rstrip("/") for f in (fallbacks or [])]
+        self.last_endpoint = ""
+
+    @property
+    def endpoints(self) -> List[str]:
+        return list(dict.fromkeys([self.endpoint] + self.fallbacks))
+
+    def _post(self, endpoint: str, payload: bytes) -> str:
+        req = urllib.request.Request(
+            f"{endpoint}/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            data = json.loads(resp.read())
+            return _strip_think(data["choices"][0]["message"]["content"])
 
     def chat(
         self,
@@ -192,27 +214,22 @@ class _VLLMCaller:
             "chat_template_kwargs": {"enable_thinking": False},
         }).encode()
 
+        last: Optional[BaseException] = None
         for attempt in range(3):
-            try:
-                req = urllib.request.Request(
-                    f"{self.endpoint}/v1/chat/completions",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                with urllib.request.urlopen(req, timeout=180) as resp:
-                    data = json.loads(resp.read())
-                    return _strip_think(data["choices"][0]["message"]["content"])
-            except urllib.error.HTTPError as e:
-                if e.code in (503, 429) and attempt < 2:
-                    time.sleep(5)
-                    continue
-                raise
-            except Exception:
-                if attempt < 2:
-                    time.sleep(5)
-                    continue
-                raise
-        raise RuntimeError("vLLM unreachable after 3 attempts")
+            for endpoint in self.endpoints:
+                try:
+                    out = self._post(endpoint, payload)
+                    self.last_endpoint = endpoint
+                    return out
+                except urllib.error.HTTPError as e:
+                    last = e
+                    if e.code not in (503, 429):
+                        raise
+                except Exception as e:  # unreachable: try the next mind
+                    last = e
+            if attempt < 2:
+                time.sleep(5)
+        raise RuntimeError(f"no mind answered after 3 attempts: {last}")
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +315,8 @@ class CFRManager:
                     endpoint_key = cfg.get("engine_endpoint") or cfg.get("vllm_endpoint")
                     if endpoint_key and not self._explicit_endpoint:
                         self._vllm.endpoint = endpoint_key.rstrip("/")
+                    if cfg.get("fallback_endpoints") and not self._explicit_endpoint:
+                        self._vllm.fallbacks = [e.rstrip("/") for e in cfg["fallback_endpoints"]]
                     if cfg.get("model") and not self._explicit_model:
                         self._vllm.model = cfg["model"]
                     break
