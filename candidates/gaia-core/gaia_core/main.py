@@ -2316,7 +2316,11 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # request as already done (A/B 2026-10-28: named
                         # Moby-Dick 2/4, summarised the page correctly
                         # otherwise).
-                        continuation_messages = tool_answer_messages(user_input, _tool_label, _tool_text)
+                        _earlier = next((m.get("content") or "" for m in reversed(history or [])
+                                         if m.get("role") == "user"
+                                         and (m.get("content") or "").strip() != (user_input or "").strip()), "")
+                        continuation_messages = tool_answer_messages(user_input, _tool_label, _tool_text,
+                                                                     earlier=_earlier)
                         # The clean-slate retry (only when the continuation
                         # called a tool again) quotes the request up front and
                         # ends on a plain reply cue — no request left to act

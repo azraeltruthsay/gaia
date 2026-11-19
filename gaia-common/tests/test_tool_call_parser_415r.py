@@ -192,3 +192,21 @@ def test_drain_leaves_an_open_tool_call_alone():
     assert p.drain() == ""
     events = p.feed('ion": "search", "query": "x"}</tool_call>')
     assert any(e.type == ParseEventType.TOOL_CALL_DETECTED for e in events)
+
+
+# --- tool_answer_messages: the earlier message when the request points back (2026-11-19) ---
+
+def test_answer_step_sees_what_it_refers_to():
+    from gaia_common.utils.tool_call_parser import tool_answer_messages
+    msgs = tool_answer_messages("Can you do some research on it and track your findings?", "web(search)",
+                                "- Microsoft account (account.microsoft.com)",
+                                earlier="Do you think the recent Microsoft, FAA and banking outages are related?")
+    assert 'Just before, they had said: "Do you think the recent Microsoft' in msgs[1]["content"]
+
+
+def test_answer_step_unchanged_for_a_request_that_stands_alone():
+    from gaia_common.utils.tool_call_parser import tool_answer_messages
+    plain = tool_answer_messages("What is the capital of Canada?", "web(search)", "- Ottawa")
+    with_earlier = tool_answer_messages("What is the capital of Canada?", "web(search)", "- Ottawa",
+                                        earlier="I'm planning a trip.")
+    assert plain == with_earlier

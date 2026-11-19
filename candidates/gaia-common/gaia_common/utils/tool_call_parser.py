@@ -474,7 +474,11 @@ TOOL_ANSWER_SYSTEM = (
 )
 
 
-def tool_answer_messages(user_input: str, tool_label: str, tool_text: str) -> list:
+_REFERS_BACK_RE = re.compile(r"\b(?:it|its|that|this|those|these|them|they|the same)\b", re.I)
+
+
+def tool_answer_messages(user_input: str, tool_label: str, tool_text: str,
+                         earlier: str = "") -> list:
     """System + user messages for answering a request a tool already served.
 
     Result first, then the request as something already done: with the
@@ -485,12 +489,20 @@ def tool_answer_messages(user_input: str, tool_label: str, tool_text: str) -> li
     stored a palace note and said "It's in the Grotto now", 5/5 (2026-11-12);
     it names the call instead. No '---' rule between result and
     request: Core read it as a section break and carried on past it, echoing
-    it in 10/20 replies vs 0/20 without, same answers (gjuh.8, 2026-10-29)."""
+    it in 10/20 replies vs 0/20 without, same answers (gjuh.8, 2026-10-29).
+
+    `earlier`, their message before this one, is shown when the request
+    points back at it: "research on it" alone left her no way to see that a
+    search for the outages had returned Microsoft's home pages, and she
+    reported those as her findings (2026-11-19)."""
+    before = ""
+    if earlier and earlier.strip() != user_input.strip() and _REFERS_BACK_RE.search(user_input or ""):
+        before = f'Just before, they had said: "{earlier.strip()[:600]}"\n'
     return [
         {"role": "system", "content": TOOL_ANSWER_SYSTEM},
         {"role": "user", "content": (
             f"{tool_label} returned the following.\n\n{tool_text}\n\n"
-            f'They asked: "{user_input}" What you did: you called {tool_label}, '
+            f'{before}They asked: "{user_input}" What you did: you called {tool_label}, '
             f"and it returned the above. Your reply to them:")},
     ]
 
@@ -518,8 +530,8 @@ def is_tool_answer(messages: list) -> bool:
         and messages[0].get("content") == TOOL_ANSWER_SYSTEM
 
 
-FRONT_PAGES_NOTE = ("No individual stories came back: these are news sites' front pages, "
-                    "with no headlines in them.")
+FRONT_PAGES_NOTE = ("Nothing on the subject came back: these are sites' front pages "
+                    "(home, sign-in, support), not pages about what was searched.")
 
 
 def _is_front_page(url: str) -> bool:
