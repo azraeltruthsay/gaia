@@ -1233,6 +1233,22 @@ async def missed_message(session_id: str):
         history, session_id, chat_generator(_ai_manager.model_pool, max_tokens=160, temperature=0.0)))
     if pick:
         logger.info("session=%s: a missed message to answer, from %s", session_id, pick.get("speaker") or "someone")
+    elif os.environ.get("CHANNEL_REVIEW_ENABLED", "1").lower() in ("1", "true", "yes", "on"):
+        # the same quiet spell: she looks back over the chat (channel_review)
+        try:
+            from gaia_core.cognition import channel_review, long_read
+            from gaia_core.cognition.engineering_mode import other_mind
+            _sm, _pool = _ai_manager.session_manager, _ai_manager.model_pool
+            channel_review.start(
+                session_id, list(history),
+                chat_generator(_pool, max_tokens=160, temperature=0.0),
+                chat_generator(_pool, roles=("prime", "core"), max_tokens=900, temperature=0.2),
+                other_mind(_pool, "prime"),
+                send=long_read.push,
+                record=lambda text: _sm.add_message(session_id, "assistant", text,
+                                                    meta={"unprompted": True, "via": "review"}))
+        except Exception:
+            logger.debug("channel review failed to start", exc_info=True)
     return {"pick": pick}
 
 

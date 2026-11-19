@@ -387,8 +387,10 @@ def check_computation(question: str, answer: str, generate: Optional[Generate],
 
     def near(x, ys):
         return any(abs(x - y) <= max(_REL_TOL * abs(y), 0.01) for y in ys)
-    if finals and all(near(f, stated) for f in finals[-1:]) and all(near(x, [v for _, v, _ in steps] + list(given))
-                                                                      for x in stated[-2:]):
+    computed = [v for _, v, _ in steps] + list(given)
+    # right if what it states is computed (a partial answer isn't a wrong one)
+    if stated and all(near(x, computed) for x in stated[-2:]) and (
+            near(finals[-1], stated) or any(near(x, finals) for x in stated)):
         return answer, "ok"
     shown = "\n".join(f"{n} = {_fmt(v)}" + (f"  ({c})" if c else "") for n, v, c in steps)
     logger.info("answer checks: computed %s; her answer said %s", shown.replace("\n", "; ")[:300],

@@ -89,9 +89,10 @@ def promised_question(history: List[dict], generate: Optional[Generate]) -> str:
     turns = [m for m in history if m.get("role") in ("user", "assistant")][-8:]
     asked = [re.sub(r"^\w[\w ]{0,30}:\s*", "", m.get("content") or "").strip() for m in turns
              if m.get("role") == "user"]
-    for a in reversed(asked):
-        if is_worked_problem(a):
-            return a
+    # the question nearest the promise; a calculation is taken as written
+    nearest = next((a for a in reversed(asked) if is_worked_problem(a) or ("?" in a and len(a.split()) > 6)), "")
+    if nearest and is_worked_problem(nearest):
+        return nearest
     if generate is not None:
         convo = "\n".join(f"{m['role']}: {(m.get('content') or '')[:600]}" for m in turns)
         try:
@@ -103,8 +104,7 @@ def promised_question(history: List[dict], generate: Optional[Generate]) -> str:
         except Exception:
             logger.debug("promised question: generation failed", exc_info=True)
     # the question itself, not the pushback after it ("Are you sure?")
-    real = [a for a in asked if "?" in a and len(a.split()) > 6]
-    return real[-1] if real else ""
+    return nearest
 
 
 def keep(session_id: str, history: List[dict], who: str, same: Optional[Generate],
