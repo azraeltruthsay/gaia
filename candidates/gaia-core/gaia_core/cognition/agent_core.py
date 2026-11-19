@@ -3982,6 +3982,10 @@ class AgentCore:
                                 {"title": r.title, "snippet": r.content, "url": "",
                                  "conversation": True, "retrieved_at": r.retrieved_at}
                                 if r.source == "conversation" else
+                                # oeql: her study notes, cited by topic and page
+                                {"title": r.title, "snippet": r.content, "url": r.url,
+                                 "study": True, "trust": r.trust_tier}
+                                if r.source == "study" else
                                 {"title": r.source, "snippet": r.content, "url": r.url,
                                  "memory_id": r.memory_id, "trust": r.trust_tier,
                                  "read": getattr(r, "read", False)}

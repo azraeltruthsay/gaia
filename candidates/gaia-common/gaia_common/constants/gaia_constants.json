@@ -364,7 +364,7 @@
       "vector_store_dir": "vector_store/blueprints"
     },
     "wiki": {
-      "doc_dir": "/gaia-wiki/docs",
+      "doc_dir": "/gaia/GAIA_Project/gaia-wiki/docs",
       "vector_store_dir": "vector_store/wiki"
     },
     "code_architecture": {
@@ -374,6 +374,11 @@
     "research": {
       "doc_dir": "research",
       "vector_store_dir": "vector_store/research"
+    },
+    "studies": {
+      "doc_dir": "studies",
+      "doc_glob": "*/notes/*.md",
+      "vector_store_dir": "vector_store/studies"
     }
   },
   "SESSION_HYGIENE": {

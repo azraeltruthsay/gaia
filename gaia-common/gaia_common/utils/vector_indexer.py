@@ -201,6 +201,7 @@ class VectorIndexer:
             "blueprints": "curated",
             "dnd_campaign": "curated",
             "research": "researched",
+            "studies": "studied",
         }
         return tier_map.get(self.knowledge_base_name, "curated")
 
@@ -222,7 +223,9 @@ class VectorIndexer:
         file_count = 0
         chunk_count = 0
 
-        for doc_file in self.doc_dir.glob("**/*.*"):
+        # doc_glob: which files are the knowledge (a study keeps its notes
+        # beside the pages it read and its training pairs; only notes count)
+        for doc_file in self.doc_dir.glob(self.kb_config.get("doc_glob", "**/*.*")):
             if doc_file.is_file():
                 try:
                     with open(doc_file, "r", encoding="utf-8") as f:

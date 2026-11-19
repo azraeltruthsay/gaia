@@ -28,7 +28,7 @@ logger = logging.getLogger("GAIA.KnowledgeRouter")
 @dataclass
 class GroundingResult:
     """Result from a knowledge retrieval attempt."""
-    source: str           # "mempalace", "journal", "kg", "vector", "web", "system", "memory"
+    source: str           # "mempalace", "journal", "kg", "vector", "web", "system", "memory", "study"
     trust_tier: str       # a level of gaia_common.utils.lookup_memory.TRUST_LEVELS
     content: str          # The actual knowledge text
     url: str = ""         # Source URL (for web results)
@@ -375,6 +375,49 @@ def _dispute_memory(results: List[GroundingResult]) -> None:
         logger.warning("Could not mark remembered lookups for revalidation: %s", e)
 
 
+STUDY_MIN_SCORE = 0.45
+
+
+def _study_header(path: str) -> tuple:
+    """(topic, source url) from a study note's header ('# topic', 'Source: url')."""
+    topic, url = "", ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f.read(600).splitlines():
+                if line.startswith("# ") and not topic:
+                    topic = line[2:].strip()
+                elif line.startswith("Source:") and not url:
+                    url = line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return topic, url
+
+
+def _query_studies(query: str, top_k: int = 2) -> List[GroundingResult]:
+    """Her study notes (study_syllabus.py: each line checked against the page
+    she read), with the page they came from, so she cites what she read and
+    an engineering intern looks it up instead of guessing (oeql, 2026-11-19:
+    adapters held the facts but invented sources for what they didn't know)."""
+    from gaia_common.utils.vector_indexer import VectorIndexer
+    try:
+        hits = VectorIndexer.instance("studies").query(query, top_k=top_k)
+    except Exception:
+        logger.debug("Study notes unavailable", exc_info=True)
+        return []
+    out = []
+    for h in hits:
+        if h.get("score", 0) < STUDY_MIN_SCORE or not h.get("text"):
+            continue
+        topic, url = _study_header(h.get("filename") or "")
+        body = "\n".join(ln for ln in h["text"].splitlines()
+                         if not ln.startswith(("# ", "Source:", "Unit:"))).strip()
+        out.append(GroundingResult(
+            source="study", trust_tier="looked_up", url=url, title=topic, query=query,
+            score=float(h["score"]),
+            content=body))
+    return out
+
+
 def _query_knowledge_graph(query: str) -> List[GroundingResult]:
     """Search the knowledge graph for entity relationships."""
     results = []
@@ -602,6 +645,17 @@ def ground_query(
                         len(memory_results), memory_results[0].score)
     except Exception:
         logger.debug("Lookup memory step failed", exc_info=True)
+
+    # 1a'. Her study notes, with the page each came from
+    try:
+        study_results = _query_studies(query)
+        ctx.results.extend(study_results)
+        ctx.sources_queried.append("studies")
+        if study_results:
+            logger.info("KnowledgeRouter: Study notes returned %d results (best %.2f)",
+                        len(study_results), study_results[0].score)
+    except Exception:
+        logger.debug("Study notes step failed", exc_info=True)
 
     # 1b. Self-narrative journal — GAIA's own consolidation/reflection
     # entries. Same trust tier as MemPalace (local, structured, grounded

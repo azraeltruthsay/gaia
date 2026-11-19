@@ -1910,6 +1910,10 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                                         _note += f", {TRUST_WORDS[r['trust']]}"
                                     _cite = ", ".join(x for x in (title, f"looked up {_when}" if _when else "") if x)
                                     parts.append(f"- {snippet[:600]} ({_cite}{_note}; {url})")
+                                elif r.get("study"):
+                                    # oeql: her checked study notes; she cites
+                                    # the page she read, not a guess
+                                    parts.append(f"- {snippet[:1600]} (my study notes on {title}, from {url})")
                                 elif r.get("trust") == "own_record":
                                     parts.append(f"- {snippet[:_snip]} ({TRUST_WORDS['own_record']})")
                                 elif r.get("read"):
