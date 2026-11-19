@@ -27,6 +27,7 @@ _MAX_LOG_BYTES = 5 * 1024 * 1024
 _MAX_REPLY_CHARS = 4000
 # A capital not opening a sentence, line or list item, or a number.
 _CLAIM_RE = re.compile(r"(?<![.!?]\s)(?<!^)(?<!\n)(?<![-*:]\s)\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+)*|\d[\d:.,]*\d|\d")
+_PATH_RE = re.compile(r"(?<![\w.:/])/(?:[\w.-]+/)+[\w.-]*")
 _LABEL_RE = re.compile(r"^\s*(?:\[[^\]\n]{1,80}\]\s*|\*\[[^\n]*\]\*\s*)+")
 _MARKUP_RE = re.compile(r"[*_`]+|^#{1,6}\s+", re.MULTILINE)
 _FAKE_RESULT_RE = re.compile(r"</?tool_(?:result|response)>", re.IGNORECASE)
@@ -55,7 +56,8 @@ def unbacked(reply: str, known: str) -> List[str]:
     lowered = (known or "").lower()
     # Before the markup strip: it drops "_", which made "…-12_8fddd…" read "128".
     body = _plain(_ID_RE.sub(" ", reply or ""))
-    out = []
+    # A file path is a claim too ("what I read from /proc/driver/nvidia/gpu/0").
+    out = [p for p in dict.fromkeys(x.rstrip("/.") for x in _PATH_RE.findall(reply or "")) if p not in (known or "")]
     for claim in _CLAIM_RE.findall(body):
         # Also as a substring: "9950" is backed by "9950X3D", "Gemma" by "Gemma4".
         if not {w.rstrip("s") for w in _words(claim)} <= words and claim.lower() not in lowered and claim not in out:

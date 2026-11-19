@@ -1583,27 +1583,9 @@ class AgentCore:
         except Exception:
             logger.debug("Told-fact soft intent estimate failed (non-blocking)", exc_info=True)
 
-        try:
-            _palace_reply = (self._told_fact_reply(user_input, session_id, source, _metadata,
-                                                    soft_intent=_tf_soft_intent)
-                             or self._host_fact_reply(user_input, session_id)
-                             or self._founding_doc_reply(user_input, session_id))
-            if _palace_reply:
-                if not _user_msg_persisted:
-                    self.session_manager.add_message(session_id, "user", user_input)
-                    self._emit_timeline_message(session_id, "user", source)
-                    _user_msg_persisted = True
-                # Kept before it is sent: a stream that ends early never
-                # resumes this generator, and the reply was lost (2026-11-11).
-                self.session_manager.add_message(session_id, "assistant", _palace_reply)
-                yield {"type": "token", "value": self._build_response_header(
-                    self.__dict__.pop("_continuation_model", "core"), None, None, None, None) + _palace_reply}
-                yield {"type": "flush"}
-                return
-        except Exception:
-            logger.warning("Told-fact check failed, continuing", exc_info=True)
-
         # Ambient channel turn: she sees it, but only replies if she decides
+        # (before the fact answers below: Azrael telling the room about his
+        # GPU got a host-facts reply, 2026-11-19)
         # to. An @mention or DM always has addressed_to_gaia=True (the
         # default) and skips this entirely (GAIA's Grotto, 2026-11-12).
         if not _metadata.get("addressed_to_gaia", True):
@@ -1627,6 +1609,26 @@ class AgentCore:
             except Exception:
                 logger.warning("Ambient turn handling failed, treating as silent", exc_info=True)
                 return
+
+        try:
+            _palace_reply = (self._told_fact_reply(user_input, session_id, source, _metadata,
+                                                    soft_intent=_tf_soft_intent)
+                             or self._host_fact_reply(user_input, session_id)
+                             or self._founding_doc_reply(user_input, session_id))
+            if _palace_reply:
+                if not _user_msg_persisted:
+                    self.session_manager.add_message(session_id, "user", user_input)
+                    self._emit_timeline_message(session_id, "user", source)
+                    _user_msg_persisted = True
+                # Kept before it is sent: a stream that ends early never
+                # resumes this generator, and the reply was lost (2026-11-11).
+                self.session_manager.add_message(session_id, "assistant", _palace_reply)
+                yield {"type": "token", "value": self._build_response_header(
+                    self.__dict__.pop("_continuation_model", "core"), None, None, None, None) + _palace_reply}
+                yield {"type": "flush"}
+                return
+        except Exception:
+            logger.warning("Told-fact check failed, continuing", exc_info=True)
 
         # Research orchestration — "research X", "look into X", etc. fan out
         # across all KBs + web search and synthesize a brief in a single turn.

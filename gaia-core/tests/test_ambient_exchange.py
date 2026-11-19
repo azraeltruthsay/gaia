@@ -58,3 +58,9 @@ def test_addressed_by_name_is_in_exchange():
            ("assistant", "ShinyAndreon, what's your last name?", T1),
            ("user", "ShinyAndreon: Smith", "2026-11-19T03:25:46+00:00"))
     assert ai.in_exchange(h, "Smith", now=NOW)
+
+
+def test_unbacked_flags_invented_path():
+    from gaia_core.cognition.second_mind import unbacked
+    assert "/proc/driver/nvidia/gpu/0" in unbacked("That matches what I read from /proc/driver/nvidia/gpu/0.", "GPU: 10.8 GB")
+    assert not unbacked("I read /proc/meminfo.", "source /proc/meminfo: 31 GB")
