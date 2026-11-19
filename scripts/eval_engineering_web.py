@@ -37,6 +37,7 @@ def main():
     ap.add_argument("--curriculum", required=True)
     ap.add_argument("--study", required=True)
     ap.add_argument("--n", type=int, default=16)
+    ap.add_argument("--adapters", default="professional_engineering_v3,professional_engineering_v4")
     a = ap.parse_args()
     cur, study = Path(a.curriculum), Path(a.study)
     card = role_card(cur)
@@ -57,8 +58,10 @@ def main():
     print(f"cases with a page: {len(cases)}", flush=True)
     from peft import PeftModel
     model, tok = load_prime(BASE)
-    model = PeftModel.from_pretrained(model, f"{OUT_ROOT}/professional_engineering_v3", adapter_name="v3")
-    model.load_adapter(f"{OUT_ROOT}/professional_engineering_v4", adapter_name="v4")
+    names = [n.strip() for n in a.adapters.split(",") if n.strip()]
+    model = PeftModel.from_pretrained(model, f"{OUT_ROOT}/{names[0]}", adapter_name=names[0])
+    for n in names[1:]:
+        model.load_adapter(f"{OUT_ROOT}/{n}", adapter_name=n)
     model.eval()
     rows = []
     for topic, q, url, title, passage in cases:
@@ -70,16 +73,16 @@ def main():
         row = {"q": q, "url": url}
         with model.disable_adapter():
             row["none"] = generate_messages(model, tok, ctx, 220)
-        for name in ("v3", "v4"):
+        for name in names:
             model.set_adapter(name)
             row[name] = generate_messages(model, tok, ctx, 220)
-        for k in ("none", "v3", "v4"):
+        for k in ["none"] + names:
             row[f"{k}_score"] = score(row[k], url, passage, note["text"])
         rows.append(row)
     summary = {k: {m: round(sum(r[f"{k}_score"][m] for r in rows) / max(1, len(rows)), 3)
-                   for m in ("cites", "backed", "invents")} for k in ("none", "v3", "v4")}
+                   for m in ("cites", "backed", "invents")} for k in ["none"] + names}
     print(json.dumps(summary, indent=1), flush=True)
-    Path(OUT_ROOT, "professional_engineering_v4", "eval_web.json").write_text(
+    Path(OUT_ROOT, names[-1], "eval_web.json").write_text(
         json.dumps({"summary": summary, "rows": rows}, indent=1, ensure_ascii=False))
 
 

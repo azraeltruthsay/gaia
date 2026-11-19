@@ -39,3 +39,15 @@ def test_adapter_off_by_default_and_card_read(monkeypatch, tmp_path):
     card.write_text("# Role card\n\n> You are Andy's engineering intern.\n> You cite what you read.\n\nWhy...")
     monkeypatch.setattr(em, "ROLE_CARD_PATH", card)
     assert em.role_card() == "You are Andy's engineering intern. You cite what you read."
+
+
+def test_web_answer_backed_by_the_page_is_kept_unbacked_one_is_rechecked():
+    page = ("Stress-strain analysis uses many simplifying assumptions; structures are often modelled as in "
+            "static equilibrium, and the stress state is found from forces and moments.")
+    good = "I looked it up: structures are often modelled as in static equilibrium, and the stress state is found from forces and moments."
+    assert em.check_web("q", good, page, None) == (good, "kept")
+    bad = ("My notes on Stress don't cover that, but I looked it up: engineers use the finite element method, "
+           "meshing the part into tetrahedra and solving stiffness matrices. (Source: https://x/Stress)")
+    text, verdict = em.check_web("q", bad, page, None)
+    assert verdict == "unchecked" and text.startswith(em.GENERAL)
+    assert "looked it up" not in text and "Source" not in text and "finite element" in text

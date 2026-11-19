@@ -104,3 +104,32 @@ def other_mind(model_pool, model_role: str) -> Optional[Callable[[List[dict]], s
     from gaia_core.cognition.self_review import chat_generator
     other = "core" if model_role in ("prime", "cpu_prime") else "prime"
     return chat_generator(model_pool, roles=(other,), max_tokens=260, temperature=0.2)
+
+
+_CLAIM_RE = re.compile(r"(?:,?\s*but)?\s*I looked it up:?\s*|\s*\((?:Source|That's from)[^)]*\)", re.I)
+
+
+def _backed(line: str, source: str) -> bool:
+    if any(n not in source for n in _NUM.findall(line)):
+        return False
+    w = _stems(line)
+    return not w or len(w & _stems(source)) / len(w) >= 0.6
+
+
+def check_web(question: str, answer: str, sources: str,
+              other: Optional[Callable[[List[dict]], str]]) -> Tuple[str, str]:
+    """An answer on a turn with a page in front of her: kept if the page (or her
+    notes) backs most of it; otherwise it is general knowledge wearing a
+    citation (the v4 eval: 'I looked it up' over the finite element method,
+    which the page didn't mention), so the claim comes off and it is checked
+    as general knowledge."""
+    sents = [x for x in re.split(r"(?<=[.!?])\s+", answer.strip()) if len(x.split()) > 3]
+    if not sents:
+        return answer, "kept"
+    ok = sum(1 for x in sents if _backed(_CLAIM_RE.sub(" ", x), sources))
+    if ok / len(sents) >= 0.5:
+        return answer, "kept"
+    logger.info("engineering mode: %d of %d sentences backed by the page; checking as general knowledge",
+                ok, len(sents))
+    plain = re.sub(r"^My notes on .*? don't cover that\.?\s*", "", _CLAIM_RE.sub(" ", answer)).strip()
+    return check_general(question, plain, other)

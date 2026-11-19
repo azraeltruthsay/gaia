@@ -4205,6 +4205,15 @@ class AgentCore:
                     # under the real header (8xr4.19).
                     from gaia_core.memory.session_manager import _strip_mind_tag
                     _final_clean = _strip_mind_tag(_final_clean).strip()
+                    if _final_clean and _eng_kind == "web":
+                        try:
+                            _sources = " ".join(r.content for r in (getattr(_grounding_ctx, "results", None) or []))
+                            _final_clean, _eng_verdict = _eng_mode.check_web(
+                                user_input, _final_clean, _sources,
+                                _eng_mode.other_mind(self.model_pool, _delib_result.model_used or _delib_role))
+                            logger.info("engineering mode: web answer %s", _eng_verdict)
+                        except Exception:
+                            logger.debug("engineering web check failed", exc_info=True)
                     if _final_clean and _eng_kind == "memory":
                         # Azrael: general knowledge is checked against
                         # something -- her other mind answers on its own
