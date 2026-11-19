@@ -56,9 +56,13 @@ class InitiativeEngine:
         # 3. Run through AgentCore, consuming all events
         try:
             logger.info("InitiativeEngine: handing self-prompt to AgentCore...")
+            # Her own thought, not a person's message (inner_monologue,
+            # 2026-11-19): the packet marks it and the prompt frames it so.
             for event in self.agent_core.run_turn(
                 user_input=self_prompt,
                 session_id=GIL_SESSION_ID,
+                source="initiative",
+                metadata={"inner_voice": True},
             ):
                 if isinstance(event, dict) and event.get("type") != "token":
                     logger.debug("GIL event: %s", event)
@@ -75,7 +79,6 @@ class InitiativeEngine:
         """Build the autonomous reflection prompt from a topic dict."""
         topic_desc = topic.get("topic", "")
         return (
-            "[Autonomous Reflection Cycle]\n"
             f"My current highest-priority, unresolved topic is: '{topic_desc}'.\n"
             f"The topic's metadata is: {topic}.\n"
             "\n"

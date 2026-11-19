@@ -427,6 +427,12 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
         (getattr(a, "mime", "") or "").startswith("image/")
         for a in (getattr(getattr(packet, "content", None), "attachments", None) or [])
     )
+    # Her own thought (inner_monologue): the full prompt, never the triage
+    # exemplars, and framed as her mind, not a person's message.
+    _inner_voice = any(getattr(df, "key", "") == "inner_voice"
+                       for df in (getattr(getattr(packet, "content", None), "data_fields", None) or []))
+    if slim_mode and _inner_voice:
+        slim_mode = False
     if slim_mode and _has_image_attachment:
         logger.info("PromptBuilder: image attachment present — forcing slim_mode=False")
         slim_mode = False
@@ -1233,6 +1239,9 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
             getattr(packet.content, 'original_prompt', '') or '', *_routed_answer)
 
     system_content_parts = []
+    if _inner_voice:
+        from gaia_core.cognition.inner_monologue import TURN_FRAME
+        system_content_parts.append(TURN_FRAME)
 
     # ── Early context window detection ─────────────────────────────────
     # Compute _tiny_context BEFORE the identity block so we can skip verbose

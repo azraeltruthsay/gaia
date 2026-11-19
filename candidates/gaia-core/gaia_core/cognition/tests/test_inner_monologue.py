@@ -44,3 +44,17 @@ def test_short_refusals_are_silence_and_format_is_restated_last(tmp_path, monkey
     out, seen = _ask(tmp_path, monkeypatch, "THOUGHT: x\nSAY: Nothing in the code covers fees, but part 2 does.")
     assert out["say"]                       # a real sentence that starts with 'Nothing'
     assert seen[0][1]["content"].rstrip().endswith("SAY: NOTHING.)")
+
+
+def test_inner_voice_turn_is_marked_and_framed():
+    from gaia_common.protocols.cognition_packet import CognitionPacket, Content, DataField, Intent
+    from gaia_core.utils.prompt_builder import build_from_packet
+    assert im.mark("I wonder.").startswith(im.MARK) and im.mark(im.mark("x")) == im.mark("x")
+    pkt = CognitionPacket(content=Content(original_prompt=im.mark("My top topic is the garden.")),
+                          intent=Intent(user_intent="chat"))
+    pkt.content.data_fields.append(DataField(key="inner_voice", value=True))
+    msgs = build_from_packet(pkt)
+    assert msgs[0]["role"] == "system" and im.TURN_FRAME in msgs[0]["content"]
+    assert msgs[-1]["role"] == "user" and msgs[-1]["content"].startswith(im.MARK)
+    plain = CognitionPacket(content=Content(original_prompt="Hi"), intent=Intent(user_intent="chat"))
+    assert im.TURN_FRAME not in build_from_packet(plain)[0]["content"]

@@ -1032,6 +1032,12 @@ class AgentCore:
         )
 
         content = Content(original_prompt=user_input)
+        # A turn that is her own thought (initiative, inner monologue): marked
+        # as nobody's message, and flagged so the prompt frames it as her mind.
+        if (metadata or {}).get("inner_voice"):
+            from gaia_core.cognition.inner_monologue import mark
+            content.original_prompt = mark(user_input)
+            content.data_fields.append(DataField(key="inner_voice", value=True))
 
         # Forward image/audio attachments from the incoming packet so the
         # multimodal pipeline (prompt_builder + engine vision path) can

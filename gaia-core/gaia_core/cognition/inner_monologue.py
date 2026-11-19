@@ -28,23 +28,34 @@ from typing import Callable, Dict, List, Optional
 
 logger = logging.getLogger("GAIA.InnerMonologue")
 
-FRAME = (
-    "You are GAIA. What follows is your inner monologue: you, thinking to yourself. "
-    "No one wrote it to you, no one is waiting for an answer, and no one sees it. "
-    "Think it through briefly in your own words, then decide whether to say anything. "
-    "Answer in this form:\n"
-    "THOUGHT: <a sentence or two of what you think>\n"
-    "SAY: <exactly what you would say to them> or SAY: NOTHING")
+def frame(label: str = "SAY", form: str = "exactly what you would say to them") -> str:
+    return ("You are GAIA. What follows is your inner monologue: you, thinking to yourself. "
+            "No one wrote it to you, no one is waiting for an answer, and no one sees it. "
+            "Think it through briefly in your own words, then decide. Answer in this form:\n"
+            "THOUGHT: <a sentence or two of what you think>\n"
+            f"{label}: <{form}> or {label}: NOTHING")
+
+
+FRAME = frame()
 
 MARK = "(My own thought. Nobody sent this; I'm thinking to myself.)"
+# For a whole turn of her own (the initiative loop): the system says so.
+TURN_FRAME = ("This turn is your own inner monologue: the message below is you thinking to "
+              "yourself, not a person talking to you. No one is waiting for an answer.")
 
-_SAY_RE = re.compile(r"^\s*\**SAY\**\s*:\s*(.*)$", re.I | re.S | re.M)
-_THOUGHT_RE = re.compile(r"^\s*\**THOUGHT\**\s*:\s*(.*?)(?=^\s*\**SAY\**\s*:|\Z)", re.I | re.S | re.M)
+
+def mark(thought: str) -> str:
+    return thought if thought.startswith(MARK) else f"{MARK}\n\n{thought}"
+
 # "NOTHING", "Nothing to add.", "None -- nothing new": a short refusal is silence
 _NOTHING_RE = re.compile(r"^\W*(nothing|none|no|n/a)\b[^.!?\n]{0,40}[.!?]?\W*$", re.I)
 # Said again at the end of her thought: a long thought (a file's text) pushes
 # the frame's format far back, and she answered freeform (2026-11-19).
-CLOSE = "(I answer myself: THOUGHT: what I think. Then SAY: exactly what I'd say, or SAY: NOTHING.)"
+def close(label: str = "SAY", form: str = "exactly what I'd say") -> str:
+    return f"(I answer myself: THOUGHT: what I think. Then {label}: {form}, or {label}: NOTHING.)"
+
+
+CLOSE = close()
 
 
 def _log_path() -> Path:
@@ -52,13 +63,17 @@ def _log_path() -> Path:
 
 
 def ask_myself(thought: str, generate: Callable[[List[dict]], str], about: str = "",
-               session_id: str = "", log: bool = True) -> Dict:
-    """Ask herself (first person `thought`) whether to speak. Returns
-    {"say": str or None, "thought": str, "raw": str}."""
-    raw = (generate([{"role": "system", "content": FRAME},
-                     {"role": "user", "content": f"{MARK}\n\n{thought}\n\n{CLOSE}"}]) or "").strip()
-    m_say = _SAY_RE.search(raw)
-    m_th = _THOUGHT_RE.search(raw)
+               session_id: str = "", log: bool = True, label: str = "SAY",
+               form: str = "exactly what you would say to them",
+               my_form: str = "exactly what I'd say") -> Dict:
+    """Ask herself (first person `thought`) whether to act. Returns
+    {"say": str or None, "thought": str, "raw": str}; `say` is the text after
+    `label` (SAY by default: words to speak), None for NOTHING or no answer."""
+    raw = (generate([{"role": "system", "content": frame(label, form)},
+                     {"role": "user", "content": f"{MARK}\n\n{thought}\n\n{close(label, my_form)}"}]) or "").strip()
+    lab = re.escape(label)
+    m_say = re.search(rf"^\s*\**{lab}\**\s*:\s*(.*)$", raw, re.I | re.S | re.M)
+    m_th = re.search(rf"^\s*\**THOUGHT\**\s*:\s*(.*?)(?=^\s*\**{lab}\**\s*:|\Z)", raw, re.I | re.S | re.M)
     said = (m_say.group(1).strip() if m_say else "").strip().strip('"').strip()
     say = None if not said or _NOTHING_RE.match(said) else said
     out = {"say": say, "thought": (m_th.group(1).strip() if m_th else ""), "raw": raw}
@@ -66,10 +81,10 @@ def ask_myself(thought: str, generate: Callable[[List[dict]], str], about: str =
         try:
             with _log_path().open("a", encoding="utf-8") as f:
                 f.write(json.dumps({"ts": time.time(), "about": about, "session_id": session_id,
-                                    "thought": out["thought"], "say": say,
+                                    "thought": out["thought"], label.lower(): say,
                                     "unparsed": raw if not m_say else ""},
                                    ensure_ascii=False) + "\n")
         except OSError:
             logger.debug("inner monologue log unwritable", exc_info=True)
-    logger.info("inner monologue (%s): %s", about or "-", "speaks" if say else "stays quiet")
+    logger.info("inner monologue (%s): %s", about or "-", f"{label} {say[:40]!r}" if say else "nothing")
     return out

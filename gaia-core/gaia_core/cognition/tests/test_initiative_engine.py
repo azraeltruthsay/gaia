@@ -79,6 +79,7 @@ class TestSuccessfulTurn:
 
         call_kwargs = mock_agent_core.run_turn.call_args
         assert call_kwargs[1]["session_id"] == GIL_SESSION_ID
+        assert call_kwargs[1]["metadata"] == {"inner_voice": True}
 
 
 # ------------------------------------------------------------------
@@ -98,10 +99,13 @@ class TestSelfPrompt:
         assert "urgency" in prompt
         assert "0.9" in prompt
 
-    def test_prompt_contains_reflection_header(self):
+    def test_prompt_is_her_own_first_person_thought(self):
+        # 2026-11-19: her own thought, not a bracketed system header a model
+        # takes for a message; the turn is flagged inner_voice instead.
         topic = {"topic_id": "t-5", "topic": "x"}
         prompt = InitiativeEngine._build_self_prompt(topic)
-        assert "[Autonomous Reflection Cycle]" in prompt
+        assert prompt.startswith("My current highest-priority")
+        assert "[Autonomous Reflection Cycle]" not in prompt
 
 
 # ------------------------------------------------------------------

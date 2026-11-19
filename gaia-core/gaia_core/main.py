@@ -1196,7 +1196,7 @@ async def missed_message(session_id: str):
     history = _ai_manager.session_manager.get_history(session_id) or []
     loop = asyncio.get_running_loop()
     pick = await loop.run_in_executor(None, lambda: pick_missed(
-        history, session_id, chat_generator(_ai_manager.model_pool, max_tokens=8, temperature=0.0)))
+        history, session_id, chat_generator(_ai_manager.model_pool, max_tokens=160, temperature=0.0)))
     if pick:
         logger.info("session=%s: a missed message to answer, from %s", session_id, pick.get("speaker") or "someone")
     return {"pick": pick}

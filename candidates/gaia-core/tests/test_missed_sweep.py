@@ -1,5 +1,17 @@
 """A missed message is found once, by her pick, checked by code."""
+import pytest
+
 from gaia_core.cognition import missed_sweep as ms
+
+
+@pytest.fixture(autouse=True)
+def _monologue_log(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHARED_DIR", str(tmp_path))
+
+
+def A(n):
+    """Her answer in the inner-monologue form."""
+    return f"THOUGHT: hmm\nANSWER: {n}"
 
 NOW = 1795058746.0  # 2026-11-19T03:25:46Z
 
@@ -16,17 +28,20 @@ H = _h(("assistant", "Andy, could you share the /in/ link?", "2026-11-19T03:20:0
 
 def test_pick_and_only_once(tmp_path):
     seen = []
-    gen = lambda m: seen.append(m) or "2"
+    gen = lambda m: seen.append(m) or A(2)
     p = ms.pick_missed(H, "s", gen, now=NOW, base=tmp_path)
     assert p["speaker"] == "Andy" and p["text"] == "Try this linkedin.com/in/x"
-    assert "Your last message: Andy, could you share" in seen[0][1]["content"]
+    user = seen[0][1]["content"]
+    assert 'My last message in the channel was: "Andy, could you share' in user
+    assert user.startswith("(My own thought") and "inner monologue" in seen[0][0]["content"]
     assert ms.pick_missed(H, "s", gen, now=NOW, base=tmp_path) is None   # looked at once
 
 
 def test_none_and_out_of_range(tmp_path):
-    assert ms.pick_missed(H, "a", lambda m: "NONE", now=NOW, base=tmp_path) is None
-    assert ms.pick_missed(H, "b", lambda m: "7", now=NOW, base=tmp_path) is None
+    assert ms.pick_missed(H, "a", lambda m: A("NOTHING"), now=NOW, base=tmp_path) is None
+    assert ms.pick_missed(H, "b", lambda m: A(7), now=NOW, base=tmp_path) is None
     assert ms.pick_missed(H, "c", lambda m: "", now=NOW, base=tmp_path) is None
+    assert ms.pick_missed(H, "f", lambda m: "2", now=NOW, base=tmp_path) is None   # no form: no pick
 
 
 def test_old_and_approval_messages_skipped(tmp_path):
@@ -34,12 +49,12 @@ def test_old_and_approval_messages_skipped(tmp_path):
            ("user", "Azrael: 123456", "2026-11-19T03:21:00+00:00"),
            ("user", "Nick: ancient", "2026-11-19T01:00:00+00:00"))
     called = []
-    assert ms.pick_missed(h, "d", lambda m: called.append(1) or "1", now=NOW, base=tmp_path) is None
+    assert ms.pick_missed(h, "d", lambda m: called.append(1) or A(1), now=NOW, base=tmp_path) is None
     assert not called
 
 
 def test_answered_messages_not_considered(tmp_path):
     h = H + _h(("assistant", "Got it.", "2026-11-19T03:23:00+00:00"))
     called = []
-    assert ms.pick_missed(h, "e", lambda m: called.append(1) or "1", now=NOW, base=tmp_path) is None
+    assert ms.pick_missed(h, "e", lambda m: called.append(1) or A(1), now=NOW, base=tmp_path) is None
     assert not called
