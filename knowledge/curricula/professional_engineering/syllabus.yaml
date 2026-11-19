@@ -51,9 +51,9 @@ units:
     - {topic: Vitrification of nuclear waste, url: "https://en.wikipedia.org/wiki/Vitrification"}
     - {topic: Hanford Waste Treatment and Immobilization Plant}
   Washington rules for engineers (WAC Title 196, suggested by Andy):
-    - {topic: "Washington WAC 196-12: Registered professional engineers", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-12&full=true", parts: 3, drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
+    - {topic: "Washington WAC 196-12: Registered professional engineers", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-12&full=true", parts: 12, drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
     - {topic: "Washington WAC 196-20: Engineer-in-training certification", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-20&full=true", drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
     - {topic: "Washington WAC 196-23: Stamping and seals", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-23&full=true", drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
-    - {topic: "Washington WAC 196-25: Business practices", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-25&full=true", parts: 2, drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
-    - {topic: "Washington WAC 196-27A: Rules of professional conduct and practice", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-27A&full=true", parts: 2, drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
+    - {topic: "Washington WAC 196-25: Business practices", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-25&full=true", parts: 12, drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
+    - {topic: "Washington WAC 196-27A: Rules of professional conduct and practice", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-27A&full=true", parts: 12, drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
     - {topic: "Washington WAC 196-29: Professional practices", url: "https://app.leg.wa.gov/wac/default.aspx?cite=196-29&full=true", drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}

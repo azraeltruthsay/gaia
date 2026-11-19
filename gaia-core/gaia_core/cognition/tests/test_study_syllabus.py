@@ -69,17 +69,38 @@ def test_max_pages_and_rate_limit_stop_the_run(tmp_path, monkeypatch):
     assert len(rep) == 2
 
 
-def test_split_page_cuts_at_paragraphs_up_to_most(monkeypatch):
-    monkeypatch.setattr(ss, "PAGE_CHARS", 40)
-    page = "\n".join(f"para {i} " + "x" * 10 for i in range(6))
-    parts = ss.split_page(page, most=10)
-    assert ss.split_page(page) == parts[:1]
-    assert len(parts) == 3 and all(p.startswith("para") for p in parts)
-    assert "\n".join(parts) == page
+class FakeCFR:
+    def __init__(self, n=4):
+        self.n, self.ingested = n, []
+
+    def ingest(self, path, doc_id=None):
+        self.text = open(path).read()
+        self.ingested.append(doc_id)
+        return {"ok": True, "section_count": self.n}
+
+    def focus(self, doc_id, i):
+        return {"focused_section": {"full_text": f"{self.text} (section {i})"}}
+
+    def rolling_context(self, doc_id, i):
+        return {"rolling_summary": f"summary of sections before {i}"}
+
+
+def test_read_parts_short_page_is_one_part_without_cfr(tmp_path):
+    assert ss.read_parts("short page", "d", tmp_path / "f", 12, cfr=object()) == [("short page", "")]
+
+
+def test_read_parts_long_page_goes_through_cfr_with_rolling_context(tmp_path, monkeypatch):
+    monkeypatch.setattr(ss, "PAGE_CHARS", 20)
+    cfr = FakeCFR(n=4)
+    parts = ss.read_parts("x" * 50, "study_k", tmp_path / "k_full.txt", 3, cfr=cfr)
+    assert cfr.ingested == ["study_k"] and len(parts) == 3          # capped at most
+    assert parts[0][1] == "" and parts[2][1] == "summary of sections before 2"
+    assert ss.read_parts("x" * 50, "d", tmp_path / "f", 1, cfr=cfr)[0] == ("x" * 20, "")
 
 
 def test_parts_each_get_notes_and_pairs(tmp_path, monkeypatch):
     monkeypatch.setattr(ss, "PAGE_CHARS", 150)
+    cfr = FakeCFR(n=3)
     page = ("Each licensee must keep control of the seal.\nThe seal shows the certificate number.\n"
             "[Statutory Authority: RCW 18.43.035.]\nRenewal of the license is every two years.\n")
     monkeypatch.setattr(ss, "fetch", lambda url: ("WAC", page * 4))
@@ -87,13 +108,14 @@ def test_parts_each_get_notes_and_pairs(tmp_path, monkeypatch):
     def gen(m):
         if "Read the page" in m[0]["content"]:
             seen.append(m[1]["content"])
-            return m[1]["content"].split("\n\n", 1)[1]
+            return m[1]["content"].rsplit("This part:\n", 1)[-1].split(" (section")[0]
         return "Q: Who controls the seal?\nA: Each licensee must keep control of the seal."
     syl = {"subject": "PE", "slug": "pe", "category": "pe", "units": {"U": [
         {"topic": "Seals", "url": "u", "parts": 3, "drop": r"\[Statutory[^\]]*\]",
          "suggested_by": "Andy"}]}}
-    rep = ss.study(syl, tmp_path, gen, log=lambda m: None)
+    rep = ss.study(syl, tmp_path, gen, log=lambda m: None, cfr=cfr)
     assert rep["seals"]["parts"] == 3 and len(seen) == 3
+    assert "What came before" in seen[1] and "What came before" not in seen[0]
     assert not any("Statutory" in s for s in seen)
     rows = [json.loads(l) for l in (tmp_path / "pairs.jsonl").read_text().splitlines()]
     assert rows and all(r["suggested_by"] == "Andy" and r["category"] == "pe" for r in rows)

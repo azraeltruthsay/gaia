@@ -146,19 +146,33 @@ def section(page: str, url: str) -> str:
     return page[m.start():].lstrip() if m else page
 
 
-def split_page(page: str, most: int = 1) -> List[str]:
-    """A long page in parts of at most PAGE_CHARS, cut at paragraph breaks, up
-    to `most` parts (a 25,000-character chapter of rules would otherwise lose
-    everything after the first 9,000). Beyond that the rest is not read."""
-    parts, cur = [], ""
-    for para in re.split(r"\n(?=\S)", page):
-        if cur and len(cur) + len(para) + 1 > PAGE_CHARS:
-            parts.append(cur)
-            cur = ""
-        cur = f"{cur}\n{para}" if cur else para
-    if cur:
-        parts.append(cur)
-    return [p[:PAGE_CHARS] for p in parts[:max(1, most)]]
+def _cfr():
+    """Her CFR store, with her CPU mind writing the summaries (its configured
+    endpoint is Prime, which is unloaded while she rests)."""
+    from gaia_common.utils.cfr_manager import CFRManager
+    return CFRManager(vllm_endpoint=os.environ.get("STUDY_CFR_URL", "http://localhost:8092"))
+
+
+def read_parts(body: str, doc_id: str, path: Path, most: int, cfr=None) -> List[Tuple[str, str]]:
+    """(part, what came before) pairs to read. A page that fits is one part. A
+    long one that the syllabus wants read whole (`parts`) goes through CFR: her
+    store splits and summarizes it, and each section is read with a rolling
+    summary of the sections before it, so a rule is read knowing the
+    definitions above it. The document stays in her CFR store afterwards, for
+    cfr_focus/expand when someone asks her about it."""
+    if most <= 1 or len(body) <= PAGE_CHARS:
+        return [(body[:PAGE_CHARS], "")]
+    cfr = cfr or _cfr()
+    path.write_text(body, encoding="utf-8")
+    res = cfr.ingest(str(path), doc_id=doc_id)
+    if not res.get("ok"):
+        raise RuntimeError(f"CFR ingest: {res.get('error')}")
+    out = []
+    for i in range(min(res["section_count"], most)):
+        text = cfr.focus(doc_id, i)["focused_section"]["full_text"]
+        before = cfr.rolling_context(doc_id, i).get("rolling_summary", "") if i else ""
+        out.append((text, before))
+    return out
 
 
 def _slug(s: str) -> str:
@@ -166,7 +180,7 @@ def _slug(s: str) -> str:
 
 
 def study(syllabus: Dict, out_dir: Path, generate: Callable[[List[dict]], str],
-          redo: bool = False, log=print, max_pages: int = 0) -> Dict:
+          redo: bool = False, log=print, max_pages: int = 0, cfr=None) -> Dict:
     """max_pages: pages to read this run (0 = all). Her web_fetch allows 200 an
     hour, shared with her live lookups, so a run leaves her room (2026-11-19:
     one run used it all)."""
@@ -197,15 +211,19 @@ def study(syllabus: Dict, out_dir: Path, generate: Callable[[List[dict]], str],
                     raise RuntimeError(f"page too short ({len(page)} chars)")
                 if item.get("drop"):
                     page = re.sub(item["drop"], "", page)
-                parts = split_page(section(page, url), item.get("parts", 1))
+                parts = read_parts(section(page, url), f"study_{key}",
+                                   out_dir / "sources" / f"{key}_full.txt",
+                                   item.get("parts", 1), cfr)
                 totals = {"notes_kept": 0, "notes_dropped": [], "pairs_kept": 0, "pairs_dropped": []}
-                for n, part in enumerate(parts, 1):
+                for n, (part, before) in enumerate(parts, 1):
                     name = topic if len(parts) == 1 else f"{topic} (part {n} of {len(parts)})"
                     pk = key if len(parts) == 1 else f"{key}_p{n}"
                     (out_dir / "sources" / f"{pk}.txt").write_text(f"{url}\n{title}\n\n{part}")
                     notes = generate([
                         {"role": "system", "content": NOTES_SYSTEM.format(subject=subject, topic=name)},
-                        {"role": "user", "content": f"Page: {title}\n\n{part}"}])
+                        {"role": "user", "content": f"Page: {title}\n\n" + (
+                            f"What came before in this document (your summary):\n{before}\n\n"
+                            f"This part:\n" if before else "") + part}])
                     kept, dropped = check_notes(notes, part)
                     text = "\n".join(kept)
                     (out_dir / "notes" / f"{pk}.md").write_text(
