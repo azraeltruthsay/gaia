@@ -38,6 +38,8 @@ def test_prompt_cites_study_notes_by_topic_and_page():
              "url": "https://app.leg.wa.gov/x", "study": True, "trust": "looked_up"}]}}))
     text = "\n".join(m["content"] for m in build_from_packet(pkt))
     assert "(my study notes on Washington WAC 196-23: Stamping and seals, from https://app.leg.wa.gov/x)" in text
+    from gaia_core.utils.prompt_builder import STUDY_NOTES_HEADER
+    assert STUDY_NOTES_HEADER in text and "Candidate context" not in text
 
 
 def test_strong_study_note_saves_the_web_and_is_named_in_her_trace():

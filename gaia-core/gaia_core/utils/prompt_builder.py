@@ -411,6 +411,9 @@ def build_from_packet(packet: CognitionPacket, *args, **kwargs) -> List[Dict]:
     return messages
 
 
+STUDY_NOTES_HEADER = "[From your own study notes, with the page each came from:]"
+
+
 def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = None, slim_mode: bool = False, kv_prefix_active: bool = False) -> List[Dict]:
     """
     Builds a prompt from a v0.3 CognitionPacket, using a tiered, budget-aware logic.
@@ -1884,7 +1887,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                     # ("…given to Arthur by the Lady of the Lake" sat at ~390,
                     # behind run-together result titles).
                     _snip = 600 if (disputed or followup) else 200
-                    _n_shown = _n_remembered = 0
+                    _n_shown = _n_remembered = _n_study = 0
                     for entity, info in web_g.items():
                         for r in info.get("results", [])[:3]:
                             title = r.get("title", "")
@@ -1913,6 +1916,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                                 elif r.get("study"):
                                     # oeql: her checked study notes; she cites
                                     # the page she read, not a guess
+                                    _n_study += 1
                                     parts.append(f"- {snippet[:1600]} (my study notes on {title}, from {url})")
                                 elif r.get("trust") == "own_record":
                                     parts.append(f"- {snippet[:_snip]} ({TRUST_WORDS['own_record']})")
@@ -1923,7 +1927,11 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                                     parts.append(f"- {snippet[:1600]} ({url})")
                                 else:
                                     parts.append(f"- {title}: {snippet[:_snip]} ({url})")
-                    if _n_remembered and _n_remembered == _n_shown and not disputed:
+                    if _n_study and _n_study == _n_shown and not disputed:
+                        # oeql: her own notebook, part of her mind (Azrael) --
+                        # not 'candidate context, verify with tools'
+                        parts.insert(0, STUDY_NOTES_HEADER)
+                    elif _n_remembered and _n_remembered == _n_shown and not disputed:
                         # Declarative and first-person: her own record of
                         # what she read (Gemma accepts facts, not "you feel").
                         parts.insert(0, "[From your memory of earlier lookups, with where each came from:]")
