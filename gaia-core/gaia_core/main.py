@@ -196,6 +196,12 @@ def _wake_for_turn(lifecycle_client, orchestrator_url, source: str) -> bool:
         state = lifecycle_client.get_state_sync(timeout=3.0).state
         if getattr(state, "value", str(state)).lower() != "parked":
             return False
+        from gaia_core.cognition import transmission as _tx
+        _hold = _tx.held()
+        if _hold:
+            # parked on purpose: she answers from the CPU and stays parked
+            logger.info("Main: parked and held (%s); not waking", _hold.get("reason") or "no reason given")
+            return False
         import httpx
         logger.info("Main: parked and spoken to; waking first")
         if os.getenv("GAIA_IS_CANDIDATE"):  # A candidate never drives the production gearbox (GAIA_IS_CANDIDATE).
@@ -1167,6 +1173,16 @@ async def generate_session_summary(session_id: str):
         "summary": summary,
         "keywords": keywords,
     }
+
+
+@app.post("/api/gear/hold")
+async def gear_hold(request: Request):
+    """Hold a park on purpose ({"hold": true, "reason": "..."}): messages don't
+    wake her and engineering turns don't shift her up. {"hold": false} lets
+    her wake and shift on her own again."""
+    from gaia_core.cognition import transmission as _tx
+    data = await request.json()
+    return _tx.set_hold(bool(data.get("hold")), data.get("reason") or "", data.get("by") or "api")
 
 
 @app.post("/api/sessions/{session_id}/posted")

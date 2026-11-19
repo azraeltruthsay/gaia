@@ -16,6 +16,12 @@ Only acts when the resting gear is gear 1 (awake), and only shifts down what
 it shifted up: a gear someone chose by hand is theirs. Strikes are counted
 per conversation; the gear is one GPU, shared.
 
+Engineering (Azrael, 2026-11-19): her engineering adapter lives on Prime's GPU
+weights, so an engineering turn in gear 1 shifts up first and waits for Prime
+(shift_for_engineering); the shift goes back down once no engineering turn has
+come for ENGINEERING_IDLE_S. Parked, she wakes for a message as before, unless
+the park is held: a park chosen on purpose (hold) stays parked.
+
 State: /shared/transmission/state.json. Flag: TRANSMISSION_ENABLED (default on).
 """
 
@@ -41,6 +47,9 @@ WINDOW = 3                    # ... among a conversation's last this many
 CLEAN_TURNS_TO_RETURN = 5     # Prime answers in a row without a correction
 MIN_DWELL_S = 600             # at least this long in gear 2 once shifted
 MAX_TURNS = 50
+ENGINEERING_IDLE_S = 900      # back to gear 1 after this long without an engineering turn
+ENGINEERING_WAIT_S = 150      # how long an engineering turn waits for Prime on the GPU
+HOLD_PATH = Path(os.environ.get("GAIA_PARK_HOLD_FILE", "/shared/orchestrator/park_hold.json"))
 
 _lock = threading.Lock()
 
@@ -103,6 +112,8 @@ def should_shift_up(turns: List[Dict], session_id: str, since: float = 0.0) -> b
 def should_shift_down(turns: List[Dict], shift: Optional[Dict], now: float) -> bool:
     if not shift or shift.get("by") != "transmission":
         return False
+    if shift.get("why") == "engineering":
+        return now - shift.get("last_engineering", shift.get("at", now)) >= ENGINEERING_IDLE_S
     if now - shift.get("at", now) < MIN_DWELL_S:
         return False
     since = [t for t in turns if t.get("at", 0) >= shift.get("at", 0)]
@@ -236,7 +247,70 @@ def note_correction(session_id: str, kind: str, detail: str = "") -> Optional[st
     return None
 
 
+# ── Held park ────────────────────────────────────────────────────────────
+
+def held() -> Optional[Dict]:
+    """The hold on a park chosen on purpose, or None."""
+    try:
+        h = json.loads(HOLD_PATH.read_text())
+        return h if h.get("held") else None
+    except (OSError, ValueError):
+        return None
+
+
+def set_hold(on: bool, reason: str = "", by: str = "") -> Dict:
+    HOLD_PATH.parent.mkdir(parents=True, exist_ok=True)
+    h = {"held": bool(on), "reason": reason, "by": by, "at": time.time()}
+    fd, tmp = tempfile.mkstemp(dir=HOLD_PATH.parent, suffix=".tmp")
+    with os.fdopen(fd, "w") as f:
+        json.dump(h, f)
+    os.replace(tmp, HOLD_PATH)
+    logger.info("Transmission: park hold %s (%s)", "on" if on else "off", reason)
+    return h
+
+
+# ── Engineering ──────────────────────────────────────────────────────────
+
+def shift_for_engineering(session_id: str, wait_s: float = ENGINEERING_WAIT_S, sleep=time.sleep) -> bool:
+    """An engineering turn: True when Prime is (now) on the GPU to answer with
+    the adapter. Shifts up from gear 1 and waits; never moves a held park or a
+    gear in transition."""
+    if not enabled() or held():
+        return False
+    gear = _current_gear()
+    now = time.time()
+    if gear == "focusing":
+        with _lock:
+            state = _load()
+            if (state.get("shift") or {}).get("why") == "engineering":
+                state["shift"]["last_engineering"] = now
+                _save(state)
+        return True
+    if gear != "awake":
+        return False
+    with _lock:
+        state = _load()
+        if state.get("shift"):
+            return False
+    if not _shift("focusing", "engineering question: the adapter is on Prime"):
+        return False
+    with _lock:
+        state = _load()
+        state["shift"] = {"by": "transmission", "why": "engineering", "at": now, "session": session_id,
+                          "last_engineering": now, "reason": "engineering question"}
+        state["since"] = now
+        _save(state)
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        sleep(3)
+        if _current_gear() == "focusing":
+            logger.info("Transmission: Prime on the GPU for an engineering turn after %.0fs", time.time() - now)
+            return True
+    logger.warning("Transmission: Prime not on the GPU after %.0fs; answering without the adapter", wait_s)
+    return False
+
+
 def status() -> Dict:
     state = _load()
-    return {"enabled": enabled(), "shift": state.get("shift"),
+    return {"enabled": enabled(), "shift": state.get("shift"), "park_hold": held(),
             "recent": [{k: t.get(k) for k in ("session", "mind", "strikes")} for t in state["turns"][-6:]]}

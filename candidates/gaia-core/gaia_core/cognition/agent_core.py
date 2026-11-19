@@ -4173,6 +4173,17 @@ class AgentCore:
                         _eng_kind = _eng_mode.turn_kind(getattr(_grounding_ctx, "results", None) or [])
                     except Exception:
                         _eng_kind = None
+                    # The engineering adapter is on Prime's GPU weights: in
+                    # gear 1 she shifts up for it and waits (Azrael, 2026-11-19)
+                    if _eng_kind and _eng_mode.adapter() and source in ("web", "discord"):
+                        try:
+                            from gaia_core.cognition import transmission as _tx
+                            if _tx.shift_for_engineering(session_id) and _delib_role != "prime" \
+                                    and "prime" in self.model_pool.models:
+                                logger.info("[DELIBERATION] engineering turn → Prime with the adapter")
+                                _delib_role = "prime"
+                        except Exception:
+                            logger.debug("engineering shift failed", exc_info=True)
                     _delib_result = run_deliberated_turn(
                         user_input=packet.content.original_prompt or user_input or "",
                         assembled_messages=_delib_messages,
