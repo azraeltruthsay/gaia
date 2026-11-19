@@ -64,3 +64,20 @@ def test_unbacked_flags_invented_path():
     from gaia_core.cognition.second_mind import unbacked
     assert "/proc/driver/nvidia/gpu/0" in unbacked("That matches what I read from /proc/driver/nvidia/gpu/0.", "GPU: 10.8 GB")
     assert not unbacked("I read /proc/meminfo.", "source /proc/meminfo: 31 GB")
+
+
+def test_open_question_by_name_survives_others_talking():
+    h = _h(("assistant", "Andy, could you share the /in/ link?", "2026-11-19T03:22:55+00:00"),
+           ("user", "Nick: That's what I basically said.", "2026-11-19T03:23:12+00:00"),
+           ("assistant", "Nick, you're right.", "2026-11-19T03:23:21+00:00"),
+           ("user", "Andy: Prince is my last name.", "2026-11-19T03:25:46+00:00"))
+    assert ai.in_exchange(h, "Prince is my last name.", now=NOW)
+
+
+def test_open_question_answered_already_does_not_count():
+    h = _h(("assistant", "Andy, what's your last name?", "2026-11-19T03:22:55+00:00"),
+           ("user", "Andy: Prince", "2026-11-19T03:23:00+00:00"),
+           ("user", "Nick: told you", "2026-11-19T03:23:10+00:00"),
+           ("assistant", "Nick, you're right.", "2026-11-19T03:23:21+00:00"),
+           ("user", "Andy: lol", "2026-11-19T03:25:46+00:00"))
+    assert not ai.in_exchange(h, "lol", now=NOW)

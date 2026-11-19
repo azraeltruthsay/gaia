@@ -106,6 +106,27 @@ def _split_new(history: List[Dict], user_input: str):
     return history, _speaker(user_input)
 
 
+def awaits_answer(earlier: List[Dict], who: str, window_s: float = EXCHANGE_WINDOW_S,
+                  now: Optional[float] = None) -> bool:
+    """She asked them something by name, recently, and they haven't spoken
+    since: their message is the answer, even if she spoke to others between
+    (2026-11-19: Andy gave his last name two messages after her question to
+    him; her latest reply had been to Nick, and she said nothing)."""
+    now = now if now is not None else time.time()
+    for m in reversed(earlier):
+        content = m.get("content") or ""
+        if m.get("role") == "user":
+            if _speaker(content) == who:
+                return False
+            continue
+        when = _epoch(m.get("timestamp"))
+        if when is None or now - when > window_s:
+            return False
+        if "?" in content and re.search(rf"\b{re.escape(who)}\b", content, re.I):
+            return True
+    return False
+
+
 def in_exchange(history: List[Dict], user_input: str, window_s: float = EXCHANGE_WINDOW_S,
                 now: Optional[float] = None) -> bool:
     """Whether the new message is the person she just answered talking back
@@ -114,6 +135,8 @@ def in_exchange(history: List[Dict], user_input: str, window_s: float = EXCHANGE
     earlier, who = _split_new(history, user_input)
     if not who:
         return False
+    if awaits_answer(earlier, who, window_s, now):
+        return True
     i = len(earlier) - 1
     while i >= 0 and earlier[i].get("role") == "user" and _speaker(earlier[i].get("content") or "") == who:
         i -= 1              # their own messages since her reply
