@@ -494,7 +494,8 @@
       "rust-lang.org",
       "cppreference.com",
       "ocw.mit.edu",
-      "mitocw.mit.edu"
+      "mitocw.mit.edu",
+      "app.leg.wa.gov"
     ],
     "reliable_domains": [
       "github.com",
@@ -547,8 +548,8 @@
       ]
     },
     "rate_limits": {
-      "search_per_hour": 100,
-      "fetch_per_hour": 50
+      "search_per_hour": 200,
+      "fetch_per_hour": 200
     },
     "fetch_timeout_seconds": 15,
     "fetch_max_bytes": 512000,

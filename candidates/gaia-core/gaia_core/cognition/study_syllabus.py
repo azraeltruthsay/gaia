@@ -146,13 +146,28 @@ def section(page: str, url: str) -> str:
     return page[m.start():].lstrip() if m else page
 
 
+def split_page(page: str, most: int = 1) -> List[str]:
+    """A long page in parts of at most PAGE_CHARS, cut at paragraph breaks, up
+    to `most` parts (a 25,000-character chapter of rules would otherwise lose
+    everything after the first 9,000). Beyond that the rest is not read."""
+    parts, cur = [], ""
+    for para in re.split(r"\n(?=\S)", page):
+        if cur and len(cur) + len(para) + 1 > PAGE_CHARS:
+            parts.append(cur)
+            cur = ""
+        cur = f"{cur}\n{para}" if cur else para
+    if cur:
+        parts.append(cur)
+    return [p[:PAGE_CHARS] for p in parts[:max(1, most)]]
+
+
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")[:60]
 
 
 def study(syllabus: Dict, out_dir: Path, generate: Callable[[List[dict]], str],
           redo: bool = False, log=print, max_pages: int = 0) -> Dict:
-    """max_pages: pages to read this run (0 = all). Her web_fetch allows 50 an
+    """max_pages: pages to read this run (0 = all). Her web_fetch allows 200 an
     hour, shared with her live lookups, so a run leaves her room (2026-11-19:
     one run used it all)."""
     subject = syllabus["subject"]
@@ -180,26 +195,39 @@ def study(syllabus: Dict, out_dir: Path, generate: Callable[[List[dict]], str],
                 title, page = fetch(url)
                 if len(page) < 500:
                     raise RuntimeError(f"page too short ({len(page)} chars)")
-                page = section(page, url)[:PAGE_CHARS]
-                (out_dir / "sources" / f"{key}.txt").write_text(f"{url}\n{title}\n\n{page}")
-                notes = generate([
-                    {"role": "system", "content": NOTES_SYSTEM.format(subject=subject, topic=topic)},
-                    {"role": "user", "content": f"Page: {title}\n\n{page}"}])
-                kept, dropped = check_notes(notes, page)
-                text = "\n".join(kept)
-                (out_dir / "notes" / f"{key}.md").write_text(
-                    f"# {topic}\n\nSource: {url}\nUnit: {unit}\n\n{text}\n")
-                pairs, bad = make_pairs(topic, text, generate) if len(kept) >= 3 else ([], [])
-                with pairs_path.open("a", encoding="utf-8") as f:
-                    for p in pairs:
-                        f.write(json.dumps({**p, "category": "professional_engineering",
-                                            "group": unit, "topic": topic,
-                                            "source": url}, ensure_ascii=False) + "\n")
-                report[key] = {"topic": topic, "url": url, "notes_kept": len(kept),
-                               "notes_dropped": dropped, "pairs_kept": len(pairs),
-                               "pairs_dropped": bad, "seconds": round(time.time() - t0)}
-                log(f"{topic}: notes {len(kept)} kept / {len(dropped)} dropped, "
-                    f"pairs {len(pairs)} kept / {len(bad)} dropped ({time.time() - t0:.0f}s)")
+                if item.get("drop"):
+                    page = re.sub(item["drop"], "", page)
+                parts = split_page(section(page, url), item.get("parts", 1))
+                totals = {"notes_kept": 0, "notes_dropped": [], "pairs_kept": 0, "pairs_dropped": []}
+                for n, part in enumerate(parts, 1):
+                    name = topic if len(parts) == 1 else f"{topic} (part {n} of {len(parts)})"
+                    pk = key if len(parts) == 1 else f"{key}_p{n}"
+                    (out_dir / "sources" / f"{pk}.txt").write_text(f"{url}\n{title}\n\n{part}")
+                    notes = generate([
+                        {"role": "system", "content": NOTES_SYSTEM.format(subject=subject, topic=name)},
+                        {"role": "user", "content": f"Page: {title}\n\n{part}"}])
+                    kept, dropped = check_notes(notes, part)
+                    text = "\n".join(kept)
+                    (out_dir / "notes" / f"{pk}.md").write_text(
+                        f"# {name}\n\nSource: {url}\nUnit: {unit}\n\n{text}\n")
+                    pairs, bad = make_pairs(topic, text, generate) if len(kept) >= 3 else ([], [])
+                    with pairs_path.open("a", encoding="utf-8") as f:
+                        for p in pairs:
+                            row = {**p, "category": syllabus.get("category", syllabus["slug"]),
+                                   "group": unit, "topic": topic, "source": url}
+                            if item.get("suggested_by"):
+                                row["suggested_by"] = item["suggested_by"]
+                            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    totals["notes_kept"] += len(kept)
+                    totals["notes_dropped"] += dropped
+                    totals["pairs_kept"] += len(pairs)
+                    totals["pairs_dropped"] += bad
+                kept, dropped, pairs, bad = (totals["notes_kept"], totals["notes_dropped"],
+                                             totals["pairs_kept"], totals["pairs_dropped"])
+                report[key] = {"topic": topic, "url": url, "parts": len(parts), **totals,
+                               "seconds": round(time.time() - t0)}
+                log(f"{topic}: notes {kept} kept / {len(dropped)} dropped, "
+                    f"pairs {pairs} kept / {len(bad)} dropped ({time.time() - t0:.0f}s)")
             except Exception as e:  # one bad page doesn't end the study
                 if "Rate limit" in str(e):
                     log(f"{topic}: her web reading limit is reached; stopping")
@@ -216,7 +244,7 @@ def main(argv: List[str]) -> None:
     out = Path(os.environ.get("STUDY_DIR", "/knowledge/studies")) / syllabus["slug"]
     study(syllabus, out, http_generator(), redo="--redo" in argv,
           log=lambda m: print(m, flush=True),
-          max_pages=int(os.environ.get("STUDY_MAX_PAGES", "20")))
+          max_pages=int(os.environ.get("STUDY_MAX_PAGES", "50")))
 
 
 if __name__ == "__main__":
