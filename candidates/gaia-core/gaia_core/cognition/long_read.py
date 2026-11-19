@@ -54,6 +54,33 @@ def attached_text(value: Dict) -> str:
     return (value or {}).get("text_preview", "") or ""
 
 
+_TEXT_EXT = (".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".xml", ".html", ".py", ".js", ".log")
+
+
+def file_text(att, data_fields=()) -> str:
+    """An attachment's text, wherever it is: the data field gaia-web sent (when
+    it reaches this packet), the extracted text gaia-web saves beside the file
+    (<file>.txt), or a text file itself. 2026-11-19: the packet her turn runs
+    on keeps attachments but not the incoming data fields, so the text never
+    arrived and every file was 'skipping ingestion'."""
+    name = getattr(att, "name", "") or ""
+    for df in data_fields or ():
+        if getattr(df, "key", "") == "attachment_text" and isinstance(df.value, dict) \
+                and df.value.get("filename") == name:
+            text = attached_text(df.value)
+            if text:
+                return text
+    loc = getattr(att, "location", "") or ""
+    for path, ok in ((loc + ".txt", True),
+                     (loc, (getattr(att, "mime", "") or "").startswith("text/") or loc.lower().endswith(_TEXT_EXT))):
+        if loc and ok:
+            try:
+                return Path(path).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+    return ""
+
+
 def opening(text: str, most: int = OPENING_CHARS) -> str:
     """The start of a long text, cut at a paragraph (or line) break."""
     if len(text) <= most:
@@ -94,14 +121,36 @@ def pick_sections(asked: str, sections: List[Dict], generate: Callable[[List[dic
     summaries = "\n".join(f"{i}. {s['summary'][:400]}" for i, s in enumerate(sections, 1))
     answer = generate([{"role": "system", "content": PICK_SYSTEM.format(n=MAX_FOCUS)},
                        {"role": "user", "content": f"They said: {asked}\n\nSections:\n{summaries}"}]) or ""
-    if answer.strip().upper().startswith("NONE"):
-        return []
     picks = []
-    for n in re.findall(r"\b(\d{1,3})\b", answer):
-        i = int(n) - 1
-        if 0 <= i < len(sections) and i not in picks:
-            picks.append(i)
+    if not answer.strip().upper().startswith("NONE"):
+        for n in re.findall(r"\b(\d{1,3})\b", answer):
+            i = int(n) - 1
+            if 0 <= i < len(sections) and i not in picks:
+                picks.append(i)
+    # Code also looks: the part sharing most words with what they asked. From
+    # summaries alone she picked the wrong part 4 times running (2026-11-19:
+    # "modify another engineer's drawings" lives in part 3, she chose part 2).
+    best = best_match(asked, sections)
+    if best is not None and best not in picks[:MAX_FOCUS - 1]:
+        picks = picks[:MAX_FOCUS - 1] + [best]
     return picks[:MAX_FOCUS]
+
+
+def _stems(text: str) -> set:
+    return {w[:5] for w in re.findall(r"[a-z]{4,}", (text or "").lower())} - _COMMON
+
+
+_COMMON = {"what", "that", "this", "with", "have", "from", "they", "there", "their", "about",
+           "would", "could", "should", "which", "where", "when", "will", "your", "here", "into"}
+
+
+def best_match(asked: str, sections: List[Dict]) -> Optional[int]:
+    q = _stems(re.sub(r"^[^:\n]{1,64}:\s", "", asked or ""))
+    if not q or not sections:
+        return None
+    scores = [len(q & _stems(s["text"])) for s in sections]
+    top = max(scores)
+    return scores.index(top) if top else None
 
 
 def follow_up(name: str, asked: str, said: str, sections: List[Dict],
@@ -113,17 +162,36 @@ def follow_up(name: str, asked: str, said: str, sections: List[Dict],
     picks = pick_sections(asked, sections, generate)
     m = re.match(r"^([^:\n]{1,64}):\s", asked or "")
     who, words = (m.group(1), asked[m.end():]) if m else ("someone", asked or "")
-    summaries = "\n".join(f"Section {i}: {s['summary'][:500]}" for i, s in enumerate(sections, 1))
-    close = "\n\n".join(f"Section {i + 1}, which I looked at closely:\n{sections[i]['text']}"
+    summaries = "\n".join(f"Part {i}: {s['summary'][:500]}" for i, s in enumerate(sections, 1))
+    close = "\n\n".join(f"Part {i + 1}, which I looked at closely:\n{sections[i]['text']}"
                          for i in picks)
     thought = (
         f"I've finished reading {name}, which {who} sent me. When it arrived I had only read "
         f"the beginning, and I told them: \"{said[:300]}\". When they sent it they said: "
-        f"\"{words[:300]}\"\n\nWhat's in it, section by section:\n{summaries}\n\n{close}\n\n"
+        f"\"{words[:300]}\"\n\nWhat's in it, part by part (the parts are only where I split it "
+        f"to read; if I cite it, I use the file's own numbering):\n{summaries}\n\n{close}\n\n"
         f"Now that I've read all of it, do I have anything worth adding, like an answer I "
         f"couldn't give before, or something notable in it? If I do, I'll say it to {who}, "
         f"using only what the file says. If not, I'll leave it.")
-    return ask_myself(thought, generate, about=f"finished reading {name}", session_id=session_id)["say"]
+    say = ask_myself(thought, generate, about=f"finished reading {name}", session_id=session_id)["say"]
+    return backed_only(say, " ".join([s["text"] + " " + s["summary"] for s in sections]
+                                    + [asked or "", said or ""]))
+
+
+def backed_only(say: Optional[str], source: str) -> Optional[str]:
+    """Her follow-up, keeping only sentences the file (or the conversation)
+    backs, as her study notes are checked (study_syllabus.backed): on the CPU
+    mind she added context nobody gave ("we're drafting a formal response").
+    None when nothing is left."""
+    if not say:
+        return None
+    from gaia_core.cognition.study_syllabus import _words, backed
+    stems = {w[:5] for w in _words(source.lower())}
+    kept = [x for x in re.split(r"(?<=[.!?])\s+", say.strip()) if x and backed(x, source, stems)]
+    if len(kept) < len(re.split(r"(?<=[.!?])\s+", say.strip())):
+        logger.info("long_read: dropped %d unbacked sentence(s) from the follow-up",
+                    len(re.split(r"(?<=[.!?])\s+", say.strip())) - len(kept))
+    return " ".join(kept) or None
 
 
 def push(session_id: str, text: str) -> bool:

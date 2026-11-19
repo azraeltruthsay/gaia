@@ -40,7 +40,11 @@ MARK = "(My own thought. Nobody sent this; I'm thinking to myself.)"
 
 _SAY_RE = re.compile(r"^\s*\**SAY\**\s*:\s*(.*)$", re.I | re.S | re.M)
 _THOUGHT_RE = re.compile(r"^\s*\**THOUGHT\**\s*:\s*(.*?)(?=^\s*\**SAY\**\s*:|\Z)", re.I | re.S | re.M)
-_NOTHING_RE = re.compile(r"^\W*(nothing|none|no|n/a)\W*$", re.I)
+# "NOTHING", "Nothing to add.", "None -- nothing new": a short refusal is silence
+_NOTHING_RE = re.compile(r"^\W*(nothing|none|no|n/a)\b[^.!?\n]{0,40}[.!?]?\W*$", re.I)
+# Said again at the end of her thought: a long thought (a file's text) pushes
+# the frame's format far back, and she answered freeform (2026-11-19).
+CLOSE = "(I answer myself: THOUGHT: what I think. Then SAY: exactly what I'd say, or SAY: NOTHING.)"
 
 
 def _log_path() -> Path:
@@ -52,7 +56,7 @@ def ask_myself(thought: str, generate: Callable[[List[dict]], str], about: str =
     """Ask herself (first person `thought`) whether to speak. Returns
     {"say": str or None, "thought": str, "raw": str}."""
     raw = (generate([{"role": "system", "content": FRAME},
-                     {"role": "user", "content": f"{MARK}\n\n{thought}"}]) or "").strip()
+                     {"role": "user", "content": f"{MARK}\n\n{thought}\n\n{CLOSE}"}]) or "").strip()
     m_say = _SAY_RE.search(raw)
     m_th = _THOUGHT_RE.search(raw)
     said = (m_say.group(1).strip() if m_say else "").strip().strip('"').strip()

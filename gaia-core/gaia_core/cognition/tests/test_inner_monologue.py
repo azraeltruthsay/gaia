@@ -34,3 +34,13 @@ def test_every_monologue_is_logged(tmp_path, monkeypatch):
     rows = [json.loads(l) for l in (tmp_path / "inner_monologue.jsonl").read_text().splitlines()]
     assert rows[0]["thought"] == "nothing new" and rows[0]["say"] is None
     assert rows[1]["unparsed"] == "no format at all"
+
+
+def test_short_refusals_are_silence_and_format_is_restated_last(tmp_path, monkeypatch):
+    for quiet in ("THOUGHT: x\nSAY: Nothing to add.", "THOUGHT: x\nSAY: None - nothing new here",
+                  "THOUGHT: x\nSAY: No."):
+        out, _ = _ask(tmp_path, monkeypatch, quiet)
+        assert out["say"] is None, quiet
+    out, seen = _ask(tmp_path, monkeypatch, "THOUGHT: x\nSAY: Nothing in the code covers fees, but part 2 does.")
+    assert out["say"]                       # a real sentence that starts with 'Nothing'
+    assert seen[0][1]["content"].rstrip().endswith("SAY: NOTHING.)")

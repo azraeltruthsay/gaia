@@ -79,5 +79,28 @@ def test_nothing_to_add_posts_nothing(tmp_path, monkeypatch):
 
 
 def test_failed_post_is_not_recorded(tmp_path, monkeypatch):
-    out, seen, posted, recorded = _run(tmp_path, monkeypatch, ["1", "THOUGHT: x\nSAY: Something."], sent_ok=False)
+    out, seen, posted, recorded = _run(tmp_path, monkeypatch, ["1", "THOUGHT: x\nSAY: Definitions of terms."], sent_ok=False)
     assert posted and recorded == []
+
+
+def test_file_text_found_without_the_data_field(tmp_path):
+    class Att:
+        def __init__(self, name, mime, location):
+            self.name, self.mime, self.location = name, mime, location
+    pdf = tmp_path / "rules.pdf"
+    pdf.write_bytes(b"%PDF")
+    (tmp_path / "rules.pdf.txt").write_text("extracted rules")
+    assert lr.file_text(Att("rules.pdf", "application/pdf", str(pdf))) == "extracted rules"
+    txt = tmp_path / "notes.md"
+    txt.write_text("plain notes")
+    assert lr.file_text(Att("notes.md", "text/markdown", str(txt))) == "plain notes"
+    assert lr.file_text(Att("x.pdf", "application/pdf", str(tmp_path / "missing.pdf"))) == ""
+
+
+def test_follow_up_keeps_only_sentences_the_file_backs():
+    src = "Modifying another licensee's work without notifying that licensee is misconduct."
+    say = ("Modifying another licensee's work without notifying that licensee is misconduct. "
+           "Given we're drafting a formal response, let's revise the letter tonight.")
+    assert lr.backed_only(say, src) == "Modifying another licensee's work without notifying that licensee is misconduct."
+    assert lr.backed_only("Let's revise the letter tonight together.", src) is None
+    assert lr.backed_only(None, src) is None

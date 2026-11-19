@@ -3132,13 +3132,9 @@ class AgentCore:
                     if (att.mime or "").startswith("image/"):
                         continue
 
-                    # Find the matching attachment_text DataField
-                    att_text = None
-                    for df in packet.content.data_fields:
-                        if df.key == "attachment_text" and isinstance(df.value, dict):
-                            if df.value.get("filename") == att.name:
-                                att_text = long_read.attached_text(df.value)
-                                break
+                    # Its text: the data field, the extracted text saved beside
+                    # the file, or the text file itself (long_read.file_text)
+                    att_text = long_read.file_text(att, packet.content.data_fields)
 
                     if not att_text:
                         self.logger.info("Attachment '%s' has no extracted text — skipping ingestion", att.name)
