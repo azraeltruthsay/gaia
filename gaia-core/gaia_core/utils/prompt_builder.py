@@ -406,8 +406,30 @@ def build_from_packet(packet: CognitionPacket, *args, **kwargs) -> List[Dict]:
             line = f"{line}\n\n{_fix}".strip()
         if line and messages and messages[0].get("role") == "system":
             messages[0] = {**messages[0], "content": f"{messages[0]['content']}\n\n{line}"}
+        if is_channel(_sid):
+            messages = _label_last_speaker(messages, _sid)
     except Exception:
         logger.debug("Speaker line unavailable", exc_info=True)
+    return messages
+
+
+def _label_last_speaker(messages: List[Dict], session_id: str) -> List[Dict]:
+    """In a group channel the message being answered carries its speaker's
+    name, as the history's lines do. 2026-11-19: Azrael's unlabeled "have you
+    been studying ... for Andy?" came right after "Andy: Good morning GAIA",
+    read as Andy still talking, and she answered "Morning Andy"."""
+    from gaia_common.utils.people import channel_speaker
+    who = channel_speaker(session_id)
+    if not who:
+        return messages
+    for i in range(len(messages) - 1, -1, -1):
+        m = messages[i]
+        if m.get("role") != "user" or not isinstance(m.get("content"), str):
+            continue
+        if not m["content"].startswith(f"{who}:"):
+            messages = list(messages)
+            messages[i] = {**m, "content": f"{who}: {m['content']}"}
+        break
     return messages
 
 

@@ -458,6 +458,38 @@ def is_relational(text: str) -> bool:
     return bool(_RELATIONAL_RE.search(text or ""))
 
 
+def _without_current(history: List[Dict[str, Any]], user_input: str) -> List[Dict[str, Any]]:
+    """History without the message being answered, when it was already kept."""
+    text = (user_input or "").strip()
+    if history and text and history[-1].get("role") == "user" and \
+            (history[-1].get("content") or "").rstrip().endswith(text):
+        return history[:-1]
+    return history
+
+
+def _with_partners(history: List[Dict[str, Any]], window: List[Dict[str, Any]],
+                   extra: int = 4) -> List[Dict[str, Any]]:
+    """The chosen turns with their other halves: a kept message brings her
+    reply to it, a kept reply the message it answered. Chosen one by one by
+    relevance, a group channel's working set came out as other people's lines
+    only (2026-11-19: Andy's 'Good morning GAIA' kept, her replies dropped, and
+    she greeted Azrael as Andy). At most `extra` messages are added."""
+    if not window:
+        return window
+    pos = {id(m): i for i, m in enumerate(history)}
+    keep = {pos[id(m)] for m in window if id(m) in pos}
+    if not keep:
+        return window
+    added = []
+    for i in sorted(keep, reverse=True):
+        role = history[i].get("role")
+        j = i + 1 if role == "user" else i - 1
+        if 0 <= j < len(history) and j not in keep and history[j].get("role") != role:
+            added.append(j)
+    keep |= set(added[:extra])
+    return [history[i] for i in sorted(keep)]
+
+
 class AgentCore:
     """
     Encapsulates the core "Reason-Act-Reflect" loop for GAIA.
@@ -888,6 +920,12 @@ class AgentCore:
         # Older turns are retrieved via semantic RAG (see session_history_indexer).
         SLIDING_WINDOW_SIZE = 6  # Last 3 turn-pairs
         all_history = history or []
+        # 2026-11-19: the new message is often already in history (persisted
+        # before the packet is built); the prompt adds it again as the user
+        # turn. Kept here it took the recency anchor's one slot, so her own
+        # last reply fell out and Azrael's "I'm Azrael, Andy isn't around"
+        # reached Prime twice, with Andy's earlier lines and none of hers.
+        all_history = _without_current(all_history, user_input)
 
         # CFR-for-conversation Phase 1 (flag CFR_CONVERSATION_ENABLED): the
         # working set is chosen by RELEVANCE×recency-decay, not pure recency.
@@ -922,6 +960,7 @@ class AgentCore:
             else:
                 window = all_history[-SLIDING_WINDOW_SIZE:]
 
+        window = _with_partners(all_history, window)
         relevant_history_snippet = []
         for i, msg in enumerate(window):
             msg_id = msg.get('id', f"auto_{i}")
