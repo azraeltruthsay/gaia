@@ -3829,6 +3829,17 @@ class AgentCore:
                         # by name; ungrounded, both minds made the facts up.
                         _is_personal = False
                         logger.info("KnowledgeRouter: chat by intent, but a question about the world: grounding")
+                if _is_personal and len((user_input or "").split()) >= 4:
+                    # oeql: classed as chat, but it's about something she
+                    # studied ("Is it misconduct to modify another engineer's
+                    # drawings?"): her notes answer it, not her weights.
+                    try:
+                        from gaia_core.cognition.knowledge_router import STUDY_STRONG, _query_studies
+                        if any(r.score >= STUDY_STRONG for r in _query_studies(user_input)):
+                            _is_personal = False
+                            logger.info("KnowledgeRouter: chat by intent, but her study notes cover it: grounding")
+                    except Exception:
+                        logger.debug("study-notes check failed", exc_info=True)
                 if _is_personal:
                     _kr_skip = True
                     logger.info(

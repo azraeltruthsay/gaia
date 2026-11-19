@@ -376,6 +376,8 @@ def _dispute_memory(results: List[GroundingResult]) -> None:
 
 
 STUDY_MIN_SCORE = 0.45
+# Strong enough that a question classed as chat is really about what she studied
+STUDY_STRONG = 0.5
 
 
 def _study_header(path: str) -> tuple:
