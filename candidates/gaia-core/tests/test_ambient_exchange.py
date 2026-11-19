@@ -77,7 +77,16 @@ def test_open_question_by_name_survives_others_talking():
 def test_open_question_answered_already_does_not_count():
     h = _h(("assistant", "Andy, what's your last name?", "2026-11-19T03:22:55+00:00"),
            ("user", "Andy: Prince", "2026-11-19T03:23:00+00:00"),
+           ("user", "Andy: from Seattle", "2026-11-19T03:23:05+00:00"),
            ("user", "Nick: told you", "2026-11-19T03:23:10+00:00"),
            ("assistant", "Nick, you're right.", "2026-11-19T03:23:21+00:00"),
            ("user", "Andy: lol", "2026-11-19T03:25:46+00:00"))
     assert not ai.in_exchange(h, "lol", now=NOW)
+
+
+def test_second_answer_to_open_question_counts():
+    h = _h(("assistant", "Andy, could you share the /in/ link?", "2026-11-19T03:22:55+00:00"),
+           ("user", "Andy: Prince is my last name.", "2026-11-19T03:23:27+00:00"),
+           ("user", "Nick: lol", "2026-11-19T03:24:00+00:00"),
+           ("user", "Andy: Try this linkedin.com/in/x", "2026-11-19T03:25:46+00:00"))
+    assert ai.in_exchange(h, "Try this linkedin.com/in/x", now=NOW)

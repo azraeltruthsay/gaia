@@ -36,6 +36,9 @@ from gaia_core.cognition.told_facts import is_question
 
 DEFAULT_COOLDOWN_S = 600
 EXCHANGE_WINDOW_S = 900
+# Their messages that can still answer her question: a question can take two
+# ("Prince is my last name", then the link she also asked for, 2026-11-19).
+OPEN_QUESTION_REPLIES = 2
 _SPEAKER_RE = re.compile(r"^([^:\n]{1,64}):\s")
 _STATE_FILE = "ambient_interject.json"
 _YES_RE = re.compile(r"^\s*yes\b", re.IGNORECASE)
@@ -109,15 +112,18 @@ def _split_new(history: List[Dict], user_input: str):
 def awaits_answer(earlier: List[Dict], who: str, window_s: float = EXCHANGE_WINDOW_S,
                   now: Optional[float] = None) -> bool:
     """She asked them something by name, recently, and they haven't spoken
-    since: their message is the answer, even if she spoke to others between
+    since more than once: their message is the answer, even if she spoke to others between
     (2026-11-19: Andy gave his last name two messages after her question to
     him; her latest reply had been to Nick, and she said nothing)."""
     now = now if now is not None else time.time()
+    theirs = 0
     for m in reversed(earlier):
         content = m.get("content") or ""
         if m.get("role") == "user":
             if _speaker(content) == who:
-                return False
+                theirs += 1
+                if theirs >= OPEN_QUESTION_REPLIES:
+                    return False   # they've had their say on it
             continue
         when = _epoch(m.get("timestamp"))
         if when is None or now - when > window_s:
