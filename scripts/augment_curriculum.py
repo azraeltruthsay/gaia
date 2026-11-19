@@ -17,7 +17,9 @@ Output: <study dir>/augment.jsonl, one record per line:
   {"kind": "reword", "instruction": original, "rewordings": [...]}
   {"kind": "unstudied", "topic": ..., "instruction": question}
 
-Run in gaia-core (her Core is at localhost:8092):
+Run in gaia-study with --prime-gpu (GAIA in meditation; Prime writes), or in
+gaia-core without it (her CPU Core writes; ~75 s a question while her sleep
+tasks share the CPU):
   python /gaia/GAIA_Project/scripts/augment_curriculum.py \
       /gaia/GAIA_Project/knowledge/curricula/professional_engineering \
       /knowledge/studies/professional_engineering
@@ -27,8 +29,25 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, "/app")
-from gaia_core.cognition.study_syllabus import _slug, http_generator  # noqa: E402
+
+
+def _slug(s: str) -> str:   # as study_syllabus._slug
+    return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")[:60]
+
+
+def core_generator():
+    """Her CPU Core (in gaia-core). Slow while her sleep tasks share it."""
+    sys.path.insert(0, "/app")
+    from gaia_core.cognition.study_syllabus import http_generator
+    return http_generator(max_tokens=300, temperature=0.7)
+
+
+def prime_gpu_generator():
+    """Prime on the GPU (in gaia-study, GAIA in meditation): minutes, not hours."""
+    sys.path.insert(0, str(Path(__file__).parent))
+    from train_knowledge_adapter import load_prime, generate_messages
+    model, tok = load_prime()
+    return lambda messages: generate_messages(model, tok, messages, max_new=300, temperature=0.7)
 
 _WORD = re.compile(r"[a-z][a-z'-]{3,}")
 _STOP = set("that this with have from they there their about would could should which where when "
@@ -75,7 +94,7 @@ def unstudied(topic, notes, source, gen, n=2):
     for line in out.splitlines():
         q = re.sub(r"^\s*(?:[-*\d.)]+\s*)", "", line).strip().strip('"')
         own = stems(q) - named
-        if not q.endswith("?") or len(own) < 2:
+        if not q.endswith("?") or q.count("?") > 1 or len(own) < 2:   # one question per line
             continue
         if len(own & known) / len(own) > 0.8:        # plainly about what she read
             continue
@@ -84,7 +103,7 @@ def unstudied(topic, notes, source, gen, n=2):
     return keep[:n]
 
 
-def main(cur, study):
+def main(cur, study, gen=None):
     cur, study = Path(cur), Path(study)
     out_path = study / "augment.jsonl"
     done = set()
@@ -95,7 +114,7 @@ def main(cur, study):
                 done.add(("reword", r["instruction"]))
             elif r["kind"] == "unstudied_done":
                 done.add(("unstudied", r["topic"]))
-    gen = http_generator(max_tokens=300, temperature=0.7)
+    gen = gen or core_generator()
     train = [json.loads(l) for l in (cur / "train.jsonl").read_text().splitlines() if l.strip()]
     with out_path.open("a", encoding="utf-8") as f:
         for i, p in enumerate(train, 1):
@@ -123,4 +142,4 @@ def main(cur, study):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    main(sys.argv[1], sys.argv[2], prime_gpu_generator() if "--prime-gpu" in sys.argv else None)

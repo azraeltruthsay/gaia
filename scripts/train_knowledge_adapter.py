@@ -136,6 +136,41 @@ def replay_prompts(n: int, avoid: set) -> list:
     return out[:n]
 
 
+def load_prime(base_model: str = BASE):
+    """Prime NF4 on the GPU for generation and training, with its tokenizer."""
+    import torch
+    try:
+        import transformers.core_model_loading as _cml
+        _cml.GLOBAL_WORKERS = 1
+    except Exception:
+        pass
+    from transformers import AutoModelForImageTextToText, AutoProcessor, BitsAndBytesConfig
+    base_model = str(Path(base_model).resolve())
+    tokenizer = AutoProcessor.from_pretrained(base_model, trust_remote_code=True).tokenizer
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    t0 = time.time()
+    model = AutoModelForImageTextToText.from_pretrained(
+        base_model, trust_remote_code=True, device_map="auto", low_cpu_mem_usage=True,
+        attn_implementation="sdpa",
+        quantization_config=BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16, bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True, llm_int8_skip_modules=["lm_head", "visual"]))
+    log.info("Model loaded in %.0fs: %.2f GB VRAM", time.time() - t0, torch.cuda.memory_allocated() / 1024 ** 3)
+    model.eval()
+    return model, tokenizer
+
+
+def generate_messages(model, tokenizer, messages: list, max_new: int = 220, temperature: float = 0.0) -> str:
+    import torch
+    ids = tokenizer(render_prompt("prime", messages), return_tensors="pt", add_special_tokens=True).to(model.device)
+    with torch.no_grad():
+        out = model.generate(**ids, max_new_tokens=max_new, use_cache=True, pad_token_id=tokenizer.pad_token_id,
+                             **({"do_sample": True, "temperature": temperature} if temperature else {"do_sample": False}))
+    text = tokenizer.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=True)
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+
+
 def generate(model, tokenizer, system: str, user: str, max_new: int = 220) -> str:
     import torch
     prompt = render_prompt("prime", [{"role": "system", "content": system},
