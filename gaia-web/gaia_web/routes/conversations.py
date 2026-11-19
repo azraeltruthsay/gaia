@@ -182,6 +182,21 @@ async def push_message(session_id: str, request: Request):
         return JSONResponse(status_code=200, content={"delivered": False, "error": str(e)})
 
 
+@router.post("/{session_id}/retract")
+async def retract_message(session_id: str, request: Request):
+    """Delete her own latest message in a Discord channel session (optionally
+    the latest containing a given text). Her history is kept by gaia-core."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not session_id.startswith("discord_channel_"):
+        return JSONResponse(status_code=400, content={"error": "only Discord channel sessions"})
+    from gaia_web.discord_interface import retract_own_message
+    text = await retract_own_message(session_id[len("discord_channel_"):], (body or {}).get("containing", ""))
+    return {"retracted": text is not None, "text": text}
+
+
 @router.post("/{session_id}/pool-summary")
 async def generate_pool_summary(session_id: str):
     """Generate a context pool summary for this conversation."""

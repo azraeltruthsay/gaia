@@ -2750,6 +2750,14 @@ async def process_packet(packet_data: Dict[str, Any]):
             else:
                 _teller = _people.for_session(_sid)
             _pp.note_introduction(_asked, _pp._main_name(_teller) if _teller else "", _channel_of(_sid), _people)
+            # Their last name, read from what they said (in the background: a
+            # model call, only when they talk about names or she asked them).
+            if _pp.might_give_last_name(_teller, _asked, _last):
+                import threading
+                from gaia_core.cognition.self_review import chat_generator as _cg
+                threading.Thread(target=_pp.note_last_name, args=(_teller, _asked, _last, _channel_of(_sid), _people),
+                                 kwargs={"read": _cg(_agent_core.model_pool, max_tokens=16, temperature=0.0)},
+                                 daemon=True, name="last-name").start()
             if _people.note_pronouns(_sid, _asked, speaker=_teller if _pp.is_channel(_sid) else None):
                 from gaia_core.cognition import outcome_ledger as _ol
                 _ol.note_call(_sid, "people", "set_pronouns", True)

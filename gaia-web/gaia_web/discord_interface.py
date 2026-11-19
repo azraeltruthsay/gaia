@@ -1181,6 +1181,32 @@ class DiscordInterface:
         return ""
 
 
+async def retract_own_message(channel_id: str, containing: str = "", within: int = 20) -> Optional[str]:
+    """Delete her most recent message in a channel (among the last `within`),
+    or the most recent one containing `containing`. Only her own messages.
+    Returns what was deleted, or None."""
+    global _bot
+    if not _bot or not _bot.is_ready():
+        logger.error("Discord bot not connected")
+        return None
+
+    async def _retract():
+        channel = _bot.get_channel(int(channel_id)) or await _bot.fetch_channel(int(channel_id))
+        async for msg in channel.history(limit=within):
+            if msg.author.id == _bot.user.id and (not containing or containing in msg.content):
+                text = msg.content
+                await msg.delete()
+                logger.info("Discord: retracted her message in channel %s", channel_id)
+                return text
+        return None
+
+    try:
+        return await _await_on_bot_loop(_retract(), timeout=30.0)
+    except Exception as e:
+        logger.error("Failed to retract in channel %s: %s", channel_id, e, exc_info=True)
+        return None
+
+
 async def send_to_channel(channel_id: str, content: str, reply_to_message_id: Optional[str] = None) -> bool:
     """Send a message to a specific Discord channel (for autonomous messages).
 

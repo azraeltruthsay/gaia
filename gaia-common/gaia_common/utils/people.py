@@ -167,6 +167,41 @@ class PeopleRegistry:
             self._write(person)
         return fact
 
+    def merge(self, keep_id: str, other_id: str, why: str, by: str) -> Optional[Dict]:
+        """Two records that are one person: `other` folds into `keep` (names,
+        accounts, facts, bond, pronouns where `keep` has none) and its file
+        moves to merged/, not deleted."""
+        with _lock:
+            keep, other = self.get(keep_id), self.get(other_id)
+            if not keep or not other or keep_id == other_id:
+                return None
+            for n in other.get("names", []):
+                if n.lower() not in {x.lower() for x in keep.get("names", [])}:
+                    keep.setdefault("names", []).append(n)
+            for n, src in (other.get("name_sources") or {}).items():
+                keep.setdefault("name_sources", {}).setdefault(n, src)
+            have = {(a.get("kind"), a.get("id")) for a in keep.get("accounts", [])}
+            keep.setdefault("accounts", []).extend(
+                a for a in other.get("accounts", []) if (a.get("kind"), a.get("id")) not in have)
+            keep.setdefault("facts", []).extend(other.get("facts", []))
+            for key in ("relationship", "pronouns", "pronouns_at", "pronouns_source", "last_name"):
+                if not keep.get(key) and other.get(key):
+                    keep[key] = other[key]
+            ob, kb = other.get("bond") or {}, keep.setdefault("bond", {})
+            for scale, pts in (ob.get("points") or {}).items():
+                kb.setdefault("points", {})[scale] = kb.get("points", {}).get(scale, 0) + pts
+            for key in ("last", "base"):
+                for scale, v in (ob.get(key) or {}).items():
+                    kb.setdefault(key, {}).setdefault(scale, v)
+            kb.setdefault("events", []).extend(ob.get("events", []))
+            keep.setdefault("merged", []).append({"id": other_id, "why": why, "by": by, "when": _now()})
+            self._write(keep)
+            archive = self.root / "merged"
+            archive.mkdir(exist_ok=True)
+            os.replace(self._path(other_id), archive / self._path(other_id).name)
+        logger.info("People: %s merged into %s (%s)", other_id, keep_id, why)
+        return keep
+
     def correct_fact(self, person_id: str, fact_id: str, why: str = "", by: str = "") -> bool:
         """A wrong fact stays on file, marked, and stops being said."""
         with _lock:
@@ -443,6 +478,97 @@ def note_channel_author(session_id: str, author_id: str, display_name: str,
     return person
 
 
+# "My last name is Smith", "surname's Smith".
+_LAST_NAME_RE = re.compile(r"\b(?:last|family|sur)\s*name(?:\s+is|'s|\s*:)\s+([A-Za-z][A-Za-z'\-]{1,30})\b", re.I)
+_ASKED_LAST_RE = re.compile(r"\b(?:last|family|full)\s+name\b|\bsurname\b", re.I)
+_FILLER = frozenset("it its it's is my name the i im i'm am yes sure oh ok okay well mine mine's and last".split())
+
+
+def stated_last_name(text: str, first_names: List[str], asked: bool = False) -> Optional[str]:
+    """A last name someone gives: said outright anywhere, or, answering her
+    question, a short reply ("It's Smith", "Andy Smith", "smith")."""
+    m = _LAST_NAME_RE.search(text or "")
+    if m and m.group(1).lower() not in _FILLER:
+        return m.group(1)[:1].upper() + m.group(1)[1:]
+    if not asked:
+        return None
+    words = re.findall(r"[A-Za-z][A-Za-z'\-]*", text or "")
+    firsts = {f.lower() for f in first_names}
+    left = [w for w in words if w.lower() not in _FILLER and w.lower() not in firsts]
+    if len(words) > 6 or len(left) != 1 or left[0] in _NOT_A_NAME:
+        return None
+    return left[0][:1].upper() + left[0][1:]
+
+
+_NAME_TALK_RE = re.compile(r"\b(?:names?|surnames?|family|called|last|maiden)\b", re.I)
+_READ_LAST = (
+    "You read one chat message and say what last name (family name, surname) "
+    "its writer gives as their own. The writer goes by: {names}.{asked} Reply with "
+    "only that last name exactly as written in the message, or NONE if the "
+    "message does not give the writer's own last name.")
+
+
+def _asked_last(person: Dict, her_last: str) -> bool:
+    names = [n for n in person.get("names", []) if " " not in n]
+    return bool(_ASKED_LAST_RE.search(her_last or "")) and any(
+        re.search(rf"\b{re.escape(n)}\b", her_last or "", re.I) for n in names)
+
+
+def might_give_last_name(person: Optional[Dict], text: str, her_last: str) -> bool:
+    """Cheap gate before the reading: she asked them, or they talk about names."""
+    return bool(person and (text or "").strip()) and (
+        _asked_last(person, her_last) or bool(_NAME_TALK_RE.search(text)))
+
+
+def read_last_name(text: str, person: Dict, her_last: str, read) -> Optional[str]:
+    """The model reads the message for the writer's own last name; code keeps
+    it only if it is written there and isn't their first name. None when the
+    reading says none or fails (then the caller may fall back to patterns)."""
+    names = [n for n in person.get("names", []) if " " not in n]
+    asked = f' They are answering: "{her_last.strip()[:200]}"' if _asked_last(person, her_last) else ""
+    answer = (read([{"role": "system", "content": _READ_LAST.format(names=", ".join(names) or "unknown", asked=asked)},
+                    {"role": "user", "content": text}]) or "").strip().strip("\"'.*` ")
+    if not answer:
+        raise ValueError("no reading")
+    if answer.upper() == "NONE" or " " in answer or len(answer) > 40:
+        return None
+    m = re.search(rf"\b{re.escape(answer)}\b", text, re.I)
+    if not m or answer.lower() in {n.lower() for n in names} or answer.lower() in _FILLER:
+        return None
+    found = m.group(0)
+    return found[:1].upper() + found[1:]
+
+
+def note_last_name(person: Optional[Dict], text: str, her_last: str, where: str = "",
+                   registry: Optional["PeopleRegistry"] = None, read=None) -> Optional[str]:
+    """Record a last name a person gives about themselves. With `read` (a model:
+    messages in, text out) it is read from the message ("Our family surname is
+    Okafor"); without one, or if the reading fails, patterns ("my last name is
+    X", or a short answer to her asking them)."""
+    if not might_give_last_name(person, text, her_last):
+        return None
+    last = None
+    try:
+        if read is None:
+            raise ValueError("no model")
+        last = read_last_name(text, person, her_last, read)
+    except Exception:
+        names = [n for n in person.get("names", []) if " " not in n]
+        last = stated_last_name(text, names, _asked_last(person, her_last))
+    if not last or last == person.get("last_name"):
+        return None
+    registry = registry or PeopleRegistry()
+    source = "said so" + (f" in {where}" if where else "")
+    with _lock:
+        fresh = registry.get(person["id"]) or person
+        fresh["last_name"] = last
+        registry._write(fresh)
+    _alias(registry, registry.get(person["id"]) or person, f"{_main_name(person)} {last}", source)
+    registry.add_fact(person["id"], f"Last name: {last}", _main_name(person), where)
+    logger.info("People: %s gave their last name", person["id"])
+    return last
+
+
 def note_introduction(text: str, told_by: str, where: str = "",
                       registry: Optional["PeopleRegistry"] = None) -> List[Dict]:
     """"Schwiftyboi is a friend of mine named Nick": Nick is another name for
@@ -507,8 +633,10 @@ def channel_speaker_line(session_id: str, author_id: str, registry: Optional["Pe
 def _display(person: Dict) -> str:
     """"Nick (Schwiftyboi on Discord)": the name they were introduced by, with
     the Discord display name when it differs."""
-    return f"{_main_name(person)} ({_screen_name(person)} on Discord)" \
-        if _screen_name(person) and _screen_name(person) != _main_name(person) else _main_name(person)
+    main = _main_name(person)
+    full = f"{main} {person['last_name']}" if person.get("last_name") and " " not in main else main
+    return f"{full} ({_screen_name(person)} on Discord)" \
+        if _screen_name(person) and _screen_name(person) != main else full
 
 
 def _main_name(person: Dict) -> str:

@@ -737,6 +737,13 @@ def deliberate(
         logger.info("Deliberation: dropped a made-up tool result (%d chars left)", len(final_response))
         if not final_response:
             fallback_used = True
+    # A note to herself ("THOUGHT_SEED: ...", "GOAL_SHIFT: ...") is not an
+    # answer: one that was nothing else falls back like an empty one, so she
+    # answers instead of sending the note (2026-11-19, Nick's "Why do you
+    # want to know?" got "GOAL_SHIFT: Clarify Nick's actual question").
+    if final_response and not _DIRECTIVE_LINE_RE.sub("", final_response).strip():
+        logger.info("Deliberation: answer was only notes to herself; falling back")
+        final_response, fallback_used = "", True
     final_response = _strip_leading_input_echo(final_response, user_input)
     final_response, _echo_dropped = _strip_scaffold_echo(
         final_response, _scaffold_text(messages[0].get("content", ""), _instructions), user_input)
@@ -806,6 +813,7 @@ def _flag(value) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+_DIRECTIVE_LINE_RE = re.compile(r"^[ \t*_]*(?:THOUGHT_SEED|GOAL_SHIFT|ACTION:\s*NONE)\b[^\n]*\n?", re.M | re.I)
 _FAKE_RESULT_RE = re.compile(r"<tool_(?:result|response)>.*?(?:</tool_(?:result|response)>|$)", re.I | re.S)
 
 

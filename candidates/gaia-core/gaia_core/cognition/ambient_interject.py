@@ -19,8 +19,8 @@ that on its own, content-blind.
 A reply to her is not ambient (2026-11-19: she asked Andy what he'd expect
 from an intern; he answered without naming her and the judgment call said
 NO, so she sat silent until he asked "any comments on my last post?"). When
-the new message comes from the person she just answered, with no one else
-in between and within EXCHANGE_WINDOW_S, she is in a conversation with them:
+the new message comes from the person she just answered or spoke to by name,
+with no one else in between and within EXCHANGE_WINDOW_S, she is in a conversation with them:
 it gets a reply, no cooldown, no judgment call.
 """
 from __future__ import annotations
@@ -122,6 +122,8 @@ def in_exchange(history: List[Dict], user_input: str, window_s: float = EXCHANGE
     when = _epoch(earlier[i].get("timestamp"))
     if when is None or (now if now is not None else time.time()) - when > window_s:
         return False
+    if re.search(rf"\b{re.escape(who)}\b", earlier[i].get("content") or "", re.I):
+        return True         # she spoke to them by name
     j = i - 1
     while j >= 0 and earlier[j].get("role") != "user":
         j -= 1

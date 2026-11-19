@@ -51,3 +51,10 @@ def test_should_interject_skips_judgment(tmp_path, monkeypatch):
 def test_conversation_not_doubled():
     text = ai._conversation(ANDY, NEW)
     assert text.count("assist with tasks") == 1
+
+
+def test_addressed_by_name_is_in_exchange():
+    h = _h(("user", "Nick: hi", T0),
+           ("assistant", "ShinyAndreon, what's your last name?", T1),
+           ("user", "ShinyAndreon: Smith", "2026-11-19T03:25:46+00:00"))
+    assert ai.in_exchange(h, "Smith", now=NOW)

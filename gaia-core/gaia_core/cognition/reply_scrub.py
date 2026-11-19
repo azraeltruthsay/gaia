@@ -145,7 +145,7 @@ class HeadScrubber:
 
 # Notes to herself that open a line: a thought seed, and Prime's "Action: none
 # (direct answer)" (2026-11-18, closing a haiku).
-_SEED_MARKS = ("THOUGHT_SEED:", "ACTION: NONE")
+_SEED_MARKS = ("THOUGHT_SEED:", "GOAL_SHIFT:", "ACTION: NONE")
 _SEED_LEN = max(len(m) for m in _SEED_MARKS)
 
 

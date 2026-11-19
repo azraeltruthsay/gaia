@@ -29,3 +29,9 @@ def test_plain_reply_untouched(tmp_path, monkeypatch):
     sm = _sm(tmp_path, monkeypatch)
     sm.add_message("seed_t3", "assistant", "A thought seed is a note.\nSecond line.")
     assert sm.get_history("seed_t3")[-1]["content"] == "A thought seed is a note.\nSecond line."
+
+
+def test_goal_shift_line_cut(tmp_path, monkeypatch):
+    sm = _sm(tmp_path, monkeypatch)
+    sm.add_message("seed_t4", "assistant", "GOAL_SHIFT: clarify\nI'd like your last name for my notes.")
+    assert sm.get_history("seed_t4")[-1]["content"] == "I'd like your last name for my notes."

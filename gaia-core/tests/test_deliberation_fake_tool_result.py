@@ -49,3 +49,15 @@ def test_plain_answer_untouched():
     r = _run("The ball costs $0.05.")
     assert r.final_response == "The ball costs $0.05."
     assert not r.fallback_used
+
+
+def test_notes_only_answer_falls_back():
+    r = _run("GOAL_SHIFT: Clarify Nick's actual question and intent behind it.")
+    assert r.final_response == "" and r.fallback_used
+    r = _run("THOUGHT_SEED: is it a joke?\n\n*GOAL_SHIFT: ask*")
+    assert r.final_response == "" and r.fallback_used
+
+
+def test_note_with_answer_kept():
+    r = _run("THOUGHT_SEED: hm\n\nThe ball costs $0.05.")
+    assert "$0.05" in r.final_response
