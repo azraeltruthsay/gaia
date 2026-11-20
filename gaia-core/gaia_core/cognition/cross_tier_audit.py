@@ -351,6 +351,60 @@ def _maybe_emit_samvega(
 
 # ── Visible same-conversation follow-up (e8hf Phase B) ──────────────────
 
+def _post_confirmed_correction(session_id: str, user_input: str, final_response: str, model_pool,
+                               cfg: Dict[str, Any], recheck=None, post=None) -> bool:
+    """Post a correction only when an independent check confirms her reply was
+    wrong (channel_review.recheck: computed, or read from a page)."""
+    if not cfg.get("followup_enabled", True):
+        return False
+    try:
+        import re as _re
+        question = _re.sub(r"^[^:\n]{1,64}:\s", "", user_input or "", count=1).strip()
+        said = _re.sub(r"^\s*\[\w+\]\s*", "", final_response or "").strip()
+        if recheck is None:
+            from gaia_core.cognition.channel_review import recheck as _recheck
+            from gaia_core.cognition.engineering_mode import other_mind
+            from gaia_core.cognition.self_review import chat_generator
+            same = chat_generator(model_pool, roles=("prime", "core"), max_tokens=900, temperature=0.2)
+            other = other_mind(model_pool, "prime")
+
+            def recheck(q, s_):
+                return _recheck(q, s_, same, other)
+        fixed, _concluded = recheck(question, said)
+        if not fixed:
+            logger.info("Cross-tier audit: flagged, but no independent check confirmed it; filed, not posted")
+            return False
+        from gaia_core.cognition.channel_review import _same_result
+        if _same_result(said, fixed):
+            return False
+        text = f"Looking back at what I just said, I was wrong. {fixed}"
+        ok = (post or _post_and_record)(session_id, text, cfg)
+        if ok:
+            try:
+                from gaia_core.cognition import learning_gaps
+                learning_gaps.note(question, "corrected", session_id, fixed[:300])
+            except Exception:
+                pass
+        return ok
+    except Exception:
+        logger.debug("Cross-tier audit: confirmed-correction check failed", exc_info=True)
+        return False
+
+
+def _post_and_record(session_id: str, text: str, cfg: Dict[str, Any]) -> bool:
+    ok = _maybe_push_followup(session_id, text, cfg)
+    if ok:
+        try:
+            req = urllib.request.Request(
+                f"http://localhost:6415/api/sessions/{session_id}/posted",
+                data=json.dumps({"text": text, "via": "review"}).encode("utf-8"), method="POST",
+                headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=5.0).read()
+        except Exception:
+            logger.debug("Cross-tier audit: correction not recorded in history", exc_info=True)
+    return ok
+
+
 def _maybe_push_followup(session_id: str, followup: str, cfg: Dict[str, Any]) -> bool:
     """Best-effort delivery of a visible self-correction into the live
     session. Routed by gaia-web, which knows how to reach each transport
@@ -518,15 +572,23 @@ def run_cross_tier_audit_sync(
     # same-conversation follow-up, not just a silent next-sleep-cycle fold.
     # Reuses _maybe_emit_samvega's own severity bar (>=2 findings, or any
     # severity-3) rather than inventing a second threshold.
+    # 2026-11-20 (Azrael, option 2): the audit's own wording went straight
+    # into the channel, unrecorded in her history, and flagged sensible
+    # replies as invented ("stress distribution", "weld types"). Now a flagged
+    # reply is re-checked against something other than a model's opinion (a
+    # calculation run in code, or a page she reads); only a confirmed
+    # correction is posted, as hers, and kept in her history. The finding is
+    # filed either way.
+    posted = False
     if samvega_path and followup and session_id:
-        _maybe_push_followup(session_id, followup, cfg)
+        posted = _post_confirmed_correction(session_id, user_input, final_response, model_pool, cfg)
 
     logger.info(
         "Cross-tier audit complete: entry=%s clean=%s findings=%d elapsed=%.0fms (verdict %s) samvega=%s followup=%s",
         journal_entry_id, clean, len(findings), elapsed_ms,
         f"{verdict_ms:.0f}ms{', only' if verdict_only else ''}" if verdict_first else "off",
         os.path.basename(samvega_path) if samvega_path else "-",
-        "yes" if (samvega_path and followup) else "no",
+        "posted (confirmed)" if posted else ("filed only" if samvega_path else "no"),
     )
 
     return AuditResult(
