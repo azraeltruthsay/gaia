@@ -41,6 +41,7 @@ logger = logging.getLogger("GAIA.ChannelReview")
 Generate = Callable[[List[dict]], str]
 
 VIEW_N = 10
+COMPUTED_PER_LOOK = 2         # answers to calculations re-checked per look back
 MAX_TRIES = 3                 # inconclusive re-checks of one message before it's left
 PROMISE_MAX_AGE_S = 4 * 3600
 _KEPT_RE = re.compile(r"^\s*(?:\[\w+\]\s*)?(?:I looked it up|I re-checked|Looking back at what I said)", re.I)
@@ -208,6 +209,42 @@ REVIEW_THOUGHT = (
     "If everything I said holds up, that's fine.")
 
 
+def _same_result(said: str, fixed: str) -> bool:
+    """A "correction" that repeats every number she gave isn't one (her
+    7,200 psi "corrected" to 7,200 psi). 5.76 cfs -> 0.589 cfs is one."""
+    def nums(t):
+        return [float(x.replace(",", "")) for x in re.findall(r"\d[\d,]*(?:\.\d+)?", t or "")]
+    a, b = nums(said), nums(fixed)
+    if not a or not b:
+        return False
+    return all(any(abs(x - y) <= max(0.015 * abs(y), 0.01) for y in b) for x in a)
+
+
+def _recheck_one(session_id, history, i, msg, same, other, ground, send, record, handled, tries, done) -> None:
+    mid = msg.get("id") or str(i)
+    question = _prev_user(history, i)
+    mine_text = re.sub(r"^\s*\[\w+\]\s*", "", msg.get("content") or "").strip()
+    fixed, concluded = recheck(question, mine_text, same, other, ground)
+    if fixed and _same_result(mine_text, fixed):
+        logger.info("channel review: the re-check came to what she said; nothing to correct")
+        fixed = None
+    # an inconclusive check doesn't use up the message: tried again on a
+    # later look back, up to MAX_TRIES (the 20 mR/hr answer's first check
+    # disagreed with itself and it was never looked at again)
+    tries[mid] = tries.get(mid, 0) + 1
+    if concluded or tries[mid] >= MAX_TRIES:
+        handled.add(mid)
+    if fixed:
+        quote = mine_text[:120] + ("…" if len(mine_text) > 120 else "")
+        text = f"Looking back at what I said earlier (\"{quote}\"), I was wrong. {fixed}"
+        if send(session_id, text):
+            record(text)
+        _file_finding(session_id, question, mine_text, fixed)
+    done["recheck"] = {"message": mine_text[:300], "question": question, "corrected": fixed,
+                       "concluded": concluded, "try": tries[mid]}
+    _log({"session_id": session_id, "kind": "recheck", **done["recheck"]})
+
+
 def review(session_id: str, history: List[Dict], generate: Optional[Generate], same: Optional[Generate],
            other: Optional[Generate], send: Callable[[str, str], bool], record: Callable[[str], None],
            ground=None, now: Optional[float] = None) -> Dict:
@@ -235,11 +272,20 @@ def review(session_id: str, history: List[Dict], generate: Optional[Generate], s
               "kept": done["promise"]})
         break
 
-    # 2. Was I wrong? She picks; code checks.
+    # 2. Was I wrong? Every answer of hers to a calculation is re-checked
+    # by code, whether or not she notices it (she let "20 mR/hr" stand);
+    # then she picks among the rest, and code checks her pick.
+    from gaia_core.cognition.nlu.intent_detection import is_worked_problem
     latest, mine = views(history)
     candidates = [(i, m) for i, m in mine if (m.get("id") or str(i)) not in handled
                   and not _own_follow_up(m) and not _already_corrected(history, i)]
-    if generate is not None and candidates:
+    computed = [(i, m) for i, m in candidates if is_worked_problem(_prev_user(history, i))]
+    # fewest tries first, newest first among those; up to COMPUTED_PER_LOOK
+    computed.sort(key=lambda im: (tries.get(im[1].get("id") or str(im[0]), 0), -im[0]))
+    for i, msg in computed[:COMPUTED_PER_LOOK]:
+        _recheck_one(session_id, history, i, msg, same, other, ground, send, record, handled, tries, done)
+        candidates = [(j, m) for j, m in candidates if j != i]
+    if generate is not None and candidates and not done.get("recheck"):
         from gaia_core.cognition.inner_monologue import ask_myself
         numbered = "\n".join(_line(m, n) for n, (_, m) in enumerate(candidates, 1))
         thought = REVIEW_THOUGHT.format(latest="\n".join(_line(m) for m in latest), mine=numbered)
@@ -249,25 +295,7 @@ def review(session_id: str, history: List[Dict], generate: Optional[Generate], s
         m = re.match(r"\D*?(\d{1,2})\b", said)
         if m and 1 <= int(m.group(1)) <= len(candidates):
             i, msg = candidates[int(m.group(1)) - 1]
-            mid = msg.get("id") or str(i)
-            question = _prev_user(history, i)
-            mine_text = re.sub(r"^\s*\[\w+\]\s*", "", msg.get("content") or "").strip()
-            fixed, concluded = recheck(question, mine_text, same, other, ground)
-            # an inconclusive check doesn't use up the message: tried again
-            # on a later look back, up to MAX_TRIES (the 20 mR/hr answer's
-            # first check disagreed with itself and it was never looked at again)
-            tries[mid] = tries.get(mid, 0) + 1
-            if concluded or tries[mid] >= MAX_TRIES:
-                handled.add(mid)
-            if fixed:
-                quote = mine_text[:120] + ("…" if len(mine_text) > 120 else "")
-                text = f"Looking back at what I said earlier (\"{quote}\"), I was wrong. {fixed}"
-                if send(session_id, text):
-                    record(text)
-                _file_finding(session_id, question, mine_text, fixed)
-            done["recheck"] = {"message": mine_text[:300], "question": question, "corrected": fixed,
-                               "concluded": concluded, "try": tries[mid]}
-            _log({"session_id": session_id, "kind": "recheck", **done["recheck"]})
+            _recheck_one(session_id, history, i, msg, same, other, ground, send, record, handled, tries, done)
     state[session_id] = {"done": sorted(handled)[-200:],
                          "tries": {k: v for k, v in tries.items() if k not in handled}}
     _save_state(state)

@@ -45,6 +45,14 @@ def test_rewrite_with_right_values_then_note_if_still_wrong():
     assert v == "noted" and "Checked by calculation" in out
 
 
+def test_computed_correction_without_her_rewrite():
+    q = "A source reads 400 mR/hr at 2 m. What is the rate at 4 m behind 3 half-value layers?"
+    steps = "I0 = 400  # mR/hr\nI4 = I0 * (2/4)**2  # mR/hr\nrate = I4 * 0.5**3  # mR/hr"
+    out, v = ac.check_computation(q, "The dose rate at 4m would be 20 mR/hr.",
+                                  lambda m: steps if m[0]["content"].startswith("Work") else "It is 20 mR/hr.")
+    assert v == "rewritten" and out.endswith("So it's 12.5 mR/hr.")
+
+
 PAGE = R(source="web", read=True, url="https://en.wikipedia.org/wiki/Stopping_sight_distance",
          content=("In US customary units stopping sight distance is SSD = 1.47 V t + 1.075 V^2 / a, "
                   "where V is the design speed in mph, t is the brake reaction time of 2.5 seconds "
@@ -170,7 +178,7 @@ def test_computation_catches_unworked_wrong_answer():
     def gen(m):
         return steps if m[0]["content"].startswith("Work this problem") else fixed
     out, v = ac.check_computation(q, "The flow rate is 5.76 cfs and 261.8 gpm.", gen)
-    assert v == "rewritten" and out == fixed
+    assert v == "rewritten" and out.startswith(fixed.rstrip(".")) and "Q = 0.589 cfs" in out
     out, v = ac.check_computation(q, "About 0.589 cfs, or 264.4 gpm.", gen)
     assert v == "ok"
     assert ac.check_computation("How are you?", "Fine", gen) == ("Fine", "skipped")
@@ -213,3 +221,9 @@ def test_third_try_breaks_the_tie():
 def test_hyphenated_words_are_not_minus():
     assert ac.arithmetic_errors("Three half-value layers reduce intensity by a factor of 2^(-3) = 0.125") == []
     assert ac.arithmetic_errors("I = 400 - 100 = 300") == []
+
+
+def test_answer_matching_a_number_in_the_question_is_right():
+    q = "A thin-wall pipe has 150 psi internal pressure, 24 in diameter and 0.25 in wall. What is the hoop stress? (PD/2t = 7,200 psi)"
+    gen = lambda m: "P = 150\nD = 24\nt = 0.25\nhoop = P * D / (2 * t)" if m[0]["content"].startswith("Work") else "7,200 psi"
+    assert ac.check_computation(q, "The hoop stress is 7,200 psi.", gen)[1] == "ok"

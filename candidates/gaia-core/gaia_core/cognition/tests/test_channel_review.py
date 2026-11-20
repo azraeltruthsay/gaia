@@ -115,3 +115,15 @@ def test_inconclusive_check_is_tried_again():
     out = cr.review("discord_channel_4", h, generate=lambda m: "RECHECK: 1", same=gen_steps, other=None,
                     send=lambda s, t: sent.append(t) or True, record=lambda t: None, ground=lambda q: [])
     assert out["recheck"]["corrected"] and "0.589" in sent[-1]
+
+
+def test_calculation_answers_are_rechecked_without_her_pick():
+    sent = []
+    out = cr.review("discord_channel_5", _h()[:2], generate=lambda m: "RECHECK: NOTHING", same=gen_steps, other=None,
+                    send=lambda s, t: sent.append(t) or True, record=lambda t: None, ground=lambda q: [])
+    assert out["recheck"]["corrected"] and "0.589" in sent[-1]
+
+
+def test_same_result_is_not_a_correction():
+    assert cr._same_result("The hoop stress is 7,200 psi.", "= 3600 / 0.5 = 7,200 psi. Final Answer: 7,200 psi.")
+    assert not cr._same_result("The dose rate at 4m would be 20 mR/hr.", "The rate is 12.5 mR/hr.")

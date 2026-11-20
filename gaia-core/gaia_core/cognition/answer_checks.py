@@ -403,7 +403,10 @@ def check_computation(question: str, answer: str, generate: Optional[Generate],
             return answer, "unsure"
     given = set(_numbers(question))
     finals = [v for _, v, _ in steps[-3:]]
-    stated = [x for x in _numbers(answer) if x not in given]
+    # everything she stated counts, a number the question also gave included
+    # ("(PD/2t = 7,200 psi)" in the question hid her 7,200 and she was
+    # "corrected" to 7,200, 2026-11-20)
+    stated = _numbers(answer)
 
     def near(x, ys):
         return any(abs(x - y) <= max(_REL_TOL * abs(y), 0.01) for y in ys)
@@ -420,6 +423,14 @@ def check_computation(question: str, answer: str, generate: Optional[Generate],
             steps=shown, question=question, answer=answer)}]) or "").strip()
     except Exception:
         new = ""
+    work = "; ".join(f"{n} = {_fmt(v)} {c.split('(')[0].strip()}".rstrip() for n, v, c in steps if v not in given)
     if new and near(finals[-1], _numbers(new)):
+        if len(new) < 80:
+            new = f"{new.rstrip('.')}. Worked out: {work}."   # a bare number: show the working
         return new, "rewritten"
-    return f"{answer.rstrip()}\n\n*(Checked by calculation: {shown.replace(chr(10), '; ')}.)*", "noted"
+    # Her rewrite missed the computed value, but the calculation stands (two
+    # tries agreed, code ran it): say it from the steps themselves (her
+    # rewrite of the 20 mR/hr answer never came to 12.5, 2026-11-20).
+    name, val, unit = steps[-1]
+    unit = unit.split("(")[0].strip()
+    return f"Worked out step by step: {work}. So it's {_fmt(val)}{(' ' + unit) if unit else ''}.", "rewritten"
