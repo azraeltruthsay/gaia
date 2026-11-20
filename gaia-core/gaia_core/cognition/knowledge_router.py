@@ -421,7 +421,49 @@ def _query_studies(query: str, top_k: int = 2) -> List[GroundingResult]:
             source="study", trust_tier="looked_up", url=url, title=topic, query=query,
             score=float(h["score"]),
             content=body))
+    # An acronym in the question that a note's title names (CFR, IBC, LRFD):
+    # embeddings score a bare acronym near nothing ("what is CFR" -> 0 against
+    # her own CFR note, 2026-11-20), so it is matched by its letters.
+    seen = {r.title: r for r in out}
+    for note in _notes_naming(_ACRONYM_RE.findall(query or "")):
+        topic, url = _study_header(str(note))
+        if topic in seen:
+            # found by meaning too, just under the bar (0.497): the acronym
+            # names it, so it is a strong match
+            seen[topic].score = max(seen[topic].score, STUDY_STRONG)
+            continue
+        try:
+            body = "\n".join(ln for ln in note.read_text(encoding="utf-8").splitlines()
+                             if not ln.startswith(("# ", "Source:", "Unit:"))).strip()
+        except OSError:
+            continue
+        r = GroundingResult(source="study", trust_tier="looked_up", url=url, title=topic, query=query,
+                            score=STUDY_STRONG, content=body[:3000])
+        seen[topic] = r
+        out.append(r)
+        if len(out) >= top_k + 1:
+            break
     return out
+
+
+_ACRONYM_RE = re.compile(r"\b[A-Z][A-Z0-9]{1,6}\b")
+_ACRONYM_SKIP = {"GAIA", "OK", "I", "AI", "US", "USA", "PDF", "URL", "FYI", "LOL"}
+
+
+def _notes_naming(acronyms) -> list:
+    """Study notes whose title holds one of these acronyms as a word."""
+    wanted = [a for a in dict.fromkeys(acronyms) if a not in _ACRONYM_SKIP]
+    if not wanted:
+        return []
+    import os as _os
+    from pathlib import Path as _Path
+    root = _Path(_os.environ.get("STUDY_DIR", "/knowledge/studies"))
+    found = []
+    for note in sorted(root.glob("*/notes/*.md")):
+        topic, _ = _study_header(str(note))
+        if any(re.search(rf"\b{re.escape(a)}\b", topic) for a in wanted):
+            found.append(note)
+    return found[:3]
 
 
 def _query_knowledge_graph(query: str) -> List[GroundingResult]:

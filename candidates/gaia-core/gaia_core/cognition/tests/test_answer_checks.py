@@ -239,3 +239,13 @@ def test_answer_matching_a_number_in_the_question_is_right():
     q = "A thin-wall pipe has 150 psi internal pressure, 24 in diameter and 0.25 in wall. What is the hoop stress? (PD/2t = 7,200 psi)"
     gen = lambda m: "P = 150\nD = 24\nt = 0.25\nhoop = P * D / (2 * t)" if m[0]["content"].startswith("Work") else "7,200 psi"
     assert ac.check_computation(q, "The hoop stress is 7,200 psi.", gen)[1] == "ok"
+
+
+def test_acronym_finds_the_note_that_names_it(tmp_path, monkeypatch):
+    from gaia_core.cognition import knowledge_router as kr
+    d = tmp_path / "gaia_self" / "notes"
+    d.mkdir(parents=True)
+    (d / "cfr.md").write_text("# CFR: my own focus and resolution system\n\nSource: my code\n\n• CFR splits documents.\n")
+    monkeypatch.setenv("STUDY_DIR", str(tmp_path))
+    assert [n.name for n in kr._notes_naming(["CFR", "GAIA"])] == ["cfr.md"]
+    assert kr._notes_naming(["GAIA", "OK"]) == []

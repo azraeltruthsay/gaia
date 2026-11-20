@@ -38,6 +38,22 @@ logger = logging.getLogger("GAIA.Web.Discord")
 # the end and used to fall through as ambient instead of getting a
 # guaranteed reply (found 2026-11-12, GAIA's Grotto).
 _NAME_RE = re.compile(r"\bgaia\b", re.IGNORECASE)
+# Her name used to address her, not just mentioned: "So with GAIA, we've
+# invented the CFR system" was Azrael talking to Andy, and she answered it
+# (2026-11-20). A mention still reaches her as ambient context.
+_GREET = r"(?:hey|hi|hello|ok(?:ay)?|so|yo|thanks|thank\s+you|good\s+(?:morning|afternoon|evening|night)|morning|evening)"
+_ADDRESS_RE = re.compile(
+    rf"^\W*(?:{_GREET}[\s,!.]+)?gaia\b(?![’']s\b|\s+(?:is|was|has|had|can|could|will|would|"
+    rf"should|might|does|did|isn't|wasn't|seems|knows|said|says)\b)"  # starts with her name
+    rf"|(?:^|[.!?\n]\s*)(?:{_GREET}[\s,]+)?gaia\s*[,:!?]"   # a sentence opening "GAIA,"
+    rf"|\b{_GREET}[\s,]+gaia\b"                              # "thanks GAIA", "hey GAIA"
+    rf"|,\s*gaia\s*[?.!]*\s*$",                              # "..., GAIA?"
+    re.IGNORECASE)
+
+
+def addressed_by_name(text: str) -> bool:
+    """Whether a message speaks to her by name (vs. talking about her)."""
+    return bool(_ADDRESS_RE.search(text or ""))
 
 try:
     from gaia_common.utils.error_logging import log_gaia_error
@@ -273,7 +289,7 @@ class DiscordInterface:
                 should_respond = True
             else:
                 mentioned = bot.user in message.mentions
-                addressed = bool(_NAME_RE.search(message.content or ""))
+                addressed = addressed_by_name(message.content or "")
                 should_respond = mentioned or addressed
 
             # Ambient channels: every message reaches her as context, not just

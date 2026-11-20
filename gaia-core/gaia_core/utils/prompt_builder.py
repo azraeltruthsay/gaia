@@ -413,9 +413,40 @@ def build_from_packet(packet: CognitionPacket, *args, **kwargs) -> List[Dict]:
             messages[0] = {**messages[0], "content": f"{messages[0]['content']}\n\n{line}"}
         if is_channel(_sid):
             messages = _label_last_speaker(messages, _sid)
+            _recap = who_said_what(messages)
+            if _recap and messages and messages[0].get("role") == "system":
+                messages[0] = {**messages[0], "content": f"{messages[0]['content']}\n\n{_recap}"}
     except Exception:
         logger.debug("Speaker line unavailable", exc_info=True)
     return messages
+
+
+_SPEAKER_PREFIX = re.compile(r"^([^:\n]{1,40}):\s+(.*)$", re.S)
+
+
+def who_said_what(messages: List[Dict], n: int = 6) -> str:
+    """Who said each of the last few lines of a group conversation, as a plain
+    fact. A name inside a message isn't its speaker: Azrael explained CFR,
+    then said "That wasn't for you, I was talking to Andy", and she credited
+    Andy with CFR (2026-11-20)."""
+    lines = []
+    for m in messages:
+        if m.get("role") not in ("user", "assistant") or not isinstance(m.get("content"), str):
+            continue
+        text = re.sub(r"^\s*\[(?:Core|Prime)\]\s*", "", m["content"]).strip()
+        if m["role"] == "assistant":
+            who, said = "You", text
+        else:
+            sp = _SPEAKER_PREFIX.match(text)
+            if not sp:
+                continue
+            who, said = sp.group(1).strip(), sp.group(2)
+        said = " ".join(said.split())
+        lines.append(f'{who}: "{said[:90]}{"…" if len(said) > 90 else ""}"')
+    lines = lines[-n:]
+    if len(lines) < 2 or not any(not ln.startswith("You:") for ln in lines):
+        return ""
+    return "Who said what here, most recent last:\n" + "\n".join(lines)
 
 
 def _label_last_speaker(messages: List[Dict], session_id: str) -> List[Dict]:

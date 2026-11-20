@@ -5,13 +5,15 @@ from gaia_core.cognition import engineering_mode as em
 
 
 def test_turn_kind_from_her_notes_and_the_web():
-    study = lambda s: R(source="study", score=s, content="x" * 80)
+    study = lambda s: R(source="study", score=s, content="x" * 80, url="https://app.leg.wa.gov/wac/x")
     web = R(source="web", score=0, content="y" * 80)
     assert em.turn_kind([]) is None
     assert em.turn_kind([study(0.40), web]) is None            # notes not near: not engineering
     assert em.turn_kind([study(0.62)]) == "notes"
     assert em.turn_kind([study(0.47), web]) == "web"
     assert em.turn_kind([study(0.47)]) == "memory"
+    # her note on herself (no web source) is not an engineering turn
+    assert em.turn_kind([R(source="study", score=0.62, content="x" * 80, url="GAIA's own code")]) is None
 
 
 def test_general_knowledge_is_marked_and_checked_by_the_other_mind():

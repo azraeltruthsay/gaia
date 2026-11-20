@@ -4305,7 +4305,8 @@ class AgentCore:
                                     same=_same_mind,
                                     other=_eng_mode.other_mind(self.model_pool, _ans_role),
                                     send=_lr.push,
-                                    record=lambda text: _sm.add_message(_sid, "assistant", text))
+                                    record=lambda text: _sm.add_message(_sid, "assistant", text),
+                                    still_open=_promises.still_open_check(_sm, _sid, _final_clean))
                                 logger.info("promises: she said she'd look it up; doing it after the turn")
                         except Exception:
                             logger.debug("promise keeping failed to start", exc_info=True)

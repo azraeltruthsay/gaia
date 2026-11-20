@@ -84,3 +84,27 @@ def test_restated_answer_is_not_a_question():
             {"role": "user", "content": "Azrael: Are you sure?"}]
     assert p.promised_question(hist, lambda m: "I was wrong, it is the 2021 IBC.") == \
         "GAIA, what code year of the IBC has Washington adopted?"
+
+
+def test_not_posted_when_she_already_followed_up():
+    sent = []
+    out = p.keep("discord_channel_1", HIST, "Andy", lambda m: "x", None, send=lambda s, t: sent.append(t) or True,
+                 record=lambda t: None, ground=lambda q: [], still_open=lambda: False)
+    assert out is None and not sent
+
+
+def test_no_not_found_for_a_question_nobody_asked():
+    sent = []
+    out = p.keep("discord_channel_1", HIST, "Andy", None,
+                 lambda m: "Which tool do you need reviewed? The URL doesn't name the tool.",
+                 send=lambda s, t: sent.append(t) or True, record=lambda t: None, ground=lambda q: [])
+    assert out is None and not sent
+
+
+def test_still_open_check():
+    class SM:
+        def __init__(self, h): self.h = h
+        def get_history(self, sid): return self.h
+    assert p.still_open_check(SM([{"role": "assistant", "content": "I'll look it up."}]), "s", "I'll look it up.")()
+    assert not p.still_open_check(SM([{"role": "assistant", "content": "I'll look it up."},
+                                      {"role": "assistant", "content": "It returned a 403."}]), "s", "I'll look it up.")()

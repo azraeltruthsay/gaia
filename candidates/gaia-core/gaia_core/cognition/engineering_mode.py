@@ -56,7 +56,9 @@ def role_card() -> str:
 def turn_kind(results: Iterable) -> Optional[str]:
     """None (not an engineering turn), 'notes', 'web' or 'memory'."""
     results = list(results or [])
-    study = [r for r in results if getattr(r, "source", "") == "study"]
+    # notes from pages she studied; her notes on herself (CFR) aren't engineering
+    study = [r for r in results if getattr(r, "source", "") == "study"
+             and str(getattr(r, "url", "") or "").startswith("http")]
     if not study or max(getattr(r, "score", 0.0) for r in study) < NEAR:
         return None
     if max(r.score for r in study) >= STRONG:

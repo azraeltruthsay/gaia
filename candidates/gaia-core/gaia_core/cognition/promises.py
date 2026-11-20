@@ -109,7 +109,7 @@ def promised_question(history: List[dict], generate: Optional[Generate]) -> str:
 
 def keep(session_id: str, history: List[dict], who: str, same: Optional[Generate],
          other: Optional[Generate], send: Callable[[str, str], bool], record: Callable[[str], None],
-         ground=None) -> Optional[str]:
+         ground=None, still_open: Optional[Callable[[], bool]] = None) -> Optional[str]:
     """Do the lookup she promised and post what she found. Returns the text."""
     from gaia_core.cognition import answer_checks as ac
     if ground is None:
@@ -127,6 +127,8 @@ def keep(session_id: str, history: List[dict], who: str, same: Optional[Generate
         text, verdict = ac.check_computation(question, "", same or other, other)
         if verdict == "rewritten":
             text, _ = ac.check_arithmetic(question, text, None)
+            if still_open is not None and not still_open():
+                return None
             return _post(session_id, question, "I re-checked the calculation: " + text, "computed", send, record)
     results = ground(question) or []
     pages = ac.web_pages(results)
@@ -147,12 +149,28 @@ def keep(session_id: str, history: List[dict], who: str, same: Optional[Generate
                 text, verdict = draft if url in draft else f"{draft.rstrip()}\n\n(Source: {url})", "answered"
                 break
     if text is None:
-        text = NOT_FOUND.format(question=question.rstrip("?") + "?")
+        # "couldn't find it" only for a question a person asked; a restated
+        # question that isn't one ("Which tool do you need reviewed? The URL
+        # doesn't name the tool.") was posted as a non-answer (2026-11-20)
+        asked = " ".join((m.get("content") or "").lower() for m in history if m.get("role") == "user")
+        if not _key_words_in(question, asked):
+            logger.info("promises: nothing found for a question nobody asked (%r); not posting", question[:80])
+            return None
+        text = NOT_FOUND.format(question=question.rstrip(" ?.") + "?")
+    if still_open is not None and not still_open():
+        logger.info("promises: she already followed up in %s; not posting", session_id)
+        return None
     try:
         text, _ = ac.check_arithmetic(question, text, None)
     except Exception:
         pass
     return _post(session_id, question, text, verdict, send, record)
+
+
+def _key_words_in(question: str, asked: str) -> bool:
+    words = [w for w in re.findall(r"[a-z]{4,}", question.lower())
+             if w not in {"what", "which", "where", "when", "does", "have", "that", "this", "with", "from", "about"}]
+    return bool(words) and sum(1 for w in words if w in asked) / len(words) >= 0.5
 
 
 def _post(session_id, question, text, verdict, send, record) -> str:
@@ -179,3 +197,19 @@ def start(*args, **kwargs) -> threading.Thread:
     t = threading.Thread(target=run, name="keep-promise", daemon=True)
     t.start()
     return t
+
+
+def still_open_check(session_manager, session_id: str, promise_text: str) -> Callable[[], bool]:
+    """True while her last message in the conversation is still the promise:
+    if she has said anything since (answered it another way), it's not."""
+    key = (promise_text or "").strip()[:60]
+
+    def check() -> bool:
+        try:
+            mine = [m for m in session_manager.get_history(session_id) or [] if m.get("role") == "assistant"]
+        except Exception:
+            return True
+        if not mine:
+            return True
+        return key in (mine[-1].get("content") or "")
+    return check

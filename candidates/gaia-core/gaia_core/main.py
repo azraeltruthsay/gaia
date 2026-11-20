@@ -2725,7 +2725,8 @@ async def process_packet(packet_data: Dict[str, Any]):
                                 session_id, list(_sm.get_history(session_id) or []), _who.group(1) if _who else "",
                                 same=_cg(_agent_core.model_pool, roles=("prime", "core"), max_tokens=900, temperature=0.2),
                                 other=_cg(_agent_core.model_pool, roles=("core", "prime"), max_tokens=900, temperature=0.2),
-                                send=_lr.push, record=lambda text, _s=session_id: _sm.add_message(_s, "assistant", text))
+                                send=_lr.push, record=lambda text, _s=session_id: _sm.add_message(_s, "assistant", text),
+                                still_open=_promises.still_open_check(_sm, session_id, full_response))
                             logger.info("promises: she said she'd check after a tool call; doing it after the turn")
                     except Exception:
                         logger.debug("promise keeping after inline tool call failed", exc_info=True)
