@@ -106,12 +106,17 @@ def host_facts() -> dict:
 
 _ASKS_RE = re.compile(
     r"\b(?:your|you|this|the)\s+(?:\w+\s+)?(?:hardware|gpu|vram|graphics card|cpu|processor|specs?|machine|computer|workstation|"
-    r"system resources?|resources|environment|ram|disk)\b"
+    r"(?:system|compute|computing|hardware) resources?|ram|disk)\b"
     r"|\bwhat\b.*\byou\b.*\b(?:running|run)\s+on\b|\bwhat\s+are\s+you\s+running\b"
     r"|\bhow\s+much\s+(?:gpu|vram|ram|disk)\b"
     r"|\bwhat\s+(?:hardware|gpu|cpu|processor|graphics card)\b.*\byou\b",
     re.IGNORECASE,
 )
+
+
+_QUESTION_RE = re.compile(
+    r"\?|^\W*(?:(?:hey|so|ok(?:ay)?|gaia)[,\s]+)*(?:what|which|how|can you tell|could you tell|tell me|do you know|"
+    r"describe|list)\b|\byou should know\b", re.IGNORECASE)
 
 
 def asks_about_host(text: str) -> bool:
@@ -120,7 +125,11 @@ def asks_about_host(text: str) -> bool:
     Only the person's own words: 2026-11-15 "the GPU" inside a pasted 17 KB dev
     journal got the hardware answer, capped at 160 tokens, instead of a reply (5qv4)."""
     from gaia_common.utils.message_shape import asking_text
-    return bool(_ASKS_RE.search(asking_text(text)))
+    asked = asking_text(text)
+    # 2026-11-20: "...how you organize priorities and allocate your resources"
+    # and "Haha you said resources" got the hardware report. It takes a
+    # question, and hardware words, not "resources" or "environment" alone.
+    return bool(_QUESTION_RE.search(asked)) and bool(_ASKS_RE.search(asked))
 
 
 def machine_description(facts: Optional[dict] = None) -> str:

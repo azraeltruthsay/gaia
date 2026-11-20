@@ -66,3 +66,11 @@ def test_work_name_without_the_chatter():
     assert work_name("Please recite the first three stanzas of The Raven by Edgar Allan Poe.") == "The Raven by Edgar Allan Poe"
     assert work_name("Recite Mr. Bojangles please") == "Mr. Bojangles"
     assert work_name("Recite The Road Not Taken by Robert Frost from memory please") == "The Road Not Taken by Robert Frost"
+
+
+def test_host_report_needs_a_hardware_question():
+    from gaia_common.utils.host_facts import asks_about_host
+    assert not asks_about_host("I am not sure how you organize priorities and allocate your resources.")
+    assert not asks_about_host("Haha you said resources")
+    assert asks_about_host("What hardware are you running on?")
+    assert asks_about_host("How much VRAM do you have?")

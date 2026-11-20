@@ -61,7 +61,7 @@ def test_nothing_read_means_nothing_said():
 
 
 @pytest.mark.parametrize("text", ["What hardware are you running on?", "What GPU do you have?", "What are you running on right now?",
-                                  "Tell me about your environment.", "You should know your system resources.",
+                                  "You should know your system resources.",
                                   "How much RAM is free?", "What's your CPU?"])
 def test_questions_about_the_machine(text):
     assert hf.asks_about_host(text)
