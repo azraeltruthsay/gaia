@@ -647,6 +647,25 @@ def domains_with_action(action: str) -> List[str]:
     return [d for d, spec in DOMAIN_TOOLS.items() if a and a in (spec.get("actions") or {})]
 
 
+ACTION_SYNONYMS = {
+    "web": {"mark_trusted": "trust_domain", "add_trusted": "trust_domain", "trust": "trust_domain",
+            "whitelist": "trust_domain", "allowlist": "trust_domain", "allow_domain": "trust_domain",
+            "add_domain": "trust_domain", "whitelist_domain": "trust_domain", "allowlist_domain": "trust_domain",
+            "add_to_allowlist": "trust_domain", "add_to_whitelist": "trust_domain"},
+}
+
+
+def resolve_action(domain: str, action: str):
+    """The real action a near-miss or synonym means, or None."""
+    import difflib
+    act = (action or "").strip().lower()
+    syn = ACTION_SYNONYMS.get(domain, {}).get(act)
+    if syn:
+        return syn
+    close = difflib.get_close_matches(act, DOMAIN_ACTIONS.get(domain, []), n=1, cutoff=0.85)
+    return close[0] if close else None
+
+
 def validate_domain_call(domain: str, action: str) -> str:
     """
     Validate a domain tool call and return the legacy tool name.
@@ -666,6 +685,12 @@ def validate_domain_call(domain: str, action: str) -> str:
 
     key = (domain, action)
     if key not in ACTION_TO_LEGACY:
+        # 2026-11-20: asked to trust Scribd, she called web(trust_domains) and
+        # web(mark_trusted). Near-misses and plain synonyms resolve to the real
+        # action; a sensitive one still goes through approval.
+        resolved = resolve_action(domain, action)
+        if resolved:
+            return ACTION_TO_LEGACY[(domain, resolved)]
         available = DOMAIN_ACTIONS.get(domain, [])
         raise ValueError(f"Unknown action '{action}' for domain '{domain}'. Available: {available}")
 
@@ -673,5 +698,9 @@ def validate_domain_call(domain: str, action: str) -> str:
 
 
 def is_sensitive(domain: str, action: str) -> bool:
-    """Check if a domain+action requires approval."""
-    return (domain, action) in SENSITIVE_ACTIONS
+    """Check if a domain+action requires approval. A near-miss or synonym is
+    judged as the action it resolves to: "mark_trusted" is trust_domain."""
+    if (domain, action) in SENSITIVE_ACTIONS:
+        return True
+    resolved = resolve_action(domain, action) if (domain, action) not in ACTION_TO_LEGACY else None
+    return bool(resolved) and (domain, resolved) in SENSITIVE_ACTIONS

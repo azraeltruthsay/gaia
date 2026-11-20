@@ -122,6 +122,9 @@ _CHECK_IN_RE = re.compile(
     re.IGNORECASE)
 
 
+TRUST_SITE_FACT = ("\n\nTo ask for a website to be added to the sites you can read, call "
+                   "web(action=trust_domain, domain=<the domain>, reason=<why it's worth trusting>). "
+                   "Azrael approves it with his authenticator code; until then the site stays closed.")
 ATTACHMENT_FACT = ("\n\nFiles people attach to a message in chat (PDFs, text files, images) reach "
                    "you with that message: you read them as they arrive, long ones in parts while "
                    "you talk. Nobody has to put them in a folder.")
@@ -722,6 +725,12 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
             # a casual "is it alright if I upload pdfs?" still gets the plain
             # fact about attachments (she sent Andy to the file roots)
             persona_anchor = persona_anchor + ATTACHMENT_FACT
+        if not (_chitchat is False and not _world_answerable) and re.search(
+                r"\b(?:white\s*list\w*|allow\s*list\w*|allowed (?:list|sites?|websites?)|trusted (?:list|sites?|websites?)|"
+                r"add (?:a |the )?(?:site|website|domain))",
+                getattr(packet.content, "original_prompt", "") or "", re.IGNORECASE):
+            # "is scribd on your allowed list?": she guessed web(mark_trusted)
+            persona_anchor = persona_anchor + TRUST_SITE_FACT
         if _chitchat:
             # Casual/social turn: no tools needed. Steer toward warm, present
             # conversation with a SHORT, POSITIVE-only nudge — negative framing

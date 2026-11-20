@@ -46,3 +46,14 @@ def test_failing_adapter_is_kept_out(env):
     assert any(v.startswith("FAIL  web invents") for v in verdict)
     assert ar.consider("engineering", "v7", fallback_current="v6")["action"] == "kept"
     assert "isn't an adapter waiting" in ar.activation_problem("engineering", "v7")
+
+
+def test_near_miss_actions_resolve_and_stay_sensitive():
+    from gaia_common.utils.domain_tools import is_sensitive, resolve_action, validate_domain_call
+    assert validate_domain_call("web", "trust_domains") == "web_trust_domain"
+    assert validate_domain_call("web", "mark_trusted") == "web_trust_domain"
+    assert is_sensitive("web", "mark_trusted") and is_sensitive("web", "trust_domains")
+    assert not is_sensitive("web", "fetch") and resolve_action("web", "fetchh") == "fetch"
+    import pytest as _pt
+    with _pt.raises(ValueError):
+        validate_domain_call("file", "edit")
