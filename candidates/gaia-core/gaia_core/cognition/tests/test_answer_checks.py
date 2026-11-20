@@ -196,3 +196,8 @@ def test_given_values_with_units():
 def test_pi_in_steps():
     assert ac.arithmetic_errors("A = π * (0.0833 ft)^2 ≈ 0.1963 ft²")
     assert ac.arithmetic_errors("A = π * (0.25 ft)^2 ≈ 0.1963 ft²") == []
+
+
+def test_compound_unit_in_step():
+    assert ac.arithmetic_errors("we get Q_gpm = 0.589 cfs * 7.48 gal/(ft³/s) = 264.4 gpm.")
+    assert ac.arithmetic_errors("Q_gpm = 0.589 cfs * 448.83 gpm/cfs = 264.4 gpm.") == []

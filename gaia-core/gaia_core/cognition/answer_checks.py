@@ -49,6 +49,10 @@ def _normalise(seg: str) -> str:
     s = s.replace("$", "").replace("%", "")
     s = _UNIT.sub(" ", s)
     s = re.sub(r"[*/]\s*(?=[)*/]|$)", " ", s)      # an operator a removed unit left dangling
+    # what a removed compound unit leaves: "gal/(ft³/s)" -> "/( )"
+    for _ in range(3):
+        s = re.sub(r"\(\s*[*/]?\s*\)", " ", s)
+        s = re.sub(r"[*/]\s*(?=[)*/]|$)", " ", s)
     s = s.replace("^", "**")
     return re.sub(r"\s+", " ", s).strip(" .,:;")
 

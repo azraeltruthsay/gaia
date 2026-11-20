@@ -84,3 +84,19 @@ def test_already_corrected_message_is_not_rechecked():
                     send=lambda s, t: pytest.fail("already corrected"), record=lambda t: None, ground=lambda q: [])
     # only the follow-up itself is a candidate now; picking 1 re-checks it, not the corrected answer
     assert out["recheck"] is None or "5.76" not in out["recheck"]["message"]
+
+
+def test_her_own_corrections_are_not_rechecked():
+    h = _h()[:2] + [{"id": "r1", "role": "assistant", "meta": {"unprompted": True, "via": "review"},
+                     "content": "Looking back at what I said earlier (...), I was wrong. RCW 18.43.",
+                     "timestamp": _h()[0]["timestamp"]}]
+    latest, mine = cr.views(h)
+    assert [m["id"] for i, m in mine if not cr._own_follow_up(m)] == ["a1"]
+
+
+def test_question_only_since_her_previous_message():
+    h = _h()
+    # a2 answered Andy's IBC question, not the pipe problem before a1
+    assert cr._prev_user(h, 4).startswith("GAIA, what IBC year")
+    h2 = h[:2] + [{"id": "a5", "role": "assistant", "content": "Anything else?", "timestamp": h[0]["timestamp"]}]
+    assert cr._prev_user(h2, 2) == ""

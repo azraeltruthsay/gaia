@@ -112,7 +112,10 @@ def views(history: List[Dict], n: int = VIEW_N):
 def _prev_user(history: List[Dict], i: int) -> str:
     """What her message at i answered: the nearest question before it."""
     from gaia_core.cognition.nlu.intent_detection import is_worked_problem
-    before = [m.get("content") or "" for m in history[max(0, i - 6):i] if m.get("role") == "user"]
+    # only what was said since her previous message: an older question was
+    # answered by an older message
+    start = max((j for j in range(i) if history[j].get("role") == "assistant"), default=-1) + 1
+    before = [m.get("content") or "" for m in history[max(start, i - 6):i] if m.get("role") == "user"]
     strip = [re.sub(r"^[^:\n]{1,64}:\s", "", b, count=1).strip() for b in before]
     for b in reversed(strip):
         if is_worked_problem(b) or ("?" in b and len(b.split()) > 5):
@@ -167,6 +170,16 @@ def recheck(question: str, said: str, same: Optional[Generate], other: Optional[
     return text if verdict == "rewritten" else None
 
 
+def _own_follow_up(m: Dict) -> bool:
+    """Something she posted on her own (a kept promise, a look back, a post):
+    it answered no one, so there is no question to check it against. One look
+    back re-checked her own correction against an older question (2026-11-20)."""
+    meta = m.get("meta") or {}
+    return bool(meta.get("unprompted") or meta.get("via") in ("promise", "review")
+                or _KEPT_RE.match(m.get("content") or "")
+                or (m.get("content") or "").lstrip().startswith("(Withdrawn"))
+
+
 def _already_corrected(history: List[Dict], i: int) -> bool:
     """She edited it, or her own next message is a follow-up on it (a kept
     promise, a re-check, an earlier look back), or a promise to follow up
@@ -218,7 +231,7 @@ def review(session_id: str, history: List[Dict], generate: Optional[Generate], s
     # 2. Was I wrong? She picks; code checks.
     latest, mine = views(history)
     candidates = [(i, m) for i, m in mine if (m.get("id") or str(i)) not in handled
-                  and not _already_corrected(history, i)]
+                  and not _own_follow_up(m) and not _already_corrected(history, i)]
     if generate is not None and candidates:
         from gaia_core.cognition.inner_monologue import ask_myself
         numbered = "\n".join(_line(m, n) for n, (_, m) in enumerate(candidates, 1))

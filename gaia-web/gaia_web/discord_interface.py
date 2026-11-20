@@ -957,16 +957,24 @@ class DiscordInterface:
     async def _missed_sweep_loop(self, bot) -> None:
         """After a quiet spell in an ambient channel, answer the message since
         her last reply she should have, if any. Once per quiet spell."""
-        swept = {}
+        swept, looked = {}, {}
         while True:
             await asyncio.sleep(15)
             for ch in list(self.ambient_channel_ids):
                 try:
                     last = self._quiet_since.get(ch)
                     busy = self.__dict__.get("_busy_map", {}).get(ch, 0)
-                    if last is None or busy or time.time() - last < MISSED_QUIET_S or swept.get(ch) == last:
+                    if last is None or busy or time.time() - last < MISSED_QUIET_S:
                         continue
-                    swept[ch] = last
+                    # Once per quiet spell, and again every LOOK_BACK_S while it
+                    # stays quiet: she looks back over the chat (channel_review
+                    # in gaia-core runs with the sweep). Only within a day of
+                    # the last message.
+                    again = (time.time() - looked.get(ch, 0) >= LOOK_BACK_S
+                             and time.time() - last < LOOK_BACK_MAX_IDLE_S)
+                    if swept.get(ch) == last and not again:
+                        continue
+                    swept[ch], looked[ch] = last, time.time()
                     await self._answer_missed(bot, ch)
                 except Exception:
                     logger.warning("Missed-message sweep failed for %s", ch, exc_info=True)
@@ -1251,6 +1259,8 @@ class DiscordInterface:
 
 
 MISSED_QUIET_S = 45
+LOOK_BACK_S = 1800            # a quiet channel is looked back over this often
+LOOK_BACK_MAX_IDLE_S = 86400  # ... while its last message is within a day
 
 
 def _plain(text: str) -> str:
