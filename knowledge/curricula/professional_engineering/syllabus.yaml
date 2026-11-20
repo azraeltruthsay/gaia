@@ -92,3 +92,44 @@ units:
     - {topic: "Process safety management", url: "https://en.wikipedia.org/wiki/Process_safety_management"}
   Washington engineering law (RCW 18.43):
     - {topic: "Washington RCW 18.43: Engineers and land surveyors", url: "https://app.leg.wa.gov/RCW/default.aspx?cite=18.43&full=true", parts: 12, drop: '\[\s*\d{4} c [^\]]*\]'}
+
+# Round 3 (2026-11-20): the gaps Andy's and Azrael's quizzes showed -- AASHTO
+# transportation (stopping sight distance), structural, geotechnical, water
+# resources -- and the building codes Andy asked about (the IBC and how
+# Washington adopts it). Not reachable yet: the WSDOT Design Manual (PDF),
+# the IBC text itself (codes.iccsafe.org refuses automated readers).
+  Transportation and highway design (AASHTO):
+    - {topic: Stopping sight distance, url: "https://en.wikipedia.org/wiki/Stopping_sight_distance"}
+    - {topic: Geometric design of roads, url: "https://en.wikipedia.org/wiki/Geometric_design_of_roads", parts: 8}
+    - {topic: "Superelevation (cant)", url: "https://en.wikipedia.org/wiki/Cant_(road_and_rail)"}
+    - {topic: Level of service (transportation), url: "https://en.wikipedia.org/wiki/Level_of_service_(transportation)"}
+    - {topic: AASHTO, url: "https://en.wikipedia.org/wiki/American_Association_of_State_Highway_and_Transportation_Officials"}
+    - {topic: Highway engineering, url: "https://en.wikipedia.org/wiki/Highway_engineering", parts: 8}
+    - {topic: Pavement engineering, url: "https://en.wikipedia.org/wiki/Pavement_engineering"}
+  Structural engineering:
+    - {topic: Bending moment, url: "https://en.wikipedia.org/wiki/Bending_moment"}
+    - {topic: Euler–Bernoulli beam theory, url: "https://en.wikipedia.org/wiki/Euler%E2%80%93Bernoulli_beam_theory", parts: 8}
+    - {topic: Deflection (engineering), url: "https://en.wikipedia.org/wiki/Deflection_(engineering)"}
+    - {topic: Structural load, url: "https://en.wikipedia.org/wiki/Structural_load"}
+    - {topic: Limit state design (LRFD), url: "https://en.wikipedia.org/wiki/Limit_state_design"}
+    - {topic: Euler's critical load (buckling), url: "https://en.wikipedia.org/wiki/Euler%27s_critical_load"}
+    - {topic: Wind engineering, url: "https://en.wikipedia.org/wiki/Wind_engineering"}
+  Geotechnical engineering:
+    - {topic: Unified Soil Classification System, url: "https://en.wikipedia.org/wiki/Unified_Soil_Classification_System"}
+    - {topic: Bearing capacity, url: "https://en.wikipedia.org/wiki/Bearing_capacity"}
+    - {topic: Atterberg limits, url: "https://en.wikipedia.org/wiki/Atterberg_limits"}
+    - {topic: Effective stress, url: "https://en.wikipedia.org/wiki/Effective_stress"}
+    - {topic: Soil consolidation, url: "https://en.wikipedia.org/wiki/Consolidation_(soil)"}
+    - {topic: Lateral earth pressure, url: "https://en.wikipedia.org/wiki/Lateral_earth_pressure", parts: 8}
+    - {topic: Darcy's law, url: "https://en.wikipedia.org/wiki/Darcy%27s_law"}
+  Water resources and environmental:
+    - {topic: Manning formula, url: "https://en.wikipedia.org/wiki/Manning_formula"}
+    - {topic: Hazen–Williams equation, url: "https://en.wikipedia.org/wiki/Hazen%E2%80%93Williams_equation"}
+    - {topic: Hydraulic jump, url: "https://en.wikipedia.org/wiki/Hydraulic_jump"}
+    - {topic: Surface runoff, url: "https://en.wikipedia.org/wiki/Surface_runoff", parts: 8}
+    - {topic: Time of concentration, url: "https://en.wikipedia.org/wiki/Time_of_concentration"}
+    - {topic: Biochemical oxygen demand, url: "https://en.wikipedia.org/wiki/Biochemical_oxygen_demand", parts: 8}
+  Building codes in Washington (asked about by Andy):
+    - {topic: International Code Council and the IBC, url: "https://en.wikipedia.org/wiki/International_Building_Code", parts: 8, suggested_by: Andy}
+    - {topic: "Washington WAC 51-50: State Building Code adoption and amendment of the IBC", url: "https://app.leg.wa.gov/wac/default.aspx?cite=51-50&full=true", parts: 12, drop: '\[Statutory Authority[^\]]*\]', suggested_by: Andy}
+    - {topic: Washington statewide code adoption timeline (SBCC), url: "https://sbcc.wa.gov/about-sbcc/history/timeline-statewide-codes-adopted-washington", suggested_by: Andy}
