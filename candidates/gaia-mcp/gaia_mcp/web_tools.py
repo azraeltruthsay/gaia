@@ -465,6 +465,24 @@ def _ddg_search(query: str, max_results: int) -> List[dict]:
 # ---------------------------------------------------------------------------
 
 _MAX_CONTENT_BYTES = 500 * 1024  # 500KB
+_MAX_PDF_BYTES = 25 * 1024 * 1024   # a design-manual chapter runs a few MB
+
+
+def _pdf_text(data: bytes, timeout: int = 60) -> str:
+    """The text of a PDF, via pdftotext (poppler-utils); "" when it can't."""
+    import subprocess
+    import tempfile
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
+            f.write(data)
+            f.flush()
+            out = subprocess.run(["pdftotext", "-layout", f.name, "-"], capture_output=True, timeout=timeout)
+        text = out.stdout.decode("utf-8", errors="replace")
+    except Exception as e:  # missing tool, timeout, broken file
+        logger.warning("web_fetch: PDF text extraction failed: %s", e)
+        return ""
+    text = "\n".join(ln.rstrip() for ln in text.splitlines())
+    return text.strip() if len(text.split()) > 30 else ""
 _FETCH_TIMEOUT = 15  # seconds
 
 
@@ -532,10 +550,28 @@ def web_fetch(params: dict) -> dict:
         return {"ok": False, "error": f"Failed to fetch URL: {e}", "domain": domain}
 
     raw_bytes = resp.content
+    content_type = resp.headers.get("Content-Type", "")
+
+    # 2026-11-20: a PDF on a trusted site (the WSDOT Design Manual) is read
+    # as text, the way gaia-web reads an attached PDF (pdftotext)
+    if "pdf" in content_type.lower() or url.lower().split("?")[0].endswith(".pdf"):
+        text = _pdf_text(raw_bytes[:_MAX_PDF_BYTES])
+        if not text:
+            return {"ok": False, "error": "Couldn't read text from that PDF (scanned, or too large).",
+                    "domain": domain}
+        title = next((ln.strip() for ln in text.splitlines() if len(ln.strip()) > 8), url)[:200]
+        tier = trust.tier_for_domain(domain)
+        _remember_lookup(params, f"{url} {title}".strip(), [{
+            "title": title, "url": url, "snippet": text[:4000],
+            "domain": domain, "trust_tier": tier,
+        }], "fetch")
+        return {"ok": True, "title": title, "content": text, "domain": domain, "trust_tier": tier,
+                "source_type": "trusted" if tier == "trusted" else "verified",
+                "bytes": len(text), "word_count": len(text.split()), "format": "pdf"}
+
     if len(raw_bytes) > _MAX_CONTENT_BYTES:
         raw_bytes = raw_bytes[:_MAX_CONTENT_BYTES]
 
-    content_type = resp.headers.get("Content-Type", "")
     if "text" not in content_type and "html" not in content_type and "json" not in content_type:
         return {
             "ok": False,
