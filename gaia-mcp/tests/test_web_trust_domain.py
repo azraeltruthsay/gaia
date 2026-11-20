@@ -14,7 +14,7 @@ def shared(tmp_path, monkeypatch):
 
 def test_problems_checked_before_asking():
     assert "isn't a domain" in wt.trust_domain_problem({"domain": "not a domain", "reason": "x"})
-    assert "needs a reason" in wt.trust_domain_problem({"domain": "codes.iccsafe.org"})
+    assert wt.trust_domain_problem({"domain": "codes.iccsafe.org"}) is None      # reason optional
     assert "already" in wt.trust_domain_problem({"domain": "en.wikipedia.org", "reason": "x"})
     assert wt.trust_domain_problem({"domain": "https://www.dot.ca.gov/x", "reason": "Caltrans manuals"}) is None
 

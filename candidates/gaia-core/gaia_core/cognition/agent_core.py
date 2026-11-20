@@ -1610,6 +1610,22 @@ class AgentCore:
             except Exception:
                 logger.warning("Rest request check failed, continuing", exc_info=True)
 
+        # Asked to add a site to the sites she can read: the request goes to
+        # Azrael's approval by code, not by her remembering the tool
+        # (2026-11-20: "add scribd.com to your allow list" got an explanation
+        # of trust_domain, or "I can't", instead of the request).
+        if (source or "").lower() not in _INTERNAL_TURN_SOURCES:
+            try:
+                from gaia_core.cognition import site_request
+                _site = site_request.handle(user_input, session_id, self.session_manager)
+                if _site:
+                    self.session_manager.add_message(session_id, "user", user_input)
+                    self.session_manager.add_message(session_id, "assistant", _site)
+                    yield {"type": "token", "value": _site}
+                    return
+            except Exception:
+                logger.warning("Site request check failed, continuing", exc_info=True)
+
         # Facts she was told, kept and recalled. Ahead of research and the
         # old save-to-file route, which get these turns otherwise (1zbx).
         # A cheap, under-threshold-tolerant intent guess so told_fact() can

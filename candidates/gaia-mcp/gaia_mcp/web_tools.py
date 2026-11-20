@@ -220,8 +220,6 @@ def trust_domain_problem(params: dict) -> Optional[str]:
         domain = domain[4:]
     if not _DOMAIN_RE.match(domain):
         return f"'{params.get('domain')}' isn't a domain name."
-    if not (params.get("reason") or "").strip():
-        return "A request to trust a site needs a reason."
     trust, _, _ = _get_config()
     if trust.is_blocked(domain):
         return f"{domain} is on the blocked list."
@@ -244,7 +242,7 @@ def web_trust_domain(params: dict) -> dict:
         data = json.loads(path.read_text())
     except (OSError, ValueError):
         data = {"domains": []}
-    data["domains"].append({"domain": domain, "reason": params.get("reason", "").strip(),
+    data["domains"].append({"domain": domain, "reason": (params.get("reason") or "").strip() or "asked for in conversation",
                             "approved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=1))
