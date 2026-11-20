@@ -324,6 +324,16 @@ def palace_recall_params(params: dict, user_input: str) -> dict:
     return params
 
 
+_FAILED_PLAIN = {
+    "fetch": "I tried to open that page, but I couldn't, so I haven't read it.",
+    "search": "I tried to search for that, but the search failed, so I haven't found it yet.",
+    "read": "I tried to read that, but I couldn't open it.",
+    "write": "I tried to write that, but it failed, so nothing was saved.",
+    "add": "I tried to save that, but it failed, so nothing was saved.",
+    "store": "I tried to save that, but it failed, so nothing was saved.",
+}
+
+
 def honest_about_failure(events, tool_label: str, memory: bool = False):
     """A continuation after a failed tool, held until it can be checked: told
     the tool failed, she still said it worked 4/6 (knowledge add, 2026-11-03).
@@ -341,7 +351,10 @@ def honest_about_failure(events, tool_label: str, memory: bool = False):
     if memory and claims_memory(reply):
         reply = "I tried to look that up in my memory just now and couldn't, so I won't claim to remember it."
     elif claims_success(reply):
-        reply = f"That didn't work: {tool_label} failed, so nothing changed."
+        # said plainly, as she would (2026-11-20: Andy got "That didn't work:
+        # web(fetch) failed, so nothing changed." when a page wouldn't open)
+        reply = _FAILED_PLAIN.get(tool_label.split("(")[-1].rstrip(")"),
+                                  f"I tried, but {tool_label} failed, so that didn't happen.")
     if reply:
         yield {"type": "token", "value": reply}
     yield from others

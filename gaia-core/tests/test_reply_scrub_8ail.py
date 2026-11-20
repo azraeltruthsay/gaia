@@ -213,7 +213,7 @@ def test_no_claim_that_it_worked(reply):
 def test_a_false_claim_after_a_failed_tool_is_replaced():
     out = list(honest_about_failure(iter([{"type": "token", "value": "The update was "},
                                           {"type": "token", "value": "successful."}, {"type": "flush"}]), "knowledge(add)"))
-    assert out == [{"type": "token", "value": "That didn't work: knowledge(add) failed, so nothing changed."}, {"type": "flush"}]
+    assert out == [{"type": "token", "value": "I tried to save that, but it failed, so nothing was saved."}, {"type": "flush"}]
 
 
 def test_her_own_account_of_a_failure_stands():
