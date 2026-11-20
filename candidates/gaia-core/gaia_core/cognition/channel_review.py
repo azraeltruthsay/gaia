@@ -41,6 +41,7 @@ logger = logging.getLogger("GAIA.ChannelReview")
 Generate = Callable[[List[dict]], str]
 
 VIEW_N = 10
+MAX_TRIES = 3                 # inconclusive re-checks of one message before it's left
 PROMISE_MAX_AGE_S = 4 * 3600
 _KEPT_RE = re.compile(r"^\s*(?:\[\w+\]\s*)?(?:I looked it up|I re-checked|Looking back at what I said)", re.I)
 
@@ -146,18 +147,20 @@ def open_promises(history: List[Dict], now: Optional[float] = None) -> List[int]
 
 
 def recheck(question: str, said: str, same: Optional[Generate], other: Optional[Generate],
-            ground=None) -> Optional[str]:
-    """What she should have said, checked against something other than
-    herself; None when the check backs her or can't be made."""
+            ground=None):
+    """(what she should have said, or None; whether the check concluded).
+    Checked against something other than herself. Not concluded: the
+    calculations disagreed or there was nothing to read, so it can be tried
+    again later."""
     from gaia_core.cognition import answer_checks as ac
     from gaia_core.cognition.nlu.intent_detection import is_worked_problem
     if not question:
-        return None
+        return None, True
     if is_worked_problem(question):
         text, verdict = ac.check_computation(question, said, same, other)
         if verdict == "rewritten":
-            return ac.check_arithmetic(question, text, None)[0]
-        return None
+            return ac.check_arithmetic(question, text, None)[0], True
+        return None, verdict == "ok"
     if ground is None:
         from gaia_core.cognition.knowledge_router import ground_query
 
@@ -165,9 +168,9 @@ def recheck(question: str, said: str, same: Optional[Generate], other: Optional[
             return ground_query(q, intent="other", max_total_ms=30000).results
     results = ground(question) or []
     if not ac.web_pages(results):
-        return None
+        return None, False
     text, verdict = ac.check_page(question, said, results, same, other, engineering=False)
-    return text if verdict == "rewritten" else None
+    return (text if verdict == "rewritten" else None), verdict in ("rewritten", "kept")
 
 
 def _own_follow_up(m: Dict) -> bool:
@@ -211,7 +214,11 @@ def review(session_id: str, history: List[Dict], generate: Optional[Generate], s
     """One look back. Returns what was done: {"promise": ..., "recheck": ...}."""
     from gaia_core.cognition import promises
     state = _load_state()
-    handled = set(state.get(session_id, []))
+    mine_state = state.get(session_id, {})
+    if isinstance(mine_state, list):          # the first format: handled ids only
+        mine_state = {"done": mine_state, "tries": {}}
+    handled = set(mine_state.get("done", []))
+    tries = dict(mine_state.get("tries", {}))
     done: Dict = {"promise": None, "recheck": None}
 
     # 1. A follow-up she promised and didn't give: kept, by code.
@@ -242,19 +249,27 @@ def review(session_id: str, history: List[Dict], generate: Optional[Generate], s
         m = re.match(r"\D*?(\d{1,2})\b", said)
         if m and 1 <= int(m.group(1)) <= len(candidates):
             i, msg = candidates[int(m.group(1)) - 1]
-            handled.add(msg.get("id") or str(i))
+            mid = msg.get("id") or str(i)
             question = _prev_user(history, i)
             mine_text = re.sub(r"^\s*\[\w+\]\s*", "", msg.get("content") or "").strip()
-            fixed = recheck(question, mine_text, same, other, ground)
+            fixed, concluded = recheck(question, mine_text, same, other, ground)
+            # an inconclusive check doesn't use up the message: tried again
+            # on a later look back, up to MAX_TRIES (the 20 mR/hr answer's
+            # first check disagreed with itself and it was never looked at again)
+            tries[mid] = tries.get(mid, 0) + 1
+            if concluded or tries[mid] >= MAX_TRIES:
+                handled.add(mid)
             if fixed:
                 quote = mine_text[:120] + ("…" if len(mine_text) > 120 else "")
                 text = f"Looking back at what I said earlier (\"{quote}\"), I was wrong. {fixed}"
                 if send(session_id, text):
                     record(text)
                 _file_finding(session_id, question, mine_text, fixed)
-            done["recheck"] = {"message": mine_text[:300], "question": question, "corrected": fixed}
+            done["recheck"] = {"message": mine_text[:300], "question": question, "corrected": fixed,
+                               "concluded": concluded, "try": tries[mid]}
             _log({"session_id": session_id, "kind": "recheck", **done["recheck"]})
-    state[session_id] = sorted(handled)[-200:]
+    state[session_id] = {"done": sorted(handled)[-200:],
+                         "tries": {k: v for k, v in tries.items() if k not in handled}}
     _save_state(state)
     return done
 

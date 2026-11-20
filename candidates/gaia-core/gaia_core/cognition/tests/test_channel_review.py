@@ -100,3 +100,18 @@ def test_question_only_since_her_previous_message():
     assert cr._prev_user(h, 4).startswith("GAIA, what IBC year")
     h2 = h[:2] + [{"id": "a5", "role": "assistant", "content": "Anything else?", "timestamp": h[0]["timestamp"]}]
     assert cr._prev_user(h2, 2) == ""
+
+
+def test_inconclusive_check_is_tried_again():
+    h = _h()[:2]
+    disagree = iter(["Q = 1", "Q = 2", "Q = 3"])
+
+    def gen_bad(m):
+        return next(disagree) if m[-1]["content"].startswith("Work this problem") else "x"
+    out = cr.review("discord_channel_4", h, generate=lambda m: "RECHECK: 1", same=gen_bad, other=None,
+                    send=lambda s, t: pytest.fail("nothing confirmed"), record=lambda t: None, ground=lambda q: [])
+    assert out["recheck"]["concluded"] is False
+    sent = []
+    out = cr.review("discord_channel_4", h, generate=lambda m: "RECHECK: 1", same=gen_steps, other=None,
+                    send=lambda s, t: sent.append(t) or True, record=lambda t: None, ground=lambda q: [])
+    assert out["recheck"]["corrected"] and "0.589" in sent[-1]
