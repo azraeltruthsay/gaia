@@ -238,6 +238,18 @@ class SleepTaskScheduler:
             min_interval_seconds=120,
         ))
 
+        # dcrs/p3ta (2026-11-20): her own gap -> study -> train -> eval loop;
+        # activation waits for Azrael's authenticator code
+        self.register_task(SleepTask(
+            task_id="self_improve",
+            task_type="SELF_IMPROVEMENT",
+            priority=4,
+            interruptible=False,
+            estimated_duration_seconds=120,
+            handler=self._run_self_improve,
+            min_interval_seconds=900,
+        ))
+
         self.register_task(SleepTask(
             task_id="tier5_training",
             task_type="RETRAINABLE_MEMORY",
@@ -3431,6 +3443,14 @@ class SleepTaskScheduler:
             logger.error("Samvega KV fold failed", exc_info=True)
 
     # ------------------------------------------------------------------
+
+    def _run_self_improve(self) -> None:
+        """One step of her self-improvement loop (self_improve.tick)."""
+        from gaia_core.cognition import self_improve
+        from gaia_core.cognition.self_review import chat_generator
+        gen = chat_generator(self.model_pool, max_tokens=200, temperature=0.2) if self.model_pool else None
+        state = self_improve.tick(gen)
+        logger.info("self_improve: stage %s", state.get("stage"))
 
     def _run_tier5_training(self) -> None:
         """Translate promoted Samvega artifacts → QLoRA training pairs, trigger micro-training."""

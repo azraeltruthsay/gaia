@@ -269,6 +269,13 @@ DOMAIN_TOOLS: Dict[str, dict] = {
                 "params": {"adapter_name": "string", "tier": "integer"},
                 "maps_to": "adapter_delete",
             },
+            # 2026-11-20: switch her active adapter in a slot to one that passed
+            # its gates (adapter_registry); Azrael approves with his code
+            "adapter_activate": {
+                "params": {"slot": "string", "name": "string"},
+                "maps_to": "adapter_activate",
+                "sensitive": True,
+            },
         },
     },
 

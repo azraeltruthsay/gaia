@@ -41,8 +41,15 @@ _NUM = re.compile(r"\d+(?:[.,]\d+)*")
 
 
 def adapter() -> str:
-    """The engineering adapter for Prime, or '' (off)."""
-    return os.environ.get("ENGINEERING_ADAPTER", "").strip()
+    """The engineering adapter for Prime, or '' (off): the registry's active
+    one (switched there by an approved activation, live on the next turn),
+    else ENGINEERING_ADAPTER."""
+    env = os.environ.get("ENGINEERING_ADAPTER", "").strip()
+    try:
+        from gaia_common.utils.adapter_registry import active
+        return active("engineering", env)
+    except Exception:
+        return env
 
 
 def role_card() -> str:

@@ -4258,6 +4258,9 @@ class AgentCore:
                                 user_input, _final_clean,
                                 _eng_mode.other_mind(self.model_pool, _ans_role))
                             logger.info("engineering mode: general knowledge %s", _eng_verdict)
+                            if _eng_verdict == "disagreed":
+                                from gaia_core.cognition import learning_gaps
+                                learning_gaps.note(user_input, "disagreed", session_id)
                         except Exception:
                             logger.debug("engineering cross-check failed", exc_info=True)
                     if _final_clean and _checks:
@@ -4270,6 +4273,9 @@ class AgentCore:
                                                                              _other_calc)
                             if _calc != "skipped":
                                 logger.info("answer checks: computation %s", _calc)
+                            if _calc == "unsure":
+                                from gaia_core.cognition import learning_gaps
+                                learning_gaps.note(user_input, "unsure", session_id)
                             _final_clean, _arith = _checks.check_arithmetic(user_input, _final_clean, _same_mind)
                             if _arith != "ok":
                                 logger.info("answer checks: arithmetic %s", _arith)

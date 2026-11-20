@@ -689,6 +689,43 @@ def create_app() -> FastAPI:
             logger.exception("Failed to start pipeline")
             raise HTTPException(status_code=500, detail=str(e))
 
+    _self_improve_proc = None
+
+    @app.post("/pipeline/self-improve")
+    async def self_improve_run(options: Dict = {}):
+        """Her own training run (scripts/self_improve_gpu.py): review, build,
+        augment, train, evaluate, decide. Asked for by gaia-core's
+        self_improve when she is idle; one at a time (dcrs/p3ta, 2026-11-20)."""
+        nonlocal _self_improve_proc
+        import subprocess
+        import sys
+        if _self_improve_proc is not None and _self_improve_proc.poll() is None:
+            return {"ok": False, "error": "a self-improve run is already going", "pid": _self_improve_proc.pid}
+        if _pipeline_proc is not None and _pipeline_proc.poll() is None:
+            return {"ok": False, "error": "another training pipeline is running"}
+        cur, study = options.get("curriculum"), options.get("study")
+        if not cur or not study:
+            raise HTTPException(status_code=400, detail="curriculum and study are required")
+        cmd = [sys.executable, "scripts/self_improve_gpu.py", "--curriculum", cur, "--study", study,
+               "--slot", options.get("slot") or "engineering", "--current", options.get("current") or ""]
+        _self_improve_proc = subprocess.Popen(cmd, cwd="/gaia/GAIA_Project",
+                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        logger.info("self-improve run started: %s", " ".join(cmd))
+        return {"ok": True, "status": "started", "pid": _self_improve_proc.pid}
+
+    @app.get("/pipeline/self-improve")
+    async def self_improve_status():
+        nonlocal _self_improve_proc
+        import json as _json
+        from pathlib import Path
+        running = _self_improve_proc is not None and _self_improve_proc.poll() is None
+        last = {}
+        try:
+            last = _json.loads(Path("/shared/self_improve/last_run.json").read_text())
+        except Exception:
+            pass
+        return {"running": running, "last_run": last}
+
     @app.get("/pipeline/status")
     async def pipeline_status():
         """Check if a pipeline subprocess is currently running."""
