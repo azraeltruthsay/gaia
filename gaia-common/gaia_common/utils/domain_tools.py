@@ -85,6 +85,13 @@ DOMAIN_TOOLS: Dict[str, dict] = {
                 "params": {"url": "string"},
                 "maps_to": "web_fetch",
             },
+            # 2026-11-20: she asks to add a site to the sites she may read;
+            # Azrael approves with his authenticator code
+            "trust_domain": {
+                "params": {"domain": "string", "reason": "string"},
+                "maps_to": "web_trust_domain",
+                "sensitive": True,
+            },
         },
     },
 

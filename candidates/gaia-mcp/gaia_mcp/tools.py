@@ -24,7 +24,7 @@ from gaia_common.utils.world_state import world_state_detail
 from gaia_common.utils.service_client import get_study_client
 
 from .approval import ApprovalStore
-from .web_tools import web_search, web_fetch
+from .web_tools import web_search, web_fetch, web_trust_domain, trust_domain_problem
 from .browser_tools import browser_tool as _browser_tool
 from .kanka_tools import (
     kanka_list_campaigns, kanka_search, kanka_list_entities,
@@ -292,6 +292,7 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         # Web research tools
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
+        "web_trust_domain": lambda p: web_trust_domain(p),
         # Kanka.io world-building tools
         "kanka_list_campaigns": lambda p: kanka_list_campaigns(p),
         "kanka_search": lambda p: kanka_search(p),
@@ -593,6 +594,10 @@ def preflight(method: str, params: Dict, approval_store: "ApprovalStore" = None)
             approval_store.validate_against_blast_shield(method, params)
         if method == "write_file":
             _checked_write_path(params.get("path"))
+        if method == "web_trust_domain":
+            _trust_problem = trust_domain_problem(params)
+            if _trust_problem:
+                return _trust_problem
         from .kanka_tools import write_problem as _kanka_write_problem
         _problem = _kanka_write_problem(method, params)
         if _problem:

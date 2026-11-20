@@ -5,9 +5,12 @@ Read-only tools that give GAIA access to real, verifiable web sources.
 Safety via domain allowlist + rate limits (not SENSITIVE_TOOLS).
 """
 
+import json
 import logging
+import os
 import re
 import time
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -172,6 +175,11 @@ def _get_config() -> Tuple[SourceTrustConfig, _RateLimiter, _RateLimiter]:
             web_cfg = {}
 
         _trust_config = SourceTrustConfig(web_cfg)
+        # sites Azrael approved for her since (web_trust_domain)
+        for d in approved_domains():
+            if d not in _trust_config.trusted:
+                _trust_config.trusted.append(d)
+            _trust_config._allowlist.add(d)
 
         rate = web_cfg.get("rate_limits", {})
         _search_limiter = _RateLimiter(
@@ -183,6 +191,67 @@ def _get_config() -> Tuple[SourceTrustConfig, _RateLimiter, _RateLimiter]:
             window_seconds=3600,
         )
     return _trust_config, _search_limiter, _fetch_limiter
+
+
+# ---------------------------------------------------------------------------
+# Sites she asked to trust, approved by Azrael (2026-11-20)
+# ---------------------------------------------------------------------------
+
+_DOMAIN_RE = re.compile(r"^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+
+
+def _approved_path() -> Path:
+    return Path(os.environ.get("SHARED_DIR", "/shared")) / "web" / "trusted_added.json"
+
+
+def approved_domains() -> List[str]:
+    try:
+        return [d["domain"] for d in json.loads(_approved_path().read_text()).get("domains", [])]
+    except (OSError, ValueError, KeyError, TypeError):
+        return []
+
+
+def trust_domain_problem(params: dict) -> Optional[str]:
+    """Why a request to trust this domain can't be granted, or None. Checked
+    before Azrael is asked (an approval that can't run wastes his code)."""
+    domain = (params.get("domain") or "").strip().lower()
+    domain = re.sub(r"^https?://", "", domain).split("/")[0].split(":")[0]
+    if domain.startswith("www."):
+        domain = domain[4:]
+    if not _DOMAIN_RE.match(domain):
+        return f"'{params.get('domain')}' isn't a domain name."
+    if not (params.get("reason") or "").strip():
+        return "A request to trust a site needs a reason."
+    trust, _, _ = _get_config()
+    if trust.is_blocked(domain):
+        return f"{domain} is on the blocked list."
+    if trust.is_allowed(domain):
+        return f"{domain} is already a site you can read."
+    return None
+
+
+def web_trust_domain(params: dict) -> dict:
+    """Add a site to the ones she may read. Runs only once approved."""
+    global _trust_config
+    problem = trust_domain_problem(params)
+    if problem:
+        return {"ok": False, "error": problem}
+    domain = re.sub(r"^https?://", "", params["domain"].strip().lower()).split("/")[0].split(":")[0]
+    domain = domain[4:] if domain.startswith("www.") else domain
+    path = _approved_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        data = {"domains": []}
+    data["domains"].append({"domain": domain, "reason": params.get("reason", "").strip(),
+                            "approved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=1))
+    os.replace(tmp, path)
+    _trust_config = None            # re-read with the new site on the next call
+    logger.info("web: %s added to trusted sites (%s)", domain, params.get("reason", "")[:120])
+    return {"ok": True, "domain": domain, "message": f"{domain} is now a site you can read."}
 
 
 # ---------------------------------------------------------------------------
@@ -524,7 +593,9 @@ def web_fetch(params: dict) -> dict:
             "error": (
                 f"Domain '{domain}' is not in the allowlist. "
                 "Use web_search first to find content from trusted sources, "
-                "then fetch from those results."
+                "then fetch from those results. If this site should be trusted, "
+                f"you can ask to add it: web(action=trust_domain, domain={domain}, "
+                "reason=...); Azrael approves it with his authenticator code."
             ),
             "domain": domain,
             "trust_tier": "unknown",
