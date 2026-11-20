@@ -1235,6 +1235,10 @@ async def missed_message(session_id: str):
         return JSONResponse(status_code=503, content={"error": "Cognitive system not initialized"})
     from gaia_core.cognition.missed_sweep import pick_missed
     from gaia_core.cognition.self_review import chat_generator
+    if _TURNS_IN_FLIGHT.get(session_id):
+        # she's answering in this channel right now; nothing is missed yet
+        logger.info("session=%s: a turn is in flight; no missed-message pick", session_id)
+        return {"pick": None, "busy": True}
     history = _ai_manager.session_manager.get_history(session_id) or []
     loop = asyncio.get_running_loop()
     pick = await loop.run_in_executor(None, lambda: pick_missed(
@@ -1322,6 +1326,9 @@ async def delete_session(session_id: str, archive: bool = True):
     return {"status": "deleted", "session_id": session_id}
 
 
+_TURNS_IN_FLIGHT: Dict[str, int] = {}
+
+
 @app.post("/process_packet")
 async def process_packet(packet_data: Dict[str, Any]):
     """
@@ -1388,8 +1395,23 @@ async def process_packet(packet_data: Dict[str, Any]):
         pass  # httpx not available — skip gate
 
     _after_turn: dict = {}
+    try:
+        _turn_sid = (packet_data.get("header", {}) or {}).get("session_id") or ""
+    except Exception:
+        _turn_sid = ""
 
     async def _run_loop():
+        # 2026-11-20: the missed-message sweep picked a message she was still
+        # answering, and she answered it twice. A session with a turn in
+        # flight is skipped by /missed.
+        _TURNS_IN_FLIGHT[_turn_sid] = _TURNS_IN_FLIGHT.get(_turn_sid, 0) + 1
+        try:
+            async for _chunk in _run_loop_body():
+                yield _chunk
+        finally:
+            _TURNS_IN_FLIGHT[_turn_sid] = max(0, _TURNS_IN_FLIGHT.get(_turn_sid, 1) - 1)
+
+    async def _run_loop_body():
         logger.info("Main: _run_loop generator started")
         if _engine_not_ready:
             _ready = False
