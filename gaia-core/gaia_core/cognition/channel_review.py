@@ -240,6 +240,11 @@ def _recheck_one(session_id, history, i, msg, same, other, ground, send, record,
         if send(session_id, text):
             record(text)
         _file_finding(session_id, question, mine_text, fixed)
+        try:
+            from gaia_core.cognition import learning_gaps
+            learning_gaps.note(question, "corrected", session_id, fixed[:300])
+        except Exception:
+            pass
     done["recheck"] = {"message": mine_text[:300], "question": question, "corrected": fixed,
                        "concluded": concluded, "try": tries[mid]}
     _log({"session_id": session_id, "kind": "recheck", **done["recheck"]})

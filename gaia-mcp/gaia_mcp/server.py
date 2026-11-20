@@ -217,7 +217,7 @@ async def request_approval_endpoint(request: Request):
         # 1. Create a pending action
         allow_pending = bool(body.get("allow_pending", False))
         action_id, created_at, expiry = approval_store.create_pending(
-            method, params, allow_pending=allow_pending
+            method, params, allow_pending=allow_pending, ttl_seconds=body.get("ttl_seconds")
         )
 
         # 2. Log for the user

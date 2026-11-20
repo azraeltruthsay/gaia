@@ -293,6 +293,7 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "web_search": lambda p: web_search(p),
         "web_fetch": lambda p: web_fetch(p),
         "web_trust_domain": lambda p: web_trust_domain(p),
+        "adapter_activate": lambda p: _adapter_activate(p),
         # Kanka.io world-building tools
         "kanka_list_campaigns": lambda p: kanka_list_campaigns(p),
         "kanka_search": lambda p: kanka_search(p),
@@ -579,6 +580,13 @@ def _checked_write_path(path) -> Path:
     return real
 
 
+def _adapter_activate(params: dict) -> dict:
+    """Switch a slot's active adapter to one waiting with a passing verdict
+    (runs only once Azrael's code approves it)."""
+    from gaia_common.utils.adapter_registry import activate
+    return activate(params.get("slot") or "engineering", params.get("name") or "", by="Azrael (authenticator code)")
+
+
 def preflight(method: str, params: Dict, approval_store: "ApprovalStore" = None):
     """Why this call could not run even if approved, or None (96xm,
     2026-11-16: a write to /approval_test.txt was approved with a real code,
@@ -594,6 +602,11 @@ def preflight(method: str, params: Dict, approval_store: "ApprovalStore" = None)
             approval_store.validate_against_blast_shield(method, params)
         if method == "write_file":
             _checked_write_path(params.get("path"))
+        if method == "adapter_activate":
+            from gaia_common.utils.adapter_registry import activation_problem
+            _act = activation_problem(params.get("slot") or "engineering", params.get("name") or "")
+            if _act:
+                return _act
         if method == "web_trust_domain":
             _trust_problem = trust_domain_problem(params)
             if _trust_problem:

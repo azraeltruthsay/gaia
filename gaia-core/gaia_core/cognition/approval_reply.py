@@ -46,14 +46,16 @@ def _file(session_id: str) -> Path:
     return APPROVALS_DIR / (re.sub(r"[^A-Za-z0-9_-]", "_", session_id) + ".json")
 
 
-def park_for(session_id: str, action_id: str, label: str) -> None:
-    """Hold a parked action for `session_id`'s next reply, from any process."""
+def park_for(session_id: str, action_id: str, label: str, ttl: float = 0) -> None:
+    """Hold a parked action for `session_id`'s next reply, from any process.
+    `ttl`: how long it waits, when gaia-mcp was asked to hold it longer than
+    the usual 15 minutes (an adapter activation waits up to a day)."""
     if not (session_id and action_id):
         return
     APPROVALS_DIR.mkdir(parents=True, exist_ok=True)
     tmp = _file(session_id).with_suffix(".tmp")
     tmp.write_text(json.dumps({"action_id": action_id, "label": label,
-                               "at": time.time()}))
+                               "at": time.time(), **({"ttl": ttl} if ttl else {})}))
     os.replace(tmp, _file(session_id))
 
 
@@ -134,7 +136,7 @@ def handle(session_manager, session_id: str, text: str, approve=None,
         return None
     if not pending:
         return None
-    if time.time() - pending.get("at", 0) > TTL_S:
+    if time.time() - pending.get("at", 0) > (pending.get("ttl") or TTL_S):
         _forget(session_manager, session_id)
         return None
     said = (text or "").strip().rstrip(".!")

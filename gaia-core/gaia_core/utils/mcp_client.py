@@ -403,9 +403,15 @@ def request_approval_via_mcp(method: str, params: Dict) -> Dict:
             params = dict(params)
             params.pop("_allow_pending", None)
 
+        ttl = None
+        if isinstance(params, dict) and "_ttl_seconds" in params:
+            params = dict(params)
+            ttl = params.pop("_ttl_seconds")
         payload: Dict[str, Any] = {"method": method, "params": params}
         if allow_pending:
             payload["allow_pending"] = True
+        if ttl:
+            payload["ttl_seconds"] = ttl
 
         logger.info(f"Requesting MCP approval: url={url} method={method} allow_pending={allow_pending}")
         # Inter-service HMAC auth — without these headers MCP's AuthMiddleware

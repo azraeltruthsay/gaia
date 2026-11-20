@@ -157,6 +157,11 @@ def keep(session_id: str, history: List[dict], who: str, same: Optional[Generate
             logger.info("promises: nothing found for a question nobody asked (%r); not posting", question[:80])
             return None
         text = NOT_FOUND.format(question=question.rstrip(" ?.") + "?")
+        try:
+            from gaia_core.cognition import learning_gaps
+            learning_gaps.note(question, "not_found", session_id)
+        except Exception:
+            pass
     if still_open is not None and not still_open():
         logger.info("promises: she already followed up in %s; not posting", session_id)
         return None

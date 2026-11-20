@@ -217,7 +217,8 @@ class ApprovalStore:
         method: str,
         params: Dict[str, Any],
         proposal: Optional[str] = None,
-        allow_pending: bool = False
+        allow_pending: bool = False,
+        ttl_seconds: Optional[float] = None,
     ) -> Tuple[str, float, float]:
         """
         Create a pending action awaiting approval.
@@ -228,7 +229,10 @@ class ApprovalStore:
         with self._lock:
             action_id = str(uuid.uuid4())
             now = time.time()
-            expiry = now + self._ttl
+            # a request may carry its own expiry (an adapter activation waits
+            # for Azrael for up to a day); 15 minutes otherwise
+            ttl = min(float(ttl_seconds), 86400.0) if ttl_seconds else self._ttl
+            expiry = now + ttl
 
             # Generate proposal if not provided
             if proposal is None:
