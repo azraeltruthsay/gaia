@@ -564,6 +564,28 @@ def _pdf_text(data: bytes, timeout: int = 60) -> str:
 _FETCH_TIMEOUT = 15  # seconds
 
 
+_GDOC_RE = re.compile(r"^https?://docs\.google\.com/(document|spreadsheets|presentation)/d/([A-Za-z0-9_-]{10,})")
+_GDRIVE_RE = re.compile(r"^https?://drive\.google\.com/(?:file/d/([A-Za-z0-9_-]{10,})|(?:open|uc)\?(?:.*&)?id=([A-Za-z0-9_-]{10,}))")
+
+
+def google_export_url(url: str) -> str:
+    """The plain export of a shared Google file: a Doc as text, a Sheet as
+    CSV, Slides as text, a Drive file as the file itself. Anything else as is."""
+    m = _GDOC_RE.match(url or "")
+    if m:
+        kind, fid = m.groups()
+        if kind == "document":
+            return f"https://docs.google.com/document/d/{fid}/export?format=txt"
+        if kind == "spreadsheets":
+            return f"https://docs.google.com/spreadsheets/d/{fid}/export?format=csv"
+        return f"https://docs.google.com/presentation/d/{fid}/export/txt"
+    m = _GDRIVE_RE.match(url or "")
+    if m:
+        fid = m.group(1) or m.group(2)
+        return f"https://drive.google.com/uc?export=download&id={fid}"
+    return url
+
+
 def web_fetch(params: dict) -> dict:
     """Fetch and extract text from a URL (allowlisted domains only).
 
@@ -577,6 +599,9 @@ def web_fetch(params: dict) -> dict:
     url = (params.get("url") or "").strip()
     if not url:
         raise ValueError("url is required")
+    # A shared Google Doc / Drive link opens a viewer that renders in the
+    # browser; its plain export is what she can read (2026-11-20, Andy's files)
+    url = google_export_url(url)
 
     # Validate URL structure
     parsed = urlparse(url)
@@ -631,6 +656,23 @@ def web_fetch(params: dict) -> dict:
 
     raw_bytes = resp.content
     content_type = resp.headers.get("Content-Type", "")
+
+    # a restricted Google file sends a login page instead of the file
+    if "accounts.google.com" in (getattr(resp, "url", "") or "") or (
+            domain.endswith("google.com") and b"accounts.google.com/ServiceLogin" in raw_bytes[:20000]):
+        return {"ok": False, "domain": domain,
+                "error": "That Google file isn't shared publicly: set it to 'Anyone with the link can view'."}
+    # plain text (a Google Doc's txt export): kept as it is, not run through
+    # the HTML extractor
+    if content_type.lower().startswith("text/plain"):
+        text = raw_bytes[:_MAX_PDF_BYTES].decode("utf-8", errors="replace").lstrip("\ufeff").strip()
+        title = next((ln.strip() for ln in text.splitlines() if ln.strip()), url)[:200]
+        tier = trust.tier_for_domain(domain)
+        _remember_lookup(params, f"{url} {title}".strip(), [{
+            "title": title, "url": url, "snippet": text[:4000], "domain": domain, "trust_tier": tier}], "fetch")
+        return {"ok": True, "title": title, "content": text, "domain": domain, "trust_tier": tier,
+                "source_type": "trusted" if tier == "trusted" else "verified",
+                "bytes": len(text), "word_count": len(text.split()), "format": "text"}
 
     # 2026-11-20: a PDF on a trusted site (the WSDOT Design Manual) is read
     # as text, the way gaia-web reads an attached PDF (pdftotext)
