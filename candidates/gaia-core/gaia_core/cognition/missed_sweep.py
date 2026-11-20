@@ -55,12 +55,17 @@ def unanswered(history: List[Dict], session_id: str, now: Optional[float] = None
     seen = _load(base).get(session_id, 0)
     last_i = max((i for i, m in enumerate(history) if m.get("role") == "assistant"), default=-1)
     after = []
+    asked = last_i >= 0 and "?" in (history[last_i].get("content") or "")[-300:]
     for m in history[last_i + 1:]:
         when = _epoch(m.get("timestamp"))
         text = _SPEAKER_RE.sub("", m.get("content") or "", count=1)
         if m.get("role") == "user" and when and when > seen and now - when <= MAX_AGE_S \
                 and not _APPROVAL_RE.match(text):
-            after.append(m)
+            from gaia_core.cognition.ambient_interject import might_be_for_her, not_for_her
+            # a reply to her own question is for her; otherwise it must look
+            # like it's said to her
+            if (asked and not not_for_her(m.get("content") or "")) or might_be_for_her(m.get("content") or ""):
+                after.append(m)
     mine = history[last_i].get("content", "") if last_i >= 0 else ""
     return mine, after[-MAX_MESSAGES:]
 

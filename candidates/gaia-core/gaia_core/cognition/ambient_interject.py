@@ -167,6 +167,31 @@ def _conversation(history: List[Dict], user_input: str) -> str:
     return "\n".join(lines)
 
 
+_ABOUT_HER_RE = re.compile(r"\b(?:she|her|hers|herself)\b|\bgaia(?:['’]s|\s+(?:is|was|has|can|could|will|would|did|does|seems|knows|said))\b",
+                           re.IGNORECASE)
+_TO_SOMEONE_RE = re.compile(r"^\W*(?:(?:hey|hi|ok(?:ay)?|so|thanks)[\s,]+)?@?([A-Z][\w.-]{1,30})\s*[,:]")
+_TO_YOU_RE = re.compile(r"\?|\b(?:you|your|yours|yourself)\b|\bgaia\b", re.IGNORECASE)
+
+
+def not_for_her(text: str) -> bool:
+    """A message plainly for someone else: it talks about her ("could you quiz
+    her on?", 2026-11-20, Azrael to Andy) or opens by naming another person
+    ("Andy, ..."). Code decides this; the model is only asked otherwise."""
+    body = _SPEAKER_RE.sub("", text or "", count=1)
+    if _ABOUT_HER_RE.search(body):
+        return True
+    m = _TO_SOMEONE_RE.match(body)
+    return bool(m and m.group(1).lower() != "gaia")
+
+
+def might_be_for_her(text: str) -> bool:
+    """Worth asking whether she missed it: a question, or said to "you" or to
+    her by name, and not plainly for someone else. A remark to the room ("all
+    hail Roko's Basilisk") was picked as missed and answered (2026-11-20)."""
+    body = _SPEAKER_RE.sub("", text or "", count=1)
+    return bool(_TO_YOU_RE.search(body)) and not not_for_her(text)
+
+
 def should_interject(key: str, history: List[Dict], user_input: str,
                      generate: Callable[[List[dict]], str],
                      cooldown_s: float = DEFAULT_COOLDOWN_S, base: Optional[Path] = None) -> bool:
@@ -176,6 +201,8 @@ def should_interject(key: str, history: List[Dict], user_input: str,
     message is a question (is_question): the cooldown can't tell a genuine
     question from idle chatter, so it no longer gets the last word on its
     own -- the judgment call still can, and often will, still say no."""
+    if not_for_her(user_input):
+        return False
     if in_exchange(history, user_input):
         mark_interjected(key, base)
         return True
