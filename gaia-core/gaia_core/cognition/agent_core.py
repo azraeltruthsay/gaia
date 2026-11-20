@@ -4175,6 +4175,16 @@ class AgentCore:
                         _eng_kind = None
                     # The engineering adapter is on Prime's GPU weights: in
                     # gear 1 she shifts up for it and waits (Azrael, 2026-11-19)
+                    # A worked problem (a calculation with units) or a person
+                    # asking for engineering mode counts too, without notes
+                    if not _eng_kind and source in ("web", "discord"):
+                        try:
+                            from gaia_core.cognition.nlu.intent_detection import is_worked_problem as _wp
+                            _asked_q = packet.content.original_prompt or user_input or ""
+                            if _eng_mode.asked_for(_asked_q) or _wp(_asked_q):
+                                _eng_kind = "problem"
+                        except Exception:
+                            pass
                     if _eng_kind and _eng_mode.adapter() and source in ("web", "discord"):
                         try:
                             from gaia_core.cognition import transmission as _tx
@@ -4200,7 +4210,9 @@ class AgentCore:
                         # Deep focus: the person asked her to focus / think
                         # hard, so Prime thinks natively on this turn only.
                         deep_focus=_delib_deep,
-                        engineering=_eng_kind,
+                        # v5 says "my notes don't cover that" to a calculation:
+                        # problems go to Prime without it (2026-11-20)
+                        engineering=_eng_kind if _eng_kind != "problem" else None,
                     )
                     # Strip any residual <think> tags from the deliberation
                     # output before yielding. _split_think_and_response already
@@ -4229,7 +4241,7 @@ class AgentCore:
                             "prime" if _ans_role in ("prime", "cpu_prime") else "core",), max_tokens=900, temperature=0.2)
                     except Exception:
                         _checks, _same_mind = None, None
-                    if _final_clean and _checks and _eng_kind != "notes" and _checks.web_pages(_gr_results):
+                    if _final_clean and _checks and _eng_kind not in ("notes", "problem") and _checks.web_pages(_gr_results):
                         try:
                             _final_clean, _eng_verdict = _checks.check_page(
                                 user_input, _final_clean, _gr_results, _same_mind,

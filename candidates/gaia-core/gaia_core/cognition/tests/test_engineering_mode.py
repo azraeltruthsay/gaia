@@ -51,3 +51,10 @@ def test_web_answer_backed_by_the_page_is_kept_unbacked_one_is_rechecked():
     text, verdict = em.check_web("q", bad, page, None)
     assert verdict == "unchecked" and text.startswith(em.GENERAL)
     assert "looked it up" not in text and "Source" not in text and "finite element" in text
+
+
+def test_asked_for_engineering_mode():
+    from gaia_core.cognition import engineering_mode as em
+    assert em.asked_for("Can you shift to Gear 2, load your engineering adapter and try that again?")
+    assert em.asked_for("switch to engineering mode please")
+    assert not em.asked_for("How has your evening been?")

@@ -47,7 +47,9 @@ def _normalise(seg: str) -> str:
     s = s.replace("²", "^2").replace("³", "^3")
     s = re.sub(r"(?<=\d),(?=\d{3}\b)", "", s)
     s = s.replace("$", "").replace("%", "")
+    s = re.sub(r"(?<=[A-Za-z])-(?=[A-Za-z])", " ", s)   # "half-value" is words, not a minus
     s = _UNIT.sub(" ", s)
+    s = re.sub(r"^\s*[-+*/]\s*(?=[\d(])", "", s)       # an operator left at the front by removed words
     s = re.sub(r"[*/]\s*(?=[)*/]|$)", " ", s)      # an operator a removed unit left dangling
     # what a removed compound unit leaves: "gal/(ft³/s)" -> "/( )"
     for _ in range(3):
@@ -380,11 +382,25 @@ def check_computation(question: str, answer: str, generate: Optional[Generate],
         runs.append(steps_run)
     if not all(runs):
         return answer, "skipped"
+    def same(x, y):
+        return abs(x - y) <= max(_REL_TOL * max(abs(x), abs(y)), 0.01)
     a, b = runs[0][-1][1], runs[1][-1][1]
-    if abs(a - b) > max(_REL_TOL * max(abs(a), abs(b)), 0.01):
-        logger.info("answer checks: two calculations disagree (%s vs %s); leaving the answer", _fmt(a), _fmt(b))
-        return answer, "unsure"
     steps = runs[0]
+    if not same(a, b):
+        # a third try breaks the tie (Prime 12.5, Core 23.67 on a shielding problem)
+        try:
+            third = run_steps(generate([{"role": "user", "content": STEPS.format(question=question)}]) or "")
+        except Exception:
+            third = []
+        c = third[-1][1] if third else None
+        if c is not None and same(c, a):
+            steps = runs[0]
+        elif c is not None and same(c, b):
+            steps = runs[1]
+        else:
+            logger.info("answer checks: calculations disagree (%s, %s, %s); leaving the answer",
+                        _fmt(a), _fmt(b), _fmt(c) if c is not None else "-")
+            return answer, "unsure"
     given = set(_numbers(question))
     finals = [v for _, v, _ in steps[-3:]]
     stated = [x for x in _numbers(answer) if x not in given]

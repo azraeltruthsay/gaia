@@ -41,3 +41,19 @@ def test_engineering_shift_returns_after_idle(tx):
     shift = {"by": "transmission", "why": "engineering", "at": 0, "last_engineering": 100}
     assert not tx.should_shift_down([], shift, 100 + tx.ENGINEERING_IDLE_S - 1)
     assert tx.should_shift_down([], shift, 100 + tx.ENGINEERING_IDLE_S)
+
+
+def test_parked_wakes_straight_into_gear_2(tx, monkeypatch):
+    gears = iter(["parked", "transitioning", "focusing"])
+    shifts = []
+    monkeypatch.setattr(tx, "_current_gear", lambda: next(gears))
+    monkeypatch.setattr(tx, "_shift", lambda target, reason: shifts.append(target) or True)
+    assert tx.shift_for_engineering("s1", wait_s=30, sleep=lambda s: None)
+    assert shifts == ["focusing"]
+
+
+def test_waits_out_a_shift_already_under_way(tx, monkeypatch):
+    gears = iter(["transitioning", "transitioning", "focusing"])
+    monkeypatch.setattr(tx, "_current_gear", lambda: next(gears))
+    monkeypatch.setattr(tx, "_shift", lambda *a: pytest.fail("already shifting"))
+    assert tx.shift_for_engineering("s1", wait_s=30, sleep=lambda s: None)

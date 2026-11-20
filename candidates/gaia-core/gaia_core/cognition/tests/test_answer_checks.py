@@ -183,7 +183,7 @@ def test_run_steps():
 
 def test_computation_needs_two_agreeing_tries():
     q = "A 6-inch inside-diameter pipe carries water at 3 ft/s. What is the flow in cfs and gpm?"
-    tries = iter(["D = 3\nQ = pi * D**2 / 4 * 3", "D = 0.5\nQ = pi * D**2 / 4 * 3"])
+    tries = iter(["D = 3\nQ = pi * D**2 / 4 * 3", "D = 0.5\nQ = pi * D**2 / 4 * 3", "D = 1\nQ = 9"])
     out, v = ac.check_computation(q, "0.589 cfs", lambda m: next(tries))
     assert v == "unsure" and out == "0.589 cfs"
 
@@ -201,3 +201,15 @@ def test_pi_in_steps():
 def test_compound_unit_in_step():
     assert ac.arithmetic_errors("we get Q_gpm = 0.589 cfs * 7.48 gal/(ft³/s) = 264.4 gpm.")
     assert ac.arithmetic_errors("Q_gpm = 0.589 cfs * 448.83 gpm/cfs = 264.4 gpm.") == []
+
+
+def test_third_try_breaks_the_tie():
+    q = "A source reads 400 mR/hr at 2 m. What is the rate at 4 m behind 3 half-value layers?"
+    tries = iter(["I = 400 * (2/4)**2 * 0.5**3", "I = 23.67", "I = 400 / 4 / 8"])
+    out, v = ac.check_computation(q, "I don't have that number.", lambda m: next(tries) if m[0]["content"].startswith("Work") else "12.5 mR/hr")
+    assert v == "rewritten" and "12.5" in out
+
+
+def test_hyphenated_words_are_not_minus():
+    assert ac.arithmetic_errors("Three half-value layers reduce intensity by a factor of 2^(-3) = 0.125") == []
+    assert ac.arithmetic_errors("I = 400 - 100 = 300") == []

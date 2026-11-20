@@ -137,3 +137,13 @@ def check_web(question: str, answer: str, sources: str,
                 ok, len(sents))
     plain = re.sub(r"^My notes on .*? don't cover that\.?\s*", "", _CLAIM_RE.sub(" ", answer)).strip()
     return check_general(question, plain, other)
+
+
+_ASKS_RE = re.compile(r"\b(?:gear\s*2|second gear|engineering\s+(?:adapter|mode)|shift\s+(?:up|to\s+(?:gear\s*2|prime)))\b",
+                      re.IGNORECASE)
+
+
+def asked_for(text: str) -> bool:
+    """The person asked for engineering mode ("shift to gear 2 and load your
+    engineering adapter"): she tried a tool and got a 404 (2026-11-20)."""
+    return bool(_ASKS_RE.search(text or ""))

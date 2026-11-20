@@ -206,7 +206,15 @@ def _wake_for_turn(lifecycle_client, orchestrator_url, source: str) -> bool:
         logger.info("Main: parked and spoken to; waking first")
         if os.getenv("GAIA_IS_CANDIDATE"):  # A candidate never drives the production gearbox (GAIA_IS_CANDIDATE).
             return False
-        return bool(httpx.post(f"{orchestrator_url}/gpu/wake", json={}, timeout=120).json().get("ok"))
+        ok = bool(httpx.post(f"{orchestrator_url}/gpu/wake", json={}, timeout=120).json().get("ok"))
+        state = lifecycle_client.get_state_sync(timeout=3.0).state
+        if getattr(state, "value", str(state)).lower() == "parked":
+            # the resting gear didn't fit (gear 1 needs ~12.8 GB); gear 2 does
+            logger.info("Main: wake into the resting gear refused; waking into gear 2")
+            r = httpx.post(f"{orchestrator_url}/consciousness/focusing", json={"reason": "wake for a turn"},
+                           timeout=30)
+            ok = r.status_code == 200
+        return ok
     except Exception as e:
         logger.warning("Main: could not wake for this turn: %s", e)
         return False

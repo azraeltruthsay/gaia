@@ -279,6 +279,11 @@ def shift_for_engineering(session_id: str, wait_s: float = ENGINEERING_WAIT_S, s
         return False
     gear = _current_gear()
     now = time.time()
+    # mid-shift (a wake for this turn already under way): wait for it to land
+    settle = time.time() + wait_s
+    while gear not in ("awake", "parked", "focusing", "") and time.time() < settle:
+        sleep(3)
+        gear = _current_gear()
     if gear == "focusing":
         with _lock:
             state = _load()
@@ -286,11 +291,14 @@ def shift_for_engineering(session_id: str, wait_s: float = ENGINEERING_WAIT_S, s
                 state["shift"]["last_engineering"] = now
                 _save(state)
         return True
-    if gear != "awake":
+    # parked (not held): wake straight into gear 2 -- what the adapter needs,
+    # and from parked gear 1 may not fit (2026-11-20: "insufficient VRAM for
+    # awake", GAIA's own parked buffers counted as an outside tenant)
+    if gear not in ("awake", "parked"):
         return False
     with _lock:
         state = _load()
-        if state.get("shift"):
+        if state.get("shift") and gear == "awake":
             return False
     if not _shift("focusing", "engineering question: the adapter is on Prime"):
         return False
