@@ -50,7 +50,19 @@ def test_computed_correction_without_her_rewrite():
     steps = "I0 = 400  # mR/hr\nI4 = I0 * (2/4)**2  # mR/hr\nrate = I4 * 0.5**3  # mR/hr"
     out, v = ac.check_computation(q, "The dose rate at 4m would be 20 mR/hr.",
                                   lambda m: steps if m[0]["content"].startswith("Work") else "It is 20 mR/hr.")
-    assert v == "rewritten" and out.endswith("So it's 12.5 mR/hr.")
+    assert v == "rewritten" and out.endswith("is 12.5 mR/hr.") and "_" not in out
+
+
+def test_plain_words():
+    q = "A source reads 400 mR/hr at 2 m. What is the rate at 4 m behind 3 half-value layers?"
+    steps = ac.run_steps("rate_at_2m = 400\nexposure_rate_at_4m_without_hvl = rate_at_2m * (2/4)**2\n"
+                         "attenuation_factor = 0.5**3\nexposure_rate_at_4m_with_hvl = exposure_rate_at_4m_without_hvl * attenuation_factor")
+    plain = ac.phrase_result(q, steps, {400.0, 2.0, 4.0, 3.0}, None)
+    assert plain == ("Working it through: exposure rate at 4 m without half-value layers is 100 mR/hr, and "
+                     "attenuation factor is 0.125. So the exposure rate at 4 m with half-value layers is 12.5 mR/hr.")
+    hers = "The rate is 12.5 mR/hr: the inverse square law cuts 400 mR/hr to 100 mR/hr at 4 m, and three half-value layers divide that by 8."
+    assert ac.phrase_result(q, steps, {400.0, 2.0, 4.0, 3.0}, lambda m: hers) == hers
+    assert ac.phrase_result(q, steps, {400.0, 2.0, 4.0, 3.0}, lambda m: "exposure_rate = 13 mR/hr") == plain
 
 
 PAGE = R(source="web", read=True, url="https://en.wikipedia.org/wiki/Stopping_sight_distance",

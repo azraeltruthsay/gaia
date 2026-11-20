@@ -423,14 +423,89 @@ def check_computation(question: str, answer: str, generate: Optional[Generate],
             steps=shown, question=question, answer=answer)}]) or "").strip()
     except Exception:
         new = ""
-    work = "; ".join(f"{n} = {_fmt(v)} {c.split('(')[0].strip()}".rstrip() for n, v, c in steps if v not in given)
     if new and near(finals[-1], _numbers(new)):
         if len(new) < 80:
-            new = f"{new.rstrip('.')}. Worked out: {work}."   # a bare number: show the working
+            new = f"{new.rstrip('.')}. Worked out: {plain_steps(steps, question, given)}."
         return new, "rewritten"
     # Her rewrite missed the computed value, but the calculation stands (two
-    # tries agreed, code ran it): say it from the steps themselves (her
+    # tries agreed, code ran it): said in plain words from the steps (her
     # rewrite of the 20 mR/hr answer never came to 12.5, 2026-11-20).
-    name, val, unit = steps[-1]
-    unit = unit.split("(")[0].strip()
-    return f"Worked out step by step: {work}. So it's {_fmt(val)}{(' ' + unit) if unit else ''}.", "rewritten"
+    return phrase_result(question, steps, given, generate), "rewritten"
+
+
+# ── the computed steps in plain words ──────────────────────────────────
+
+_ABBREV = {"hvl": "half-value layers", "hvls": "half-value layers", "q": "flow", "cfs": "cfs", "gpm": "gpm",
+           "psi": "psi", "ft": "ft", "ft2": "ft²", "ft3": "ft³", "d": "diameter", "a": "area", "v": "velocity",
+           "p": "pressure", "t": "thickness", "r": "radius", "i": "intensity", "num": "number", "sigma": "stress"}
+_UNIT_WORDS = {"per": "/", "hr": "hr", "sec": "s", "seconds": "s", "meters": "m", "meter": "m", "feet": "ft"}
+
+
+def _words(name: str) -> str:
+    """exposure_rate_at_4m_with_hvl -> exposure rate at 4 m with half-value layers"""
+    parts = re.findall(r"[A-Za-z]+|\d+(?:\.\d+)?", name.replace("_per_", " per "))
+    out = []
+    for p in parts:
+        low = p.lower()
+        out.append(_ABBREV.get(low, p if (p.isupper() and len(p) > 1) or p[0].isdigit() else low))
+    text = " ".join(out)
+    text = re.sub(r"(\d) (m|ft|in|s)\b", r"\1 \2", text)
+    return re.sub(r"\bmR per hr\b", "mR/hr", text)
+
+
+def _unit(comment: str) -> str:
+    """The unit in a step's comment, if it is short enough to be one."""
+    u = (comment or "").split("(")[0].strip()
+    return u if u and len(u) <= 12 and len(u.split()) <= 2 else ""
+
+
+def _question_unit(question: str, value: float, steps) -> str:
+    """No unit on the result: the unit of the given quantity it derives from
+    (the first given whose unit names a rate, else the first given)."""
+    units = re.findall(r"\d+(?:\.\d+)?\s*([A-Za-zµ°][\w/°²³]*(?:/[A-Za-z]+)?)", question or "")
+    rates = [u for u in units if "/" in u]
+    return (rates or units or [""])[0]
+
+
+def plain_steps(steps, question: str = "", given=()) -> str:
+    out = []
+    for n, v, c in steps:
+        if v in given:
+            continue
+        u = _unit(c)
+        out.append(f"{_words(n)} = {_fmt(v)}{(' ' + u) if u else ''}")
+    return "; ".join(out)
+
+
+PHRASE = ("Say this worked result in one or two plain sentences, as a correction of your earlier answer: "
+          "what the right result is and the one or two steps that get there, with units. Use the numbers "
+          "exactly as given. No variable names, no formatting.\n\nProblem: {question}\n\nComputed steps:\n{steps}")
+
+
+def phrase_result(question: str, steps, given=(), generate: Optional[Generate] = None) -> str:
+    """The computed result in plain words: she phrases it, and her sentence
+    is kept only if it carries the computed value and none of its numbers
+    contradict the steps; otherwise code writes it from the step names."""
+    name, val, comment = steps[-1]
+    unit = _unit(comment) or _question_unit(question, val, steps)
+    if generate is not None:
+        try:
+            said = (generate([{"role": "user", "content": PHRASE.format(
+                question=question, steps=plain_steps(steps, question, given))}]) or "").strip()
+        except Exception:
+            said = ""
+        nums = _numbers(said)
+        known = [v for _, v, _ in steps] + list(given) + [float(k) for k in range(1, 13)]
+        if said and any(abs(x - val) <= max(_REL_TOL * abs(val), 0.01) for x in nums) and \
+                all(any(abs(x - k) <= max(_REL_TOL * abs(k), 0.01) for k in known) for x in nums) and \
+                not re.search(r"\b[a-z]+_[a-z_]+\b", said):
+            return said
+    final_words = set(_words(name).split()) - {"at", "with", "without", "of", "the", "per", "m", "ft"}
+
+    def unit_of(n, c):
+        # an intermediate measuring the same thing as the result shares its unit
+        return _unit(c) or (unit if final_words & set(_words(n).split()) else "")
+    middle = [f"{_words(n)} is {_fmt(v)}{(' ' + unit_of(n, c)) if unit_of(n, c) else ''}" for n, v, c in steps[:-1]
+              if v not in given][-2:]
+    lead = ("Working it through: " + ", and ".join(middle) + ". ") if middle else ""
+    return f"{lead}So the {_words(name)} is {_fmt(val)}{(' ' + unit) if unit else ''}."
