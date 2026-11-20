@@ -64,7 +64,11 @@ _PREAMBLE_RE = re.compile(
     r"(?:recite|read|share|give me|show me|write out|type out|present|say)\s+(?:(?:to\s+)?me\s+)?"
 )
 _QUESTION_RE = re.compile(r"(?i)^(?:what(?:'s|’s| is| are| was)|tell me|how does|how do)\s+")
-_TRAILER_RE = re.compile(r"(?i)[\s,]+(?:for me|please|if you (?:can|could|would)|from memory)\s*$")
+_TRAILER_RE = re.compile(
+    r"(?i)[\s,]+(?:for (?:me|us|everyone|the (?:group|channel|class))|please|again|now|real quick|"
+    r"if you (?:can|could|would)|from memory|online|"
+    r"(?:from|using|via|with|through) (?:a |the )?(?:web|internet|online)(?: (?:lookup|look-up|search|source))?|"
+    r"(?:from|using|via|with) (?:a |the )?(?:web )?(?:lookup|look-up|search))\s*$")
 _FORM_RE = re.compile(r"(?i)^(?:the\s+)?(?:full\s+|whole\s+|entire\s+|complete\s+)?(?:text|poem|speech)\s+(?:of\s+)?")
 _TERM_NOISE = frozenset("""
 a an the of and in on to from for by poem poems speech text full whole entire complete
@@ -214,7 +218,15 @@ def work_name(request: str) -> str:
     name = _LEAD_IN_RE.sub("", name)
     name = _PREAMBLE_RE.sub("", name)
     name = _QUESTION_RE.sub("", name)
-    name = _TRAILER_RE.sub("", name)
+    # the request ends at its first sentence: "Ozymandias for us please? I
+    # think it's relevant" searched for all of it (2026-11-20)
+    name = re.split(r"(?<=[a-z0-9\"”’'])[?!]\s+|(?<!\bMr)(?<!\bMrs)(?<!\bMs)(?<!\bDr)(?<!\bSt)(?<!\bJr)(?<!\bSr)"
+                    r"(?<!\b[A-Z])\.\s+(?=[A-Z])", name, maxsplit=1)[0].rstrip(".!?")
+    for _ in range(4):                       # "... for us please", "... from a web lookup please"
+        stripped = _TRAILER_RE.sub("", name)
+        if stripped == name:
+            break
+        name = stripped
     name = _PART_OF_RE.sub("", name, count=1)
     name = _FORM_RE.sub("", name)
     return re.sub(r"[\"“”]", "", name).strip().strip("‘’").strip()

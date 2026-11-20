@@ -57,3 +57,12 @@ def test_near_miss_actions_resolve_and_stay_sensitive():
     import pytest as _pt
     with _pt.raises(ValueError):
         validate_domain_call("file", "edit")
+
+
+def test_work_name_without_the_chatter():
+    from gaia_common.utils.work_memory import work_name
+    assert work_name("Can you recite Ozymandias for us please? I think it's relevant") == "Ozymandias"
+    assert work_name("Please recite the poem Ozymandias from a web lookup.") == "Ozymandias"
+    assert work_name("Please recite the first three stanzas of The Raven by Edgar Allan Poe.") == "The Raven by Edgar Allan Poe"
+    assert work_name("Recite Mr. Bojangles please") == "Mr. Bojangles"
+    assert work_name("Recite The Road Not Taken by Robert Frost from memory please") == "The Road Not Taken by Robert Frost"
