@@ -165,8 +165,19 @@ _search_limiter: Optional[_RateLimiter] = None
 _fetch_limiter: Optional[_RateLimiter] = None
 
 
+_approved_mtime = 0.0
+
+
 def _get_config() -> Tuple[SourceTrustConfig, _RateLimiter, _RateLimiter]:
-    global _trust_config, _search_limiter, _fetch_limiter
+    global _trust_config, _search_limiter, _fetch_limiter, _approved_mtime
+    try:
+        mtime = _approved_path().stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    if mtime != _approved_mtime:
+        # a site approved since (in this or another process): re-read the list
+        _approved_mtime = mtime
+        _trust_config = None
     if _trust_config is None:
         try:
             cfg = Config()

@@ -17,7 +17,7 @@ logger = logging.getLogger("GAIA.SiteRequest")
 _DOMAIN = r"(?:https?://)?(?:www\.)?([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9-]{1,63})*\.[a-z]{2,63})"
 _LIST = r"(?:(?:web\s+)?(?:search\s+)?(?:allow\s*-?\s*list|white\s*-?\s*list|safe\s*list|trusted\s+(?:list|sites?|websites?|domains?)|approved\s+sites?|allowed\s+(?:list|sites?|websites?)))"
 _ASK_RE = re.compile(
-    rf"\b(?:add|put|include|allow|trust|whitelist|allowlist)\s+{_DOMAIN}(?:\s+(?:to|on|in)\s+(?:your|the|her)?\s*{_LIST})?"
+    rf"\b(?:add|put|include|allow|trust|whitelist|allowlist|approve|mark(?:\s+as)?\s+trusted|make\s+trusted)\s+{_DOMAIN}(?:\s+(?:to|on|in)\s+(?:your|the|her)?\s*{_LIST})?"
     rf"|\b(?:add|put)\s+{_DOMAIN}\b"
     rf"|\b{_LIST}\b[^.?!\n]{{0,40}}?\b{_DOMAIN}",
     re.IGNORECASE)

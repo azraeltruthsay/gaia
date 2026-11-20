@@ -7,6 +7,7 @@ def test_requested_domain():
     assert sr.requested_domain("Andy: please whitelist https://www.dot.ca.gov/programs") == "dot.ca.gov"
     assert sr.requested_domain("Azrael: is scribd on your allowed list of websites?") is None
     assert sr.requested_domain("Nick: add some salt to the soup") is None
+    assert sr.requested_domain("Azrael: please mark trusted scribd.com for research and reference") == "scribd.com"
     assert sr.requested_domain("Azrael: I visited scribd.com yesterday") is None
 
 
