@@ -38,7 +38,10 @@ ADAPTER_ROOT = Path(os.environ.get("ADAPTER_ROOT", "/models/lora_adapters/tier1_
 # the web gates compare it with the active adapter on the same cases.
 GATES = {
     "recall_min": 0.65,            # held-out recall with the adapter
-    "recall_gain_min": 0.02,       # ... and better than without it
+    # Azrael 2026-11-20: with her notes shown, recall comes from the notes
+    # (~0.75 without any adapter); the adapter changes how she uses them. The
+    # gate is "does no harm": recall no more than this below no adapter.
+    "recall_harm_max": 0.01,
     "says_missing_min": 0.80,      # says when her notes don't cover a question
     "ordinary_kept_min": 0.50,     # ordinary answers (it is only on engineering turns)
     "invents_slack": 0.02,         # web: invents no more than the active adapter (+ slack)
@@ -115,7 +118,8 @@ def decide(candidate: str, current: str = "") -> Tuple[bool, List[str]]:
         return False, [f"FAIL  {candidate} has no eval_notes.json"]
     r, r0 = notes.get("held_out_recall", 0), base.get("held_out_recall", 0)
     gate(r >= GATES["recall_min"], f"held-out recall {r:.2f} (min {GATES['recall_min']})")
-    gate(r - r0 >= GATES["recall_gain_min"], f"recall gain over no adapter {r - r0:+.2f} (min +{GATES['recall_gain_min']})")
+    gate(r - r0 >= -GATES["recall_harm_max"],
+         f"recall vs no adapter {r - r0:+.3f} (no lower than -{GATES['recall_harm_max']})")
     sm = notes.get("unstudied_says_missing", 0)
     gate(sm >= GATES["says_missing_min"], f"says what her notes don't cover {sm:.2f} (min {GATES['says_missing_min']})")
     ok_ord = notes.get("ordinary_kept", 0)

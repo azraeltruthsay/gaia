@@ -39,10 +39,10 @@ def test_passing_adapter_waits_for_approval(env, monkeypatch):
 
 
 def test_failing_adapter_is_kept_out(env):
-    env("v7", BASE, {"held_out_recall": 0.71, "unstudied_says_missing": 0.9, "ordinary_kept": 0.6},
+    env("v7", BASE, {"held_out_recall": 0.66, "unstudied_says_missing": 0.9, "ordinary_kept": 0.6},
         {"v6": {"invents": 0.05, "backed": 0.60}, "v7": {"invents": 0.20, "backed": 0.40}})
     passed, verdict = ar.decide("v7", "v6")
-    assert not passed and any(v.startswith("FAIL  recall gain") for v in verdict)
+    assert not passed and any(v.startswith("FAIL  recall vs no adapter") for v in verdict)
     assert any(v.startswith("FAIL  web invents") for v in verdict)
     assert ar.consider("engineering", "v7", fallback_current="v6")["action"] == "kept"
     assert "isn't an adapter waiting" in ar.activation_problem("engineering", "v7")
