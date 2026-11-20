@@ -122,6 +122,11 @@ _CHECK_IN_RE = re.compile(
     re.IGNORECASE)
 
 
+ATTACHMENT_FACT = ("\n\nFiles people attach to a message in chat (PDFs, text files, images) reach "
+                   "you with that message: you read them as they arrive, long ones in parts while "
+                   "you talk. Nobody has to put them in a folder.")
+
+
 def is_check_in(text: str) -> bool:
     """Whether a message just asks how she is / what she's been up to."""
     return bool(_CHECK_IN_RE.match(text or ""))
@@ -610,6 +615,9 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
             "  /sandbox            — scratch area for writes.\n"
             "When asked about a file, pass an absolute path under one of those "
             "roots. Bare filenames like 'CLAUDE.md' will be rejected.\n"
+            # 2026-11-20: Andy asked whether he could upload PDFs and she sent
+            # him to the file roots; an attachment reaches her on its own
+            + ATTACHMENT_FACT.strip() + "\n"
             "When NOT to call a tool: pure conversation, math you can do in "
             "your head, things you genuinely know. Calling a tool for "
             "'what's 2+2' is wasteful. Use judgment.\n"
@@ -678,7 +686,12 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
         _world_answerable = _li in _WORLD_ANSWERABLE_INTENTS
         if not (_chitchat or _world_answerable):
             persona_anchor = persona_anchor + _capability_block
-        elif _chitchat:
+        elif re.search(r"\b(?:upload|attach\w*|pdfs?|send (?:you )?(?:a |the )?files?)\b",
+                       getattr(packet.content, "original_prompt", "") or "", re.IGNORECASE):
+            # a casual "is it alright if I upload pdfs?" still gets the plain
+            # fact about attachments (she sent Andy to the file roots)
+            persona_anchor = persona_anchor + ATTACHMENT_FACT
+        if _chitchat:
             # Casual/social turn: no tools needed. Steer toward warm, present
             # conversation with a SHORT, POSITIVE-only nudge — negative framing
             # ("don't deflect") makes the model fixate on the named concept and
