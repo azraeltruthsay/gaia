@@ -543,7 +543,8 @@ def _ddg_search(query: str, max_results: int) -> List[dict]:
 # ---------------------------------------------------------------------------
 
 _MAX_CONTENT_BYTES = 500 * 1024  # 500KB
-_MAX_PDF_BYTES = 25 * 1024 * 1024   # a design-manual chapter runs a few MB
+_MAX_PDF_BYTES = 60 * 1024 * 1024   # a scanned reference book runs 30+ MB
+_LONG_DOC_CHARS = 60000             # longer documents are kept on disk and read in parts
 
 
 def _pdf_text(data: bytes, timeout: int = 60) -> str:
@@ -554,18 +555,83 @@ def _pdf_text(data: bytes, timeout: int = 60) -> str:
         with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
             f.write(data)
             f.flush()
-            out = subprocess.run(["pdftotext", "-layout", f.name, "-"], capture_output=True, timeout=timeout)
+            out = subprocess.run(["pdftotext", "-layout", f.name, "-"], capture_output=True, timeout=max(timeout, 240))
         text = out.stdout.decode("utf-8", errors="replace")
     except Exception as e:  # missing tool, timeout, broken file
         logger.warning("web_fetch: PDF text extraction failed: %s", e)
         return ""
-    text = "\n".join(ln.rstrip() for ln in text.splitlines())
+    # keep the form feeds between pages (page numbers for find=)
+    text = "\f".join("\n".join(ln.rstrip() for ln in page.splitlines()) for page in text.split("\f"))
     return text.strip() if len(text.split()) > 30 else ""
+
+
+def _docs_dir() -> Path:
+    return Path(os.environ.get("SHARED_DIR", "/shared")) / "web" / "docs"
+
+
+def _long_document(url: str, title: str, text: str, find: str) -> str:
+    """A long document: kept whole on disk; the reply is its opening, or the
+    pages that hold `find`, with page numbers."""
+    import hashlib
+    d = _docs_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    (d / (hashlib.sha1(url.encode()).hexdigest()[:12] + ".txt")).write_text(text, encoding="utf-8")
+    pages = text.split("\f")
+    if find:
+        words = [w for w in re.findall(r"[A-Za-z0-9.,-]+", find.lower()) if len(w) > 1]
+        pairs = [f"{a} {b}" for a, b in zip(words, words[1:])]
+        scored = []
+        for i, pg in enumerate(pages, 1):
+            low = re.sub(r"\s+", " ", pg.lower())
+            # the words in order count most ("problem 1", "fillet weld"), then each word
+            hits = 100 * low.count(" ".join(words)) + 10 * sum(low.count(p) for p in pairs) + \
+                sum(low.count(w) for w in words)
+            if hits and (all(w in low for w in words[:3]) or any(p in low for p in pairs)):
+                scored.append((hits, i, pg))
+        scored.sort(key=lambda x: -x[0])
+        if not scored:
+            return (f"{title}: {len(pages)} pages. Nothing on any page matches '{find}'. "
+                    "(Scanned text can misspell words; try fewer or different words.)")
+        parts = [f"--- page {i} ---\n{pg.strip()[:3500]}" for _, i, pg in sorted(scored[:4], key=lambda x: x[1])]
+        return f"{title}: {len(pages)} pages; the pages that match '{find}':\n\n" + "\n\n".join(parts)
+    head = "\n".join(p.strip() for p in pages[:6])[:6000]
+    return (f"{title}: {len(pages)} pages, too long to read at once. To read a part, fetch this same link "
+            f"again with find=<words> (a problem number, a figure, a heading).\n\nThe opening:\n{head}")
 _FETCH_TIMEOUT = 15  # seconds
 
 
 _GDOC_RE = re.compile(r"^https?://docs\.google\.com/(document|spreadsheets|presentation)/d/([A-Za-z0-9_-]{10,})")
 _GDRIVE_RE = re.compile(r"^https?://drive\.google\.com/(?:file/d/([A-Za-z0-9_-]{10,})|(?:open|uc)\?(?:.*&)?id=([A-Za-z0-9_-]{10,}))")
+
+
+_GFOLDER_RE = re.compile(r"^https?://drive\.google\.com/drive/(?:u/\d+/)?folders/([A-Za-z0-9_-]{10,})")
+_ENTRY_RE = re.compile(r'<a href="([^"]+)"[^>]*>.*?<div class="flip-entry-title">([^<]+)</div>', re.S)
+
+
+def _drive_folder(fid: str, url: str, domain: str, trust) -> dict:
+    """A shared Drive folder as a list: each item with the link to open it
+    (a subfolder lists in turn; a file downloads). Read through Drive's
+    static folder view (2026-11-20: Andy's reference folder)."""
+    import html as _html
+    import requests
+    try:
+        r = requests.get(f"https://drive.google.com/embeddedfolderview?id={fid}", timeout=_FETCH_TIMEOUT,
+                         headers={"User-Agent": "GAIA-Research/1.0 (educational AI assistant)"})
+        r.raise_for_status()
+    except Exception as e:
+        return {"ok": False, "error": f"Couldn't open that Drive folder: {e}", "domain": domain}
+    items = [(_html.unescape(n).strip(), link.split("?")[0]) for link, n in _ENTRY_RE.findall(r.text)]
+    title = _html.unescape((re.search(r"<title>([^<]*)</title>", r.text) or [None, "Drive folder"])[1]).strip()
+    if not items:
+        return {"ok": False, "domain": domain,
+                "error": "That Drive folder is empty, or not shared publicly ('Anyone with the link can view')."}
+    lines = [f"- {'Folder' if '/folders/' in link else 'File'}: {name} -> {link}" for name, link in items]
+    text = (f"Google Drive folder '{title}' ({len(items)} items). To open one, fetch its link "
+            f"(web action=fetch, url=<link>); a long document can then be read in parts with find=<words>.\n"
+            + "\n".join(lines))
+    return {"ok": True, "title": title, "content": text, "domain": domain,
+            "trust_tier": trust.tier_for_domain(domain), "format": "folder",
+            "items": [{"name": n, "url": u, "kind": "folder" if "/folders/" in u else "file"} for n, u in items]}
 
 
 def google_export_url(url: str) -> str:
@@ -642,6 +708,10 @@ def web_fetch(params: dict) -> dict:
             "remaining": fetch_lim.remaining,
         }
 
+    folder = _GFOLDER_RE.match(url)
+    if folder:
+        return _drive_folder(folder.group(1), url, domain, trust)
+
     # Fetch the page
     try:
         import requests
@@ -676,17 +746,22 @@ def web_fetch(params: dict) -> dict:
 
     # 2026-11-20: a PDF on a trusted site (the WSDOT Design Manual) is read
     # as text, the way gaia-web reads an attached PDF (pdftotext)
-    if "pdf" in content_type.lower() or url.lower().split("?")[0].endswith(".pdf"):
-        text = _pdf_text(raw_bytes[:_MAX_PDF_BYTES])
+    if "pdf" in content_type.lower() or url.lower().split("?")[0].endswith(".pdf") or raw_bytes[:5] == b"%PDF-":
+        if len(raw_bytes) > _MAX_PDF_BYTES:
+            return {"ok": False, "domain": domain,
+                    "error": f"That PDF is {len(raw_bytes) // 1048576} MB, over the {_MAX_PDF_BYTES // 1048576} MB I can read."}
+        text = _pdf_text(raw_bytes)
         if not text:
             return {"ok": False, "error": "Couldn't read text from that PDF (scanned, or too large).",
                     "domain": domain}
-        title = next((ln.strip() for ln in text.splitlines() if len(ln.strip()) > 8), url)[:200]
+        title = (params.get("title") or next((ln.strip() for ln in text.splitlines() if len(ln.strip()) > 8), url))[:200]
         tier = trust.tier_for_domain(domain)
         _remember_lookup(params, f"{url} {title}".strip(), [{
             "title": title, "url": url, "snippet": text[:4000],
             "domain": domain, "trust_tier": tier,
         }], "fetch")
+        if len(text) > _LONG_DOC_CHARS or params.get("find"):
+            text = _long_document(url, title, text, (params.get("find") or "").strip())
         return {"ok": True, "title": title, "content": text, "domain": domain, "trust_tier": tier,
                 "source_type": "trusted" if tier == "trusted" else "verified",
                 "bytes": len(text), "word_count": len(text.split()), "format": "pdf"}

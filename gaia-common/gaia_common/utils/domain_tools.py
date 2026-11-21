@@ -82,7 +82,7 @@ DOMAIN_TOOLS: Dict[str, dict] = {
                 "maps_to": "web_search",
             },
             "fetch": {
-                "params": {"url": "string"},
+                "params": {"url": "string", "find": "string?"},
                 "maps_to": "web_fetch",
             },
             # 2026-11-20: she asks to add a site to the sites she may read;
