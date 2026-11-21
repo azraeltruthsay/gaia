@@ -45,6 +45,8 @@ services:
       # never installed here before the engine became one shared mount — keep off.
       - GAIA_ENGINE_AWARENESS=${GAIA_ENGINE_AWARENESS:-0}
       - GAIA_ENGINE_COGPACKET_COMPRESS=${GAIA_ENGINE_COGPACKET_COMPRESS:-0}
+      # aidw.1: her selector decides tool/none on every non-social turn (GROUNDED_SPEECH.md)
+      - TOOL_DECIDE_EVERY_TURN=${TOOL_DECIDE_EVERY_TURN:-1}
       - PYTHONPATH=/app:/gaia-common
       - GAIA_ENV=development
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

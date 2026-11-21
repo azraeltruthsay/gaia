@@ -499,7 +499,8 @@ def select_tool(
     packet: CognitionPacket,
     user_input: str,
     model,
-    temperature: float = 0.15
+    temperature: float = 0.15,
+    decide: bool = False,
 ) -> Tuple[Optional[SelectedTool], List[SelectedTool]]:
     """
     Use low-temperature LLM generation to select the appropriate tool.
@@ -538,9 +539,21 @@ def select_tool(
         if history_text else ""
     )
 
+    # aidw.1: no keyword asked for a tool; the question is whether answering
+    # needs a lookup at all, and "none" is an ordinary answer.
+    task = (
+        "You decide whether GAIA needs to look something up before she answers this message. "
+        "If her answer would state facts she has to read rather than remember (her own state, "
+        "her memory palace, files, services, logs, the web, a campaign), choose the call that "
+        "gives those facts. If the message is conversation, an opinion, creative writing, about "
+        "the conversation itself, or already answered in the recent conversation, choose no tool."
+        if decide else
+        "You are a tool selector for GAIA. Given the user's request, select the most appropriate tool."
+    )
+
     # Build selection prompt — schema uses string params (not object) to avoid
     # llama-cpp grammar hangs with unconstrained objects.
-    prompt = f"""You are a tool selector for GAIA. Given the user's request, select the most appropriate tool.
+    prompt = f"""{task}
 
 AVAILABLE TOOLS:
 {tool_catalog}
@@ -605,7 +618,7 @@ If NO tool is appropriate, set selected_tool to empty string:
             # same model instance (llama-cpp is not thread-safe and the hung
             # thread may still be using it).  Bail out gracefully.
             logger.warning("Tool selection timed out; skipping tool routing for this turn")
-            _ledger(packet, path="llm", parsed=False, error="timeout")
+            _ledger(packet, path="decide" if decide else "llm", parsed=False, error="timeout")
             return None, []
 
         # Extract response content
@@ -622,7 +635,7 @@ If NO tool is appropriate, set selected_tool to empty string:
         selected = selection.get("selected_tool")
         if selected is None or selected == "":
             logger.info(f"Tool selector determined no tool needed: {selection.get('reasoning')}")
-            _ledger(packet, path="llm", parsed=True, tool="",
+            _ledger(packet, path="decide" if decide else "llm", parsed=True, tool="",
                     reasoning=outcome_ledger.clip(selection.get("reasoning")))
             return None, []
 
@@ -644,7 +657,7 @@ If NO tool is appropriate, set selected_tool to empty string:
         invalid = _invalid_selection(selected, raw_params)
         if invalid:
             logger.warning("Tool selector picked an invalid tool: %s", invalid)
-            _ledger(packet, path="llm", parsed=True, valid=False, tool=selected,
+            _ledger(packet, path="decide" if decide else "llm", parsed=True, valid=False, tool=selected,
                     param_keys=outcome_ledger.param_keys(raw_params), error=invalid)
             return None, []
 
@@ -680,7 +693,7 @@ If NO tool is appropriate, set selected_tool to empty string:
 
         logger.info(f"Tool selected: {primary.tool_name} (confidence={primary.selection_confidence}) "
                     f"params={json.dumps(primary.params, default=str)[:300]}")
-        _ledger(packet, path="llm", parsed=True, valid=True, tool=primary.tool_name,
+        _ledger(packet, path="decide" if decide else "llm", parsed=True, valid=True, tool=primary.tool_name,
                 param_keys=outcome_ledger.param_keys(raw_params),
                 confidence=primary.selection_confidence,
                 reasoning=outcome_ledger.clip(primary.selection_reasoning))
@@ -689,12 +702,12 @@ If NO tool is appropriate, set selected_tool to empty string:
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse tool selection JSON: {e}")
         # The raw output is the evidence: what shape the model wrote.
-        _ledger(packet, path="llm", parsed=False, error=str(e),
+        _ledger(packet, path="decide" if decide else "llm", parsed=False, error=str(e),
                 raw=outcome_ledger.clip(content, outcome_ledger.RAW_CHARS))
         return None, []
     except Exception as e:
         logger.error(f"Tool selection failed: {e}")
-        _ledger(packet, path="llm", parsed=False, error=outcome_ledger.clip(e))
+        _ledger(packet, path="decide" if decide else "llm", parsed=False, error=outcome_ledger.clip(e))
         return None, []
 
 

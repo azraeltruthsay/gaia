@@ -491,6 +491,25 @@ def _with_partners(history: List[Dict[str, Any]], window: List[Dict[str, Any]],
     return [history[i] for i in sorted(keep)]
 
 
+_CORE_GPU_CACHE = {"at": 0.0, "on": False}
+
+
+def _core_on_gpu(ttl: float = 10.0) -> bool:
+    """Whether Core's engine is on the GPU right now (its /health, cached)."""
+    now = time.time()
+    if now - _CORE_GPU_CACHE["at"] < ttl:
+        return _CORE_GPU_CACHE["on"]
+    on = False
+    try:
+        import httpx
+        url = os.environ.get("CORE_CPU_ENDPOINT", "http://localhost:8092").rstrip("/") + "/health"
+        on = bool(httpx.get(url, timeout=1.0).json().get("has_gpu"))
+    except Exception:
+        logger.debug("Core GPU check failed; treating Core as off the GPU", exc_info=True)
+    _CORE_GPU_CACHE.update(at=now, on=on)
+    return on
+
+
 class AgentCore:
     """
     Encapsulates the core "Reason-Act-Reflect" loop for GAIA.
@@ -3663,17 +3682,22 @@ class AgentCore:
 
             # gwrg: the pre-executed search already answered the tool need; a
             # routing pass would run the same search a second time.
+            _decide_turn = False
             if _campaign_pre_executed:
                 logger.info("Tool routing skipped: campaign entry already looked up")
             elif _web_pre_executed:
                 logger.info("Tool routing skipped: web search already pre-executed this turn")
             elif _lookup_recalled:
                 logger.info("Tool routing skipped: answering from the earlier search")
-            elif _campaign_change or self._should_use_tool_routing(plan, user_input):
+            elif (_campaign_change or self._should_use_tool_routing(plan, user_input)
+                  or (_decide_turn := self._decide_every_turn(plan, user_input))):
                 # A change to a campaign entry, asked in "chat" intent, got a
                 # prompt with no tools and she copied her last reply (2026-11-17).
+                # aidw.1: _decide_turn = no keyword fired; her selector decides
+                # whether this turn needs a lookup at all.
                 logger.info(f"Tool routing triggered for intent: {plan.intent}"
-                            + (" (campaign change)" if _campaign_change else ""))
+                            + (" (campaign change)" if _campaign_change else "")
+                            + (" (she decides)" if _decide_turn else ""))
                 _forced = None
                 if _campaign_change:
                     _cm_name = None
@@ -3703,6 +3727,7 @@ class AgentCore:
                     source=source,
                     metadata=_metadata,
                     forced_tool=_forced,
+                    decide=_decide_turn,
                 )
 
                 # KB write parked for approval — yield the prompt verbatim and
@@ -10663,6 +10688,7 @@ Start your response with the first line of the file."""
         source: str = "cli",
         metadata: dict = None,
         forced_tool: Optional[SelectedTool] = None,
+        decide: bool = False,
     ) -> CognitionPacket:
         """
         Execute the tool routing loop for packets that need MCP tools.
@@ -10738,7 +10764,8 @@ Start your response with the first line of the file."""
                     packet=packet,
                     user_input=user_input,
                     model=selection_model,
-                    temperature=selection_temp
+                    temperature=selection_temp,
+                    decide=decide,
                 )
         finally:
             if selection_model_name:
@@ -11317,6 +11344,30 @@ Start your response with the first line of the file."""
                 error=str(e),
                 execution_time_ms=elapsed_ms
             )
+
+    def _decide_every_turn(self, plan: Plan, user_input: str) -> bool:
+        """aidw.1 (GROUNDED_SPEECH.md, part A): with no keyword to go on, her
+        selector still decides whether answering needs a lookup, on every turn
+        that isn't social. "What's in your Operational wing?" matched no
+        keyword, so no tool ran and she described rooms she doesn't have
+        (2026-11-21). Behind TOOL_DECIDE_EVERY_TURN until measured (aidw.3)."""
+        flag = os.environ.get("TOOL_DECIDE_EVERY_TURN")
+        if flag is None:
+            flag = str(self.config.constants.get("TOOL_ROUTING", {}).get("DECIDE_EVERY_TURN", "0"))
+        if flag.strip().lower() not in ("1", "true", "yes", "on"):
+            return False
+        if not self.config.constants.get("TOOL_ROUTING", {}).get("ENABLED", True):
+            return False
+        text = asking_text(user_input or "").strip()
+        if not text:
+            return False
+        from gaia_core.utils.prompt_builder import TOOL_FREE_INTENTS, is_social_turn
+        intent = (getattr(plan, "intent", "") or "").lower()
+        if intent in TOOL_FREE_INTENTS or is_social_turn(intent, text):
+            return False
+        # The selector runs on Core: ~0.6 s on the GPU, 7-13 s on the CPU
+        # (measured 2026-11-21). Off the GPU, the keyword gate decides as before.
+        return _core_on_gpu()
 
     def _should_use_tool_routing(self, plan: Plan, user_input: str) -> bool:
         """

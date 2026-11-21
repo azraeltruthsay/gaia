@@ -145,3 +145,22 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
 ## Run log
 
 - 2026-11-21: blueprint written; baseline above.
+- 2026-11-21: **A live** (`aidw.1`, `aidw.3`). `scripts/selector_eval.py direct`:
+  routing decision only, real intent detection, candidate code against
+  production Core on the GPU, 26 cases (14 need a lookup, 12 must stay
+  tool-free incl. the yn31/mjcg poem traps), two passes:
+
+  | | lookups chosen | left tool-free | selector |
+  |---|---|---|---|
+  | keyword gate | 4/14, 4/14 | 12/12, 12/12 | 0.84 s, 0.77 s |
+  | she decides | 13/14, 12/14 | 12/12, 12/12 | 0.62 s, 0.59 s |
+
+  Both misses still looked something up, just not the best thing
+  (`shell` for free RAM; once `manage` for a blueprint). On the CPU the same
+  selector call takes 7–13 s, so she decides on every turn only while Core's
+  engine reports the GPU (`_core_on_gpu`, cached 10 s); off it, the keyword
+  gate decides as before. `TOOL_DECIDE_EVERY_TURN=1` in both compose files.
+  Live check: adapters → `study(adapter_list)`, open issues → `issue(status)`,
+  a poem → none.
+  Side finding while measuring: a wake refused for "external tenants ~7 GB"
+  was a Windows game sharing the GPU (WSL), not a leak.

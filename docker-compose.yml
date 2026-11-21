@@ -293,6 +293,8 @@ services:
       # mode (no LLM — cheap rule/embedding checks only). Was bypassed there. Set 0
       # to disable. Remediation is a follow-up; for now it observes + logs + health.
       - OBSERVER_ON_STREAM=${OBSERVER_ON_STREAM:-1}
+      # aidw.1: her selector decides tool/none on every non-social turn (GROUNDED_SPEECH.md)
+      - TOOL_DECIDE_EVERY_TURN=${TOOL_DECIDE_EVERY_TURN:-1}
       # a57i: the sleep resilience drill asks gaia-monkey for a container drill
       # on the candidates until she is Serene. Serene unlocks code_evolution's
       # sibling tasks: initiative_cycle and auto-promote of NON-vital services
