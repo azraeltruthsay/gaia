@@ -362,8 +362,9 @@ def format_world_state_snapshot(max_lines: int = 12, output_context: Dict = None
 
     # Self-knowledge hint - where GAIA's core documents live
     lines.append(
-        "Self-knowledge: Your core documents (constitution, identity, cognitive protocol) "
-        "are in knowledge/system_reference/. Use your tools to explore when curious."
+        "Self-knowledge: Your blueprints, your tools, your service contracts and your core "
+        "documents (constitution, identity, cognitive protocol) are on the library shelves of "
+        "your memory palace, kept in sync with their sources."
     )
 
     # Output context - where GAIA is currently communicating

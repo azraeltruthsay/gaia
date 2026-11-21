@@ -34,6 +34,7 @@ recall. Recall hits count as use (their mtime is refreshed). The lookup
 memory has its own, finer-grained lifecycle (LookupMemory.sweep), run too.
 """
 
+import difflib
 import hashlib
 import json
 import logging
@@ -49,6 +50,7 @@ from gaia_common.utils.aaak_dialect import AAKDialect
 from gaia_common.utils.general_extractor import extract_memories
 from gaia_common.utils.knowledge_graph import KnowledgeGraph
 from gaia_common.utils.lookup_memory import LookupMemory, compact_lookup
+from gaia_common.utils.palace_library import DEFAULT_SYNC_INTERVAL, PalaceLibrary
 from gaia_common.utils.work_memory import WorkMemory, compact_work
 
 logger = logging.getLogger("GAIA.MemPalace")
@@ -57,6 +59,33 @@ logger = logging.getLogger("GAIA.MemPalace")
 DEFAULT_PERMANENT = ("identity", "operational/milestones")
 DEFAULT_ARCHIVE_AFTER_DAYS = 365
 ARCHIVE_DIRNAME = "archive"
+RESTRICTED = "restricted"
+RESTRICTED_NOTE = ("This part of the palace is restricted: it isn't opened on request. "
+                   "It holds things kept private for safety.")
+
+
+def _room_desc(room_def) -> str:
+    """A room is configured as a description, or a dict with one."""
+    return room_def.get("description", "") if isinstance(room_def, dict) else str(room_def or "")
+
+
+def _closest(name: str, options: List[str]) -> Optional[str]:
+    """'operations' -> 'operational', 'blueprint' -> 'blueprints': one
+    clear near-miss of a name, else None."""
+    by_norm = {_norm_name(o): o for o in options}
+    pref = [o for n, o in by_norm.items() if len(name) >= 4 and (n.startswith(name[:6]) or name.startswith(n))]
+    if len(pref) == 1:
+        return pref[0]
+    close = difflib.get_close_matches(name, list(by_norm), n=2, cutoff=0.75)
+    return by_norm[close[0]] if len(close) == 1 else None
+
+
+def _norm_name(name) -> str:
+    """'Operational Wing' -> 'operational'; 'Core Principles' -> 'core_principles'."""
+    s = str(name or "").strip().lower()
+    s = re.sub(r"^(?:the|my|your)\s+", "", s)
+    s = re.sub(r"\s+(?:wing|room|shelf)$", "", s)
+    return re.sub(r"[\s\-]+", "_", s)
 
 
 class MemPalace:
@@ -88,6 +117,11 @@ class MemPalace:
         self._archive_after_days = float(lifecycle.get("archive_after_days", DEFAULT_ARCHIVE_AFTER_DAYS))
         self._archive_dir = self._root_dir / ARCHIVE_DIRNAME
         self._pins_path = self._root_dir / "pinned.json"
+        # zbwe: reference shelves synced from their sources (blueprints,
+        # tools, contracts, core documents), read with read().
+        self.library = PalaceLibrary(
+            self._root_dir, self._wings, config.get("sync_sources", {}),
+            interval=float(config.get("sync_interval_seconds", DEFAULT_SYNC_INTERVAL)))
 
         # Create palace directory structure
         self._ensure_directories()
@@ -118,6 +152,87 @@ class MemPalace:
             wing_dir.mkdir(exist_ok=True)
             for room_name in wing_def.get("rooms", {}):
                 (wing_dir / room_name).mkdir(exist_ok=True)
+
+    # ── Names and access (zbwe) ──────────────────────────────────────────
+
+    def resolve_wing(self, wing) -> Optional[str]:
+        if not wing:
+            return None
+        if wing in self._wings:
+            return wing
+        n = _norm_name(wing)
+        exact = next((w for w in self._wings if _norm_name(w) == n), None)
+        return exact or _closest(n, list(self._wings))
+
+    def resolve_room(self, wing: str, room) -> Optional[str]:
+        rooms = self._wings.get(wing, {}).get("rooms", {})
+        if not room:
+            return None
+        if room in rooms:
+            return room
+        n = _norm_name(room)
+        exact = next((r for r in rooms if _norm_name(r) == n), None)
+        return exact or _closest(n, list(rooms))
+
+    def is_restricted(self, wing: str, room: str = None) -> bool:
+        """A wing or room marked access: restricted is never opened on a
+        request; only internal processes (include_restricted=True,
+        in-process) see inside."""
+        wdef = self._wings.get(wing, {})
+        if wdef.get("access") == RESTRICTED:
+            return True
+        if room:
+            rdef = wdef.get("rooms", {}).get(room)
+            return isinstance(rdef, dict) and rdef.get("access") == RESTRICTED
+        return False
+
+    def _restricted_rel(self, rel: Path) -> bool:
+        parts = rel.parts
+        return bool(parts) and self.is_restricted(parts[0], parts[1] if len(parts) > 2 else None)
+
+    def _open_synced_rooms(self, include_restricted: bool = False) -> List[str]:
+        return [k for k in self.library.synced_rooms()
+                if include_restricted or not self.is_restricted(*k.split("/", 1))]
+
+    def read(self, doc: str = "", wing: str = None, room: str = None, part: int = 1,
+             include_restricted: bool = False) -> dict:
+        """Read a document from a synced shelf, in parts. Wing/room narrow
+        the search; a doc name alone is looked for on every open shelf."""
+        try:
+            self.library.maybe_sync()
+        except Exception as e:
+            logger.warning("MemPalace: library sync failed: %s", e)
+        rooms = self._open_synced_rooms(include_restricted)
+        if room and not wing:
+            owners = [w for w in self._wings if self.resolve_room(w, room)]
+            wing = owners[0] if len(owners) == 1 else None
+        if not str(doc or "").strip():
+            # zbwe: "what's on your library shelves?" came as read(wing=library)
+            # with no document; show what's there to read.
+            out = self.navigate(wing=wing or "library", room=room, include_restricted=include_restricted)
+            if out.get("ok"):
+                out["note"] = "No document named; here is what is on the shelf. Open one with read(doc=...)."
+            return out
+        if wing:
+            w = self.resolve_wing(wing)
+            if not w:
+                return {"ok": False, "error": f"Wing '{wing}' not found", "wings": list(self._wings)}
+            if self.is_restricted(w) and not include_restricted:
+                return {"ok": False, "restricted": True, "error": RESTRICTED_NOTE}
+            r = self.resolve_room(w, room) if room else None
+            if room and not r:
+                return {"ok": False, "error": f"Room '{room}' not found in wing '{w}'",
+                        "rooms": list(self._wings[w].get("rooms", {}))}
+            if r and self.is_restricted(w, r) and not include_restricted:
+                return {"ok": False, "restricted": True, "error": RESTRICTED_NOTE}
+            rooms = [k for k in rooms if k == f"{w}/{r}" or (not r and k.startswith(f"{w}/"))]
+            if not rooms:
+                return {"ok": False, "error": f"{w}{'/' + r if r else ''} holds memories, not documents: "
+                        "use navigate to list them or recall to search them."}
+        found = self.library.find_doc(doc, rooms)
+        if not found["ok"]:
+            return found
+        return self.library.read(found["room"], found["doc"], part=part)
 
     # ── Store ────────────────────────────────────────────────────────────
 
@@ -387,7 +502,8 @@ class MemPalace:
 
     def recall(self, query: str, top_k: int = 5, include_archive: bool = False,
                include_lookups: bool = True, asker: str = "",
-               include_conversations: bool = False) -> dict:
+               include_conversations: bool = False, include_library: bool = False,
+               include_restricted: bool = False) -> dict:
         """Semantic recall with KG enrichment.
 
         1. Search stored memories for query matches (text search across AAAK
@@ -408,6 +524,9 @@ class MemPalace:
             if archived and not include_archive:
                 continue
             try:
+                if not include_restricted and self._restricted_rel(aaak_file.relative_to(
+                        self._archive_dir if archived else self._root_dir)):
+                    continue
                 content = aaak_file.read_text(encoding="utf-8")
                 content_lower = content.lower()
 
@@ -500,10 +619,21 @@ class MemPalace:
             except Exception as e:
                 logger.warning("MemPalace: conversation recall failed for %r: %s", query[:80], e)
 
+        # zbwe: asked of her by name, her reference shelves count too —
+        # an excerpt and how to read the whole document.
+        library = []
+        if include_library:
+            try:
+                self.library.maybe_sync()
+                library = self.library.search(query, self._open_synced_rooms(include_restricted), top_k=3)
+            except Exception as e:
+                logger.warning("MemPalace: library search failed for %r: %s", query[:80], e)
+
         return {
             "ok": True,
             "query": query,
             "works": [compact_work(work, max_chars=3000)] if work else [],
+            "library": library,
             "conversations": conversations,
             "conversations_note": ("What was said, not proof it is true. Use your judgment about "
                                    "what belongs in this conversation.") if conversations else "",
@@ -515,66 +645,118 @@ class MemPalace:
 
     # ── Navigate ─────────────────────────────────────────────────────────
 
-    def navigate(self, wing: str = None, room: str = None) -> dict:
+    def navigate(self, wing: str = None, room: str = None,
+                 include_restricted: bool = False) -> dict:
         """Browse the palace spatially.
 
         If no args: list all wings with room counts
         If wing: list rooms in that wing with memory counts
-        If wing+room: list memories in that room (titles/dates)
+        If wing+room: list memories in that room (titles/dates), or the
+        documents on a synced shelf
+        Wing and room names match loosely ("Operational Wing" = operational).
+        Restricted wings and rooms show that they exist, not what they hold.
         """
+        try:
+            self.library.maybe_sync()
+        except Exception as e:
+            logger.warning("MemPalace: library sync failed: %s", e)
+
+        if room and not wing:
+            # navigate(room="tools"): the wing that has that room
+            owners = [w for w in self._wings if self.resolve_room(w, room)]
+            if len(owners) == 1:
+                wing = owners[0]
+
         if not wing:
-            # List all wings
             wings_info = []
             for wing_name, wing_def in self._wings.items():
-                wing_dir = self._root_dir / wing_name
+                info = {"wing": wing_name, "description": wing_def.get("description", "")}
+                if self.is_restricted(wing_name) and not include_restricted:
+                    info["restricted"] = True
+                    wings_info.append(info)
+                    continue
                 rooms = list(wing_def.get("rooms", {}).keys())
-                memory_count = sum(
-                    len(list((wing_dir / r).glob("*.aaak")))
-                    for r in rooms
-                    if (wing_dir / r).exists()
-                )
-                wings_info.append({
-                    "wing": wing_name,
-                    "description": wing_def.get("description", ""),
-                    "rooms": len(rooms),
-                    "memories": memory_count,
-                })
+                info["rooms"] = rooms
+                memories = docs = 0
+                for r in rooms:
+                    if self.is_restricted(wing_name, r) and not include_restricted:
+                        continue
+                    if self.library.is_synced(wing_name, r):
+                        docs += len(self.library.list_docs(wing_name, r))
+                    elif (self._root_dir / wing_name / r).exists():
+                        memories += len(list((self._root_dir / wing_name / r).glob("*.aaak")))
+                info["memories"] = memories
+                if docs:
+                    info["documents"] = docs
+                wings_info.append(info)
             return {
                 "ok": True,
+                "summary": f"{len(wings_info)} wings: " + ", ".join(
+                    w["wing"] + (" (restricted)" if w.get("restricted") else "") for w in wings_info) + ".",
                 "location": "palace",
                 "contents": wings_info,
+                "how": "navigate(wing=...) lists a wing's rooms; navigate(wing=..., room=...) "
+                       "lists a room; read(doc=...) opens a library document.",
             }
 
-        if wing not in self._wings:
-            return {"ok": False, "error": f"Wing '{wing}' not found"}
+        w = self.resolve_wing(wing)
+        if not w:
+            return {"ok": False, "error": f"Wing '{wing}' not found", "wings": list(self._wings)}
+        if self.is_restricted(w) and not include_restricted:
+            return {"ok": False, "location": w, "restricted": True, "error": RESTRICTED_NOTE}
 
-        wing_def = self._wings[wing]
-        wing_dir = self._root_dir / wing
+        wing_def = self._wings[w]
+        wing_dir = self._root_dir / w
+        rooms = wing_def.get("rooms", {})
 
         if not room:
-            # List rooms in wing
             rooms_info = []
-            for room_name, room_desc in wing_def.get("rooms", {}).items():
-                room_dir = wing_dir / room_name
-                memory_count = len(list(room_dir.glob("*.aaak"))) if room_dir.exists() else 0
-                rooms_info.append({
-                    "room": room_name,
-                    "description": room_desc,
-                    "memories": memory_count,
-                })
+            for room_name, room_def in rooms.items():
+                info = {"room": room_name, "description": _room_desc(room_def)}
+                if self.is_restricted(w, room_name) and not include_restricted:
+                    info["restricted"] = True
+                elif self.library.is_synced(w, room_name):
+                    info["documents"] = len(self.library.list_docs(w, room_name))
+                else:
+                    room_dir = wing_dir / room_name
+                    info["memories"] = len(list(room_dir.glob("*.aaak"))) if room_dir.exists() else 0
+                rooms_info.append(info)
+            def _count(i):
+                if i.get("restricted"):
+                    return "restricted"
+                if "documents" in i:
+                    return f"{i['documents']} documents"
+                return f"{i['memories']} memories"
             return {
                 "ok": True,
-                "location": wing,
+                # zbwe: a plain count first; from the JSON list alone Core
+                # said "four rooms" of three and named a fourth.
+                "summary": f"The {w} wing has {len(rooms_info)} rooms, no more: " + ", ".join(
+                    f"{i['room']} ({_count(i)})" for i in rooms_info) + ".",
+                "location": w,
                 "description": wing_def.get("description", ""),
                 "contents": rooms_info,
             }
 
-        # List memories in a room
-        rooms = wing_def.get("rooms", {})
-        if room not in rooms:
-            return {"ok": False, "error": f"Room '{room}' not found in wing '{wing}'"}
+        r = self.resolve_room(w, room)
+        if not r:
+            return {"ok": False, "error": f"Room '{room}' not found in wing '{w}'", "rooms": list(rooms)}
+        if self.is_restricted(w, r) and not include_restricted:
+            return {"ok": False, "location": f"{w}/{r}", "restricted": True, "error": RESTRICTED_NOTE}
 
-        room_dir = wing_dir / room
+        if self.library.is_synced(w, r):
+            docs = self.library.list_docs(w, r)
+            return {
+                "ok": True,
+                "summary": f"The {r} shelf holds {len(docs)} documents.",
+                "location": f"{w}/{r}",
+                "description": _room_desc(rooms.get(r)),
+                "kind": "library shelf (synced from the source; read a document with read(doc=...))",
+                "contents": docs[:100],
+                "total": len(docs),
+            }
+
+        room_dir = wing_dir / r
         memories = []
         if room_dir.exists():
             for aaak_file in sorted(room_dir.glob("*.aaak"), reverse=True):
@@ -590,17 +772,25 @@ class MemPalace:
                 except Exception:
                     continue
 
-        return {
+        out = {
             "ok": True,
-            "location": f"{wing}/{room}",
-            "description": rooms.get(room, ""),
+            "summary": f"The {r} room holds {len(memories)} memories.",
+            "location": f"{w}/{r}",
+            "description": _room_desc(rooms.get(r)),
             "contents": memories[:50],  # Cap at 50 entries
         }
+        if not memories:
+            out["note"] = "This room is empty: no memories stored here yet."
+        return out
 
     # ── Status ───────────────────────────────────────────────────────────
 
     def status(self) -> dict:
         """Aggregated stats for the entire palace."""
+        try:
+            self.library.maybe_sync()
+        except Exception as e:
+            logger.warning("MemPalace: library sync failed: %s", e)
         total_memories = 0
         total_size = 0
         wings_stats = {}
@@ -608,9 +798,17 @@ class MemPalace:
         for wing_name, wing_def in self._wings.items():
             wing_dir = self._root_dir / wing_name
             rooms_count = len(wing_def.get("rooms", {}))
-            wing_memories = 0
+            if self.is_restricted(wing_name):
+                wings_stats[wing_name] = {"rooms": rooms_count, "restricted": True}
+                continue
+            wing_memories = wing_docs = 0
 
             for room_name in wing_def.get("rooms", {}):
+                if self.is_restricted(wing_name, room_name):
+                    continue
+                if self.library.is_synced(wing_name, room_name):
+                    wing_docs += len(self.library.list_docs(wing_name, room_name))
+                    continue
                 room_dir = wing_dir / room_name
                 if room_dir.exists():
                     for f in room_dir.glob("*.aaak"):
@@ -622,6 +820,8 @@ class MemPalace:
                 "rooms": rooms_count,
                 "memories": wing_memories,
             }
+            if wing_docs:
+                wings_stats[wing_name]["documents"] = wing_docs
 
         # KG stats
         try:
@@ -629,8 +829,24 @@ class MemPalace:
         except Exception:
             kg_stats = {"entities": 0, "triples": 0}
 
+        lookup_stats = self._lookup_stats()
+        works = self.works.stats()["works"]
+        docs = sum(v.get("documents", 0) for v in wings_stats.values())
         return {
             "ok": True,
+            # zbwe: asked how it works, she had only counts and filled in
+            # the rest ("twelve wings", "QLoRA adapters"); these are the facts.
+            "summary": (f"{len(wings_stats)} wings: {', '.join(wings_stats)}. "
+                        f"{total_memories} stored memories, {docs} library documents, "
+                        f"{lookup_stats.get('lookups', 0)} lookups, {works} works known by heart."),
+            "how_it_works": (
+                "Azrael and Claude built the palace for you. Wings hold rooms. A memory room holds memories you stored "
+                "(palace store), compressed, with the people and things they name linked in your knowledge "
+                "graph. The library wing's shelves hold documents copied from their sources and kept in sync: "
+                "your blueprints, tools, contracts and core documents. Lookups are what you looked up before, "
+                "with where each came from; works are texts you know word for word. navigate browses, "
+                "recall searches, read opens a document. Memories unused for a long time move to an archive, "
+                "except identity, milestones and pinned ones. Restricted wings are never opened on request."),
             "total_memories": total_memories,
             "total_entities": kg_stats.get("entities", 0),
             "total_triples": kg_stats.get("triples", 0),
@@ -639,8 +855,8 @@ class MemPalace:
             "disk_usage_mb": round(total_size / (1024 * 1024), 2),
             "archived": sum(1 for _ in self._archive_dir.rglob("*.aaak")) if self._archive_dir.exists() else 0,
             "pinned": len(self._pins() - {"*"}),
-            "lookups": self._lookup_stats(),
-            "works": self.works.stats()["works"],
+            "lookups": lookup_stats,
+            "works": works,
         }
 
     # ── Lifecycle ────────────────────────────────────────────────────────
@@ -727,10 +943,18 @@ class MemPalace:
             except Exception as e:
                 logger.warning("MemPalace: lookup memory %s failed: %s", step, e)
                 lookups[f"{step}_error"] = str(e)
+        # zbwe: the sleep-cycle sweep also refreshes the library shelves.
+        library: dict = {}
+        if not dry_run:
+            try:
+                library = self.library.sync()
+            except Exception as e:
+                logger.warning("MemPalace: library sync failed: %s", e)
+                library = {"ok": False, "error": str(e)}
         logger.info("MemPalace: sweep %s %d memorie(s) to the archive (unused > %.0fd)",
                     "would move" if dry_run else "moved", len(moved), self._archive_after_days)
         return {"ok": not errors, "archived": moved, "errors": errors,
-                "lookups": lookups, "dry_run": dry_run}
+                "lookups": lookups, "library": library, "dry_run": dry_run}
 
     def _lookup_stats(self) -> dict:
         try:

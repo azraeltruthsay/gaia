@@ -162,19 +162,25 @@ DOMAIN_TOOLS: Dict[str, dict] = {
 
     # ── MemPalace ──────────────────────────────────────────────────────
     "palace": {
-        "description": "Structured memory palace — store, recall, navigate GAIA's long-term memories; lookups = what you looked up before, with sources; work = a poem or speech you know word for word",
+        "description": "Structured memory palace — store, recall, navigate GAIA's long-term memories (navigate lists wings, a wing's rooms, a room's contents); its library wing holds your blueprints, tools, contracts and core documents, opened with read(doc); lookups = what you looked up before, with sources; work = a poem or speech you know word for word",
         "actions": {
             "store": {
                 "params": {"text": "string", "source": "string?", "date": "string?"},
                 "maps_to": "palace_store",
             },
+            # zbwe: asked of her by name, recall searches the library too
+            # (palace_search); internal grounding keeps palace_recall.
             "recall": {
                 "params": {"query": "string", "top_k": "integer?"},
-                "maps_to": "palace_recall",
+                "maps_to": "palace_search",
             },
             "navigate": {
                 "params": {"wing": "string?", "room": "string?"},
                 "maps_to": "palace_navigate",
+            },
+            "read": {
+                "params": {"doc": "string", "wing": "string?", "room": "string?", "part": "integer?"},
+                "maps_to": "palace_read",
             },
             "status": {
                 "params": {},
@@ -525,6 +531,28 @@ def _build_mappings():
         ("palace", "lookup"): ("palace", "lookups"),
         ("palace", "remembered"): ("palace", "lookups"),
         ("palace", "search"): ("palace", "recall"),
+        # zbwe (Grotto 2026-11-21): asked what rooms a wing has, she sent
+        # palace(list); browsing verbs are navigate, opening verbs read.
+        ("palace", "list"): ("palace", "navigate"),
+        ("palace", "browse"): ("palace", "navigate"),
+        ("palace", "explore"): ("palace", "navigate"),
+        ("palace", "rooms"): ("palace", "navigate"),
+        ("palace", "wings"): ("palace", "navigate"),
+        ("palace", "list_rooms"): ("palace", "navigate"),
+        ("palace", "list_wings"): ("palace", "navigate"),
+        ("palace", "open"): ("palace", "read"),
+        ("palace", "view"): ("palace", "read"),
+        ("palace", "show"): ("palace", "read"),
+        ("palace", "read_doc"): ("palace", "read"),
+        ("palace", "get"): ("palace", "read"),
+        # asked how her palace works, she sent palace(overview) (zbwe)
+        ("palace", "overview"): ("palace", "status"),
+        ("palace", "about"): ("palace", "status"),
+        ("palace", "info"): ("palace", "status"),
+        ("palace", "describe"): ("palace", "status"),
+        ("palace", "explain"): ("palace", "status"),
+        ("palace", "stats"): ("palace", "status"),
+        ("palace", "summary"): ("palace", "status"),
         # recall/introspect
         ("recall", "events"): ("introspect", "recall"),
         ("introspect", "events"): ("introspect", "recall"),

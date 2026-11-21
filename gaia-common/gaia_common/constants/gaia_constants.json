@@ -858,7 +858,26 @@
           "journal": "Session reflections",
           "growth": "Lessons from mistakes"
         }
+      },
+      "library": {
+        "description": "Reference shelves kept in sync with their sources: your blueprints, your tools, your service contracts, your core documents",
+        "rooms": {
+          "blueprints": "Design blueprints of your systems",
+          "tools": "Every tool you can call and its actions",
+          "contracts": "Your services' API contracts and how they connect",
+          "core_documents": "Your constitution, identity and cognitive protocol"
+        }
       }
+    },
+    "sync_interval_seconds": 600,
+    "sync_sources": {
+      "library/blueprints": [{"glob": "/knowledge/blueprints/*.md"}, {"glob": "/knowledge/blueprints/*.yaml", "render": "blueprint_yaml"}],
+      "library/tools": [{"generator": "domain_tools"}],
+      "library/contracts": [
+        {"glob": "/gaia/GAIA_Project/contracts/services/*.yaml"},
+        {"glob": "/gaia/GAIA_Project/contracts/CONNECTIVITY.md"}
+      ],
+      "library/core_documents": [{"glob": "/knowledge/system_reference/core_documents/*.md"}]
     },
     "type_to_room": {
       "decision": "technical/architecture",

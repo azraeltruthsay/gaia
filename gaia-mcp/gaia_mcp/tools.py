@@ -322,6 +322,10 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "palace_store": lambda p: _palace_store_impl(p),
         "palace_recall": lambda p: _palace_recall_impl(p),
         "palace_navigate": lambda p: _palace_navigate_impl(p),
+        # zbwe: the library shelves (synced docs) and her own palace search
+        "palace_read": lambda p: _palace_read_impl(p),
+        "palace_search": lambda p: _palace_search_impl(p),
+        "palace_library_sync": lambda p: _get_palace().library.sync(),
         "palace_status": lambda p: _palace_status_impl(p),
         # 0vuz: lookup memory — what GAIA has looked up, with provenance
         "palace_store_lookup": lambda p: _palace_store_lookup_impl(p),
@@ -1481,11 +1485,44 @@ def _palace_lookup_revalidate_impl(params: dict) -> dict:
 
 
 def _palace_navigate_impl(params: dict) -> dict:
-    """Browse the palace spatially."""
+    """Browse the palace spatially. Restricted wings and rooms stay shut:
+    this is the requested path, so include_restricted is never taken from
+    the call (zbwe)."""
     palace = _get_palace()
-    wing = params.get("wing")
-    room = params.get("room")
+    wing = params.get("wing") or params.get("location") or params.get("name")
+    room = params.get("room") or params.get("section") or params.get("shelf")
+    if isinstance(wing, str) and "/" in wing and not room:
+        wing, room = wing.split("/", 1)
     return palace.navigate(wing=wing, room=room)
+
+
+def _palace_read_impl(params: dict) -> dict:
+    """Read a library document (blueprint, tool page, contract, core
+    document), in parts. Never opens a restricted shelf (zbwe)."""
+    doc = next((str(params[k]) for k in ("doc", "document", "name", "file", "title", "filename", "query")
+                if str(params.get(k) or "").strip()), "")
+    wing = params.get("wing")
+    room = params.get("room") or params.get("section") or params.get("shelf")
+    if isinstance(wing, str) and "/" in wing and not room:
+        wing, room = wing.split("/", 1)
+    try:
+        part = int(params.get("part") or params.get("page") or 1)
+    except (TypeError, ValueError):
+        part = 1
+    return _get_palace().read(doc=doc, wing=wing, room=room, part=part)
+
+
+def _palace_search_impl(params: dict) -> dict:
+    """palace(recall) as she asks it: memories, lookups, works, what was said,
+    and the library shelves. Restricted rooms are left out (zbwe)."""
+    query = _query_param(params)
+    if not query:
+        return _palace_recall_impl(params)
+    return _get_palace().recall(query, top_k=int(params.get("top_k", 5)),
+                                include_archive=bool(params.get("include_archive")),
+                                include_lookups=params.get("include_lookups", True) is not False,
+                                asker=str(params.get("_asker") or ""),
+                                include_conversations=True, include_library=True)
 
 
 def _palace_status_impl(params: dict) -> dict:

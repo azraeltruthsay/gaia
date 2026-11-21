@@ -305,6 +305,9 @@ _CLAIMS_MEMORY_RE = re.compile(
 )
 _PALACE_RECALL_ALIASES = {"recalling", "remember", "remembering", "search", "find", "lookup",
                           "look_up", "retrieve", "query", "get", "read"}
+# zbwe: read is a palace action now (a library document); read/get naming a
+# document open it, and only without one are they a recall.
+_PALACE_DOC_KEYS = ("doc", "document", "name", "file", "title", "filename")
 
 
 def claims_memory(reply: str) -> bool:
@@ -317,6 +320,9 @@ def palace_recall_params(params: dict, user_input: str) -> dict:
     recall with nothing to look for looks for what she was just told."""
     params = dict(params or {})
     action = str(params.get("action") or "").strip().lower()
+    if action in ("read", "get") and any(str(params.get(k) or "").strip() for k in _PALACE_DOC_KEYS):
+        params["action"] = "read"
+        return params
     if action in _PALACE_RECALL_ALIASES:
         params["action"] = action = "recall"
     if action == "recall" and not str(params.get("query") or "").strip():

@@ -776,7 +776,9 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
             _social_turn = is_social_turn(
                 _li, getattr(getattr(packet, 'content', None), 'original_prompt', '') or '')
             logger.info("PromptBuilder: tool-free intent '%s' — social mode (lean anchor, skipped capability + system-health blocks)", _li)
-        else:
+        elif _world_answerable:
+            # zbwe: this was a bare `else`, so every non-social turn (a palace
+            # question, a code question) got the time-question hint below.
             # World-answerable (e.g. time): the data is already in world_state.
             # Be specific — Core otherwise ignores the line and confabulates
             # timezone math ("add 6 hours"). Point it at the exact pre-computed

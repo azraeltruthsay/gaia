@@ -65,6 +65,7 @@ from gaia_common.utils.doc_sections import asked_articles
 from gaia_common.utils.founding_docs import asks_opinion, named_document, refers_back, wants_whole
 from gaia_common.utils.host_facts import asks_about_host, host_facts_text
 from gaia_common.utils.message_shape import asking_text
+from gaia_common.utils.palace_library import asks_about_palace
 from gaia_core.cognition.knowledge_router import weakest_last
 from gaia_core.cognition.second_mind import keeps_to_text, states_something, unbacked
 from gaia_core.cognition.told_facts import (
@@ -8520,6 +8521,10 @@ RESULT: COMPLEX (reason: <brief reason>)
         if not content:
             self.logger.warning("Founding documents: could not read %s: %s", path, result.get("error"))
             return None
+        if path.endswith((".yaml", ".yml")):
+            # zbwe: a service blueprint's YAML, as prose she can retell
+            from gaia_common.utils.palace_library import readable_blueprint
+            content = readable_blueprint(content)
         opinion = asks_opinion(user_input)
         whole = wants_whole(user_input) or (opinion and not asked_articles(user_input))
         part = content[:WHOLE_DOC_CHARS] if whole else excerpt_for(content, user_input, limit=7000)
@@ -11329,6 +11334,12 @@ Start your response with the first line of the file."""
             return True
 
         # Quick heuristic check for tool-related requests
+
+        # zbwe (Grotto 2026-11-21): "What's in your Operational wing?" read as
+        # chat (list_tree), no tool ran, and she described rooms she doesn't
+        # have. A question about her palace goes to the palace tool.
+        if asks_about_palace(asking_text(user_input or ""), self.config.constants.get("MEMPALACE", {})):
+            return True
 
         # Create a minimal packet for the check
         # We don't have a full packet yet, so we check against the raw input

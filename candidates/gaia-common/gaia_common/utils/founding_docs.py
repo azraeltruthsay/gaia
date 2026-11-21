@@ -97,11 +97,42 @@ def authorship_for(path: str) -> str:
     return DEV_JOURNAL_AUTHORSHIP if "/Dev_Notebook/" in (path or "") else AUTHORSHIP
 
 
+# zbwe (2026-11-21): "open your blueprint for the doctor" was answered from
+# Your Services, the overview; one service's blueprint names the service.
+BLUEPRINTS_DIR = os.environ.get("BLUEPRINTS_DIR", "/knowledge/blueprints")
+_BLUEPRINT_RE = re.compile(r"\bblue\s*prints?\b", re.IGNORECASE)
+_SERVICE_RE = re.compile(
+    r"\b(?:gaia[-_\s]?)?(core|prime|web|mcp|study|audio|orchestrator|doctor|monkey|wiki|translate|nano|common)\b"
+    r"|\b(sleep)\s+cycle\b", re.IGNORECASE)
+
+
+def named_blueprint(text: str, directory: str = "") -> Optional[Tuple[str, str]]:
+    """(path, title) of one service's blueprint, when a message asks for the
+    blueprint of a named service; None for blueprints in general."""
+    if not _BLUEPRINT_RE.search(text or ""):
+        return None
+    m = _SERVICE_RE.search(text or "")
+    if not m:
+        return None
+    svc = (m.group(1) or m.group(2)).lower()
+    d = directory or BLUEPRINTS_DIR
+    names = (["GAIA_SLEEP_CYCLE.md"] if svc == "sleep" else
+             [f"GAIA_{svc.upper()}.md", f"gaia-{svc}.md", f"gaia-{svc}.yaml"])
+    for name in names:
+        if os.path.isfile(f"{d}/{name}"):
+            label = "the sleep cycle" if svc == "sleep" else f"gaia-{svc}"
+            return f"{d}/{name}", f"your blueprint of {label}"
+    return None
+
+
 def _named_in(text: str) -> Optional[Tuple[str, str]]:
     if _SOMEONE_ELSES_RE.search(text):
         return None
     if _DEV_JOURNAL_RE.search(text) and (_HERS_RE.search(text) or "gaia" in text.lower()):
         return latest_dev_journal()
+    bp = named_blueprint(text)
+    if bp:
+        return bp
     for pattern, filename, title in _NAMED:
         if re.search(pattern, text, re.IGNORECASE) and (_HERS_RE.search(text) or "gaia" in text.lower()):
             return f"{DOCS_DIR}/{filename}", title
@@ -135,8 +166,21 @@ def as_request(text: str) -> str:
     described the blueprints from nowhere ("in my free time"); asked to do
     it, she summarised the document 6/6 (albm, 2026-11-06)."""
     m = _ABILITY_RE.match(text or "")
-    if not m:
+    rest = m.group("rest").strip() if m else (text or "").strip()
+    # zbwe: "open your blueprint for the doctor and tell me what it does" —
+    # with the document already given, "open" sent her for a tool ("I'll
+    # pull up the blueprint" + a call) 2/2. The opening is done; the ask is
+    # what follows it.
+    o = _OPEN_RE.match(rest)
+    if o:
+        rest = (o.group("ask") or "tell me what it says").strip().rstrip("?.!")
+    elif not m:
         return text
-    rest = m.group("rest").strip()
     return rest[:1].upper() + rest[1:] + "."
+
+
+_OPEN_RE = re.compile(
+    r"^(?:please\s+)?(?:open|pull\s+up|bring\s+up|look\s+(?:at|up)|check|find|load|get|grab|fetch)\b"
+    r"[^.?!]*?(?:\s+and\s+(?:then\s+)?(?P<ask>.+?))?\s*[?.!]*\s*$",
+    re.IGNORECASE | re.DOTALL)
 
