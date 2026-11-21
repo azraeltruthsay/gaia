@@ -1625,6 +1625,21 @@ class AgentCore:
                     return
             except Exception:
                 logger.warning("Site request check failed, continuing", exc_info=True)
+            # Asked to open something in a shared Drive folder from this
+            # conversation: code walks the folder and opens it (drive_nav)
+            try:
+                from gaia_core.cognition import drive_nav
+                from gaia_core.cognition.ambient_interject import not_for_her
+                if len(user_input or "") < 400 and not not_for_her(user_input):
+                    _drive = drive_nav.handle(user_input, list(self.session_manager.get_history(session_id) or []),
+                                              session_id=session_id)
+                    if _drive:
+                        self.session_manager.add_message(session_id, "user", user_input)
+                        self.session_manager.add_message(session_id, "assistant", _drive)
+                        yield {"type": "token", "value": _drive}
+                        return
+            except Exception:
+                logger.warning("Drive navigation failed, continuing", exc_info=True)
 
         # Facts she was told, kept and recalled. Ahead of research and the
         # old save-to-file route, which get these turns otherwise (1zbx).

@@ -592,7 +592,8 @@ def _long_document(url: str, title: str, text: str, find: str) -> str:
         if not scored:
             return (f"{title}: {len(pages)} pages. Nothing on any page matches '{find}'. "
                     "(Scanned text can misspell words; try fewer or different words.)")
-        parts = [f"--- page {i} ---\n{pg.strip()[:3500]}" for _, i, pg in sorted(scored[:4], key=lambda x: x[1])]
+        # best match first (the reader shows the first one)
+        parts = [f"--- page {i} ---\n{pg.strip()[:3500]}" for _, i, pg in scored[:4]]
         return f"{title}: {len(pages)} pages; the pages that match '{find}':\n\n" + "\n\n".join(parts)
     head = "\n".join(p.strip() for p in pages[:6])[:6000]
     return (f"{title}: {len(pages)} pages, too long to read at once. To read a part, fetch this same link "
