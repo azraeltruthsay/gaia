@@ -255,6 +255,10 @@ class PIIRedactionScanner:
 # SecretsScanner
 # ---------------------------------------------------------------------------
 
+_URL_RE = re.compile(r"\bhttps?://\S+|\b(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|gov|edu|io|co|us|uk)/\S*",
+                     re.IGNORECASE)
+
+
 class SecretsScanner:
     """
     Detects API keys, tokens, and high-entropy strings before they can be
@@ -287,8 +291,11 @@ class SecretsScanner:
                     redacted_excerpt=excerpt,
                 ))
 
-        # High-entropy string detection
-        for match in self._HIGH_ENTROPY_RE.finditer(text):
+        # High-entropy string detection, outside links: a shared Google Doc's
+        # id (44 random characters) blocked Azrael's "GAIA, try to access this
+        # link please" twice (2026-11-20). Known key patterns above still scan
+        # the whole text, links included.
+        for match in self._HIGH_ENTROPY_RE.finditer(_URL_RE.sub(" ", text)):
             token = match.group()
             if _shannon_entropy(token) > self._ENTROPY_THRESHOLD:
                 hits.append(ScanHit(
