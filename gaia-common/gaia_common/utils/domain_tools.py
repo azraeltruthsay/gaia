@@ -337,14 +337,17 @@ DOMAIN_TOOLS: Dict[str, dict] = {
 
     # ── Worldbuild (Kanka.io) ─────────────────────────────────────────
     "worldbuild": {
-        "description": ("Azrael's D&D campaign wiki on Kanka (Sunrise in the Valley; the Dusk in Leshen "
-                        "chapter): search for an entry, then get it by entity_id. Most entries are DM-only "
-                        "and can be read only in a conversation with him alone. create/update propose a "
-                        "change; nothing is written until he approves it with his authenticator code"),
+        "description": ("Your live API connection to Kanka (kanka.io), where Azrael keeps his D&D campaign "
+                        "wiki (Sunrise in the Valley; the Dusk in Leshen chapter). Use it, not web, for "
+                        "anything on Kanka: list with no entity_type for an overview of the campaign, list "
+                        "an entity_type (characters, locations, families, organisations, notes...), search "
+                        "for an entry, then get it by entity_id. Most entries are DM-only and can be read "
+                        "only in a conversation with him alone. create/update propose a change; nothing is "
+                        "written until he approves it with his authenticator code"),
         "actions": {
             "campaigns": {"params": {}, "maps_to": "kanka_list_campaigns"},
             "search": {"params": {"query": "string", "campaign": "string?"}, "maps_to": "kanka_search"},
-            "list": {"params": {"entity_type": "string", "name": "string?", "page": "integer?", "campaign": "string?"},
+            "list": {"params": {"entity_type": "string?", "name": "string?", "page": "integer?", "campaign": "string?"},
                      "maps_to": "kanka_list_entities"},
             "get": {"params": {"entity_id": "integer", "campaign": "string?"}, "maps_to": "kanka_get_entity"},
             "create": {"params": {"entity_type": "string", "name": "string", "entry": "string?", "type": "string?",

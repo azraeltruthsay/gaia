@@ -311,9 +311,65 @@ _NOT_HERE = ("Changes to the campaign can only be proposed in a conversation wit
              "(a direct message), not here.")
 _ENTRY_MAX = 4000
 
+# 2026-11-20: shown worldbuild's result for "Sunrise in the Valley", she said
+# "I checked my worldbuild index ... I don't have any pre-authorized
+# integrations with external sites like Kanka". Every result names where it
+# came from: the site itself, read live.
+_SOURCE = ("Read live from Kanka (kanka.io), Azrael's D&D campaign wiki, through your own "
+           "Kanka API connection (the worldbuild tool)")
+
+# The kinds a campaign overview counts: one request each, under the 25/min cap.
+_OVERVIEW_KINDS = ("characters", "locations", "families", "organisations", "notes", "quests", "items")
+
+# What people call a kind -> Kanka's module name. Asked for "the character
+# entries", the selector sent worldbuild(list) with no entity_type and the
+# call failed (2026-11-20).
+_KIND_ALIASES = {
+    "character": "characters", "npc": "characters", "npcs": "characters", "pc": "characters",
+    "pcs": "characters", "player characters": "characters", "people": "characters",
+    "location": "locations", "place": "locations", "places": "locations",
+    "family": "families", "house": "families", "houses": "families",
+    "organisation": "organisations", "organization": "organisations", "organizations": "organisations",
+    "faction": "organisations", "factions": "organisations", "guild": "organisations", "guilds": "organisations",
+    "note": "notes", "quest": "quests", "item": "items", "journal": "journals", "sessions": "journals",
+    "event": "events", "race": "races", "creature": "creatures", "map": "maps", "tag": "tags",
+    "calendar": "calendars", "ability": "abilities", "timeline": "timelines",
+}
+
+# Post visibility (Kanka): 1 = everyone in the campaign. The others are
+# admins only, the author only, or admins and the author.
+_POST_VISIBLE_TO_ALL = 1
+
 
 def _dm_view(params: dict) -> bool:
     return bool((params or {}).pop("_dm_view", False))
+
+
+def _kind(entity_type: str) -> str:
+    t = " ".join((entity_type or "").strip().lower().split())
+    return _KIND_ALIASES.get(t, t)
+
+
+def _restricted(client: "KankaClient", campaign_id: int, entity_id: Any) -> bool:
+    """Whether an entry not flagged private is still hidden from players by its
+    permissions: a role denied, or access granted to named users only. Nyx's
+    character entry (2026-11-20) is visible to the DM and her player alone, and
+    its private flag is off, so the flag alone would have shown it in the Grotto.
+    Unknown counts as restricted."""
+    try:
+        r = client.get(f"campaigns/{campaign_id}/entities/{int(entity_id)}/entity_permissions", cache_ttl=300)
+    except Exception:
+        return True
+    if not isinstance(r, dict) or r.get("ok") is False:
+        return True
+    rows = r.get("data") or []
+    return any(row.get("user_id") or row.get("access") is False for row in rows)
+
+
+def _shareable(client: "KankaClient", campaign_id: int, dm: bool, entity_id: Any, is_private: bool) -> bool:
+    if dm:
+        return True
+    return not is_private and not _restricted(client, campaign_id, entity_id)
 
 
 def entry_text(entry_html: str) -> str:
@@ -394,9 +450,10 @@ def kanka_search(params: dict) -> dict:
         return result
 
     entities = result.get("data", [])
-    shown = [e for e in entities if dm or not e.get("is_private")]
+    shown = [e for e in entities if _shareable(client, campaign_id, dm, e.get("id"), e.get("is_private"))]
     out = {
         "ok": True,
+        "source": _SOURCE,
         "campaign_id": campaign_id,
         "query": query,
         "results": [
@@ -421,25 +478,59 @@ def kanka_search(params: dict) -> dict:
         if got.get("ok"):
             # title + content: what tool_result_text shows as a page.
             others = [e.get("name") for e in shown if e is not exact[0]]
-            out["title"] = got["name"] + (f" ({got['type']})" if got.get("type") else "")
+            out["title"] = (f"{_SOURCE}:\n" + got["name"] + (f" ({got['type']})" if got.get("type") else ""))
             out["content"] = (got.get("entry") or "(no text yet)") + (
                 "\n\nOther entries matching: " + ", ".join(others) if others else "")
     # Said as a fact either way (an empty result with only "public entries
     # shown" read as room to fill: she described the Witcher's leshen,
     # 2026-11-17), and worded the same whether DM-only matches exist or not.
     if not shown:
-        out["note"] = (f"Nothing in the campaign matches {query!r}" +
+        out["note"] = (f"{_SOURCE}. Nothing in the campaign matches {query!r}" +
                        ("." if dm else " among the entries that can be shared in this conversation "
                                        "(only the campaign's public entries can be)."))
     elif not dm:
-        out["note"] = "Only the campaign's public entries can be shared in this conversation."
+        out["note"] = f"{_SOURCE}. Only the campaign's public entries can be shared in this conversation."
+    else:
+        out["note"] = f"{_SOURCE}."
     return out
+
+
+def kanka_overview(params: dict, dm: bool) -> dict:
+    """What the campaign holds, kind by kind: for worldbuild(list) with no
+    entity_type ("can you see the campaign?")."""
+    campaign_id = _resolve_campaign_id(params)
+    client = _get_client()
+    kinds, total, failed = [], 0, None
+    for kind in _OVERVIEW_KINDS:
+        r = client.get(f"campaigns/{campaign_id}/{kind}", params={"page": 1}, cache_ttl=180)
+        if not isinstance(r, dict) or r.get("ok") is False:
+            failed = failed or (r if isinstance(r, dict) else {"ok": False, "error": "Kanka gave no answer"})
+            continue
+        rows = [e for e in r.get("data", [])
+                if _shareable(client, campaign_id, dm, e.get("entity_id"), e.get("is_private"))]
+        count = (r.get("meta") or {}).get("total", len(rows)) if dm else len(rows)
+        total += count
+        if count:
+            kinds.append({"kind": kind, "count": count, "names": [e.get("name") for e in rows][:25]})
+    # A failed call is a failure, not an empty campaign (live test, 2026-11-20:
+    # with no API key it said "holds 0 entries").
+    if failed and not kinds:
+        return failed
+    lines = [f"- {k['kind']} ({k['count']}): " + ", ".join(k["names"]) +
+             (" ..." if k["count"] > len(k["names"]) else "") for k in kinds]
+    head = (f"{_SOURCE}. The campaign (Kanka campaign {campaign_id}) holds {total} entries of these kinds"
+            + ("" if dm else " that can be shared in this conversation (only its public entries can be)") + ":")
+    return {"ok": True, "source": _SOURCE, "campaign_id": campaign_id, "kinds": kinds,
+            "title": "Campaign overview", "content": "\n".join([head] + lines) if kinds else
+            head + " none.", "count": total}
 
 
 def kanka_list_entities(params: dict) -> dict:
     """List entities of a given type, with optional name filter and pagination."""
     dm = _dm_view(params)
-    entity_type = _validate_entity_type(params.get("entity_type") or "")
+    if not _kind(params.get("entity_type") or ""):
+        return kanka_overview(params, dm)
+    entity_type = _validate_entity_type(_kind(params.get("entity_type")))
     campaign_id = _resolve_campaign_id(params)
     name_filter = params.get("name")
     page = int(params.get("page", 1))
@@ -455,12 +546,13 @@ def kanka_list_entities(params: dict) -> dict:
         return result
 
     entities = result.get("data", [])
-    shown = [e for e in entities if dm or not e.get("is_private")]
+    shown = [e for e in entities if _shareable(client, campaign_id, dm, e.get("entity_id"), e.get("is_private"))]
     meta = result.get("meta", {})
     links = result.get("links", {})
 
     out = {
         "ok": True,
+        "source": _SOURCE,
         "campaign_id": campaign_id,
         "entity_type": entity_type,
         "entities": [
@@ -484,6 +576,12 @@ def kanka_list_entities(params: dict) -> dict:
         out["note"] = "Only the campaign's public entries can be shared in this conversation."
     if not shown:
         out["note"] = f"No {entity_type} on this page" + ("." if dm else " that can be shared in this conversation.")
+    # Shown as a page of lines, not JSON.
+    lines = [f"- {e.get('name')}" + (f" ({e.get('type')})" if e.get("type") else "") +
+             f" [entity_id {e.get('entity_id')}]" for e in shown]
+    more = f"\n(page {page} of {out['last_page']}; ask for page {page + 1} for more)" if out["has_next"] else ""
+    out["title"] = f"{_SOURCE}:\n{entity_type.capitalize()} in the campaign"
+    out["content"] = "\n".join(([out["note"]] if out.get("note") else []) + lines) + more
     return out
 
 
@@ -508,12 +606,26 @@ def kanka_get_entity(params: dict) -> dict:
             return result
 
     e = result.get("data", {}) or {}
-    if e.get("is_private") and not dm:
+    if not _shareable(client, campaign_id, dm, e.get("id"), e.get("is_private")):
         return {"ok": False, "error": _DM_ONLY}
     child = e.get("child") or {}
     text = entry_text(child.get("entry") or "")
+    # Posts hold much of an entry (Nyx's whole backstory is her player's
+    # Background post). The DM sees them all; elsewhere only those shown to
+    # everyone in the campaign.
+    try:
+        pr = client.get(f"campaigns/{campaign_id}/entities/{int(e.get('id'))}/posts", cache_ttl=300)
+        posts = (pr or {}).get("data", []) if isinstance(pr, dict) else []
+    except Exception:
+        posts = []
+    for p in posts:
+        if dm or p.get("visibility_id") == _POST_VISIBLE_TO_ALL:
+            body = entry_text(p.get("entry") or "")
+            if body:
+                text += f"\n\n[{p.get('name') or 'Post'}]\n{body}"
     out = {
         "ok": True,
+        "source": _SOURCE,
         "campaign_id": campaign_id,
         "entity_id": e.get("id"),
         "name": e.get("name"),
@@ -524,6 +636,9 @@ def kanka_get_entity(params: dict) -> dict:
         "entry": text[:_ENTRY_MAX] + (" ... [cut]" if len(text) > _ENTRY_MAX else ""),
         "url": (e.get("urls") or {}).get("view", ""),
     }
+    # Shown as a page (title, then text), not as JSON.
+    out["title"] = f"{_SOURCE}:\n{out['name']}" + (f" ({out['type']})" if out["type"] else "")
+    out["content"] = out["entry"] or "(no text yet)"
     return out
 
 

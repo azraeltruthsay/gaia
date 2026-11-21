@@ -199,8 +199,13 @@ _HITS = [{"id": 10154654, "name": "Leshen", "type": "Capital city", "entity_type
 class FakeKanka:
     def __init__(self):
         self.posts, self.patches = [], []
+        self.perms, self.post_rows = {}, {}
 
     def get(self, path, params=None, cache_ttl=None):
+        if path.endswith("/entity_permissions"):
+            return {"data": list(self.perms.get(path.split("/")[-2], []))}
+        if path.endswith("/posts"):
+            return {"data": list(self.post_rows.get(path.split("/")[-2], []))}
         if "/search/" in path:
             q = path.rsplit("/", 1)[1].lower()
             return {"data": [h for h in _HITS if q in h["name"].lower()]}
@@ -255,7 +260,7 @@ class TestPrivacy:
 
     def test_search_shows_all_in_dm_view(self, fake):
         r = kanka_search({"query": "e", "_dm_view": True})
-        assert r["count"] == 2 and "note" not in r
+        assert r["count"] == 2 and "public entries" not in r.get("note", "")
         assert r["results"][0]["entity_id"] == 10154654 and r["results"][0]["kind"] == "location"
 
     def test_get_private_refused_without_dm_view(self, fake):
@@ -281,7 +286,7 @@ class TestKankaSearch:
 
     def test_exact_name_comes_with_its_text(self, fake):
         r = kanka_search({"query": "leshen", "_dm_view": True})
-        assert r["title"] == "Leshen (Capital city)" and r["content"].startswith("Capital of Llasak")
+        assert r["title"].endswith("Leshen (Capital city)") and r["content"].startswith("Capital of Llasak")
         from gaia_common.utils.tool_call_parser import tool_result_text
         assert "Capital of Llasak" in tool_result_text(r, question="what is Leshen?")
 
@@ -313,9 +318,22 @@ class TestKankaGetEntity:
 
 class TestKankaListEntities:
 
-    def test_missing_entity_type_raises(self):
+    def test_no_entity_type_gives_overview(self, fake):
+        # 2026-11-20: "can you find the character entries?" -> worldbuild(list) with no type.
+        r = kanka_list_entities({"_dm_view": True})
+        assert r["ok"] and "Leshen" in r["content"] and "Kanka" in r["content"]
+
+    def test_overview_hides_private_without_dm_view(self, fake):
+        r = kanka_list_entities({})
+        assert "Market" in r["content"] and "Leshen" not in r["content"]
+
+    def test_kind_aliases(self, fake):
+        r = kanka_list_entities({"entity_type": "Location", "_dm_view": True})
+        assert r["entity_type"] == "locations" and r["count"] == 2
+
+    def test_unknown_kind_still_refused(self, fake):
         with pytest.raises(ValueError):
-            kanka_list_entities({})
+            kanka_list_entities({"entity_type": "spaceships"})
 
 
 class TestKankaCreateEntity:
@@ -411,3 +429,39 @@ class TestValidEntityTypes:
 
     def test_count(self):
         assert len(_VALID_ENTITY_TYPES) == 17
+
+
+class TestSourceAndRestrictions:
+    """2026-11-20: she read worldbuild's result and said she had no Kanka
+    integration; Nyx's entry is hidden by permissions, not the private flag."""
+
+    def test_results_name_kanka_as_the_source(self, fake):
+        from gaia_common.utils.tool_call_parser import tool_result_text
+        for r in (kanka_search({"query": "e", "_dm_view": True}),
+                  kanka_get_entity({"entity_id": 10154654, "_dm_view": True}),
+                  kanka_list_entities({"_dm_view": True})):
+            assert "Kanka API connection" in tool_result_text(r)
+
+    def test_permission_restricted_entry_is_not_public(self, fake):
+        fake.perms["10155000"] = [{"user_id": 432165, "action": 1, "access": True}]
+        assert kanka_search({"query": "e"})["count"] == 0
+        assert kanka_get_entity({"entity_id": 10155000})["ok"] is False
+        assert kanka_get_entity({"entity_id": 10155000, "_dm_view": True})["ok"]
+
+    def test_role_denied_entry_is_not_public(self, fake):
+        fake.perms["10155000"] = [{"campaign_role_id": 7, "action": 1, "access": False}]
+        assert kanka_get_entity({"entity_id": 10155000})["ok"] is False
+
+    def test_posts_dm_sees_all_others_only_shared(self, fake):
+        fake.post_rows["10155000"] = [
+            {"name": "Background", "visibility_id": 1, "entry": "<p>Shared lore.</p>"},
+            {"name": "DM secrets", "visibility_id": 2, "entry": "<p>Hidden truth.</p>"}]
+        dm = kanka_get_entity({"entity_id": 10155000, "_dm_view": True})["entry"]
+        pub = kanka_get_entity({"entity_id": 10155000})["entry"]
+        assert "Shared lore" in dm and "Hidden truth" in dm
+        assert "Shared lore" in pub and "Hidden truth" not in pub
+
+    def test_typed_list_reads_as_lines(self, fake):
+        from gaia_common.utils.tool_call_parser import tool_result_text
+        t = tool_result_text(kanka_list_entities({"entity_type": "locations", "_dm_view": True}))
+        assert "- Leshen" in t and "- Market" in t and "{" not in t

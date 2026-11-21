@@ -210,6 +210,9 @@ services:
       - GAIA_ENV=development
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - GAIA_SERVICE=mcp
+      # Kanka campaign tools (worldbuild): without it the candidate failed every
+      # Kanka call, so promotion tests never exercised them (2026-11-20).
+      - KANKA_API_KEY=${KANKA_API_KEY:-}
 
     volumes:
       - ./candidates/gaia-mcp:/app:rw
