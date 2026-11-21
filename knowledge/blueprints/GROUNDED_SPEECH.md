@@ -164,3 +164,31 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
   a poem → none.
   Side finding while measuring: a wake refused for "external tenants ~7 GB"
   was a Windows game sharing the GPU (WSL), not a leak.
+- 2026-11-21: **C1 live** (`aidw.4`). Replay (`scripts/samvega_grounding_replay.py`,
+  production Prime as auditor, Core on the GPU as extractor and selector):
+  with no evidence, Prime vouched for the invented palace rooms ("Core
+  accurately described the operational wing"); its 21:16 flag had been luck
+  at temperature 0.3. So a finding no longer waits on the auditor:
+  1. the audit sees the turn's evidence, quotes the words it flags, and
+     a self-claim the evidence backs is a PASS (the old "can't verify from
+     inside the forward pass" item is gone);
+  2. independent of its verdict, Core lists the reply's statements about
+     herself (extraction, not judgment; it is given the question, since
+     "Five areas: core, cognitive…" never says "my");
+  3. whatever the turn's evidence doesn't hold is checked against what her
+     selector would have looked up for the question (read-only calls only);
+  4. code decides (`finding_grounding.confirm`): numbers whole and exact
+     ("12 wings" isn't backed by "122 memories"; "nearly 4,000" is by 3,994),
+     names via `unbacked`, other words only when specific (≥3 missing words
+     of 6+ letters and half the claim): "the other two are empty" for
+     "0 memories" is a paraphrase; "watchdog, immune system, self-repair
+     protocols" is an invention.
+  Statuses: confirmed / rejected (dropped from Samvega, kept in the journal
+  note) / unverified / judgment. Confirmed findings weigh as severity 3 and
+  carry `claim`, `evidence`, `grounding_call`, `grounding`, `findings[]`.
+  Replay set: 7/7 twice (3 inventions confirmed; 3 true or roughly-true
+  replies and a poem left alone); 1–5 s per turn in the background.
+  Tried and dropped: looking up from the claim's own words instead of the
+  question picked worse sources (2/7).
+  Note: the audit follows deliberated turns; turns answered from a routed
+  lookup take another path and aren't audited (they have their evidence).

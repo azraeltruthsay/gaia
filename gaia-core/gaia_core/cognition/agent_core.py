@@ -66,6 +66,7 @@ from gaia_common.utils.founding_docs import asks_opinion, named_document, refers
 from gaia_common.utils.host_facts import asks_about_host, host_facts_text
 from gaia_common.utils.message_shape import asking_text
 from gaia_common.utils.palace_library import asks_about_palace
+from gaia_core.cognition.finding_grounding import turn_evidence
 from gaia_core.cognition.knowledge_router import weakest_last
 from gaia_core.cognition.second_mind import keeps_to_text, states_something, unbacked
 from gaia_core.cognition.told_facts import (
@@ -4452,6 +4453,7 @@ class AgentCore:
                                 model_pool=self.model_pool,
                                 config=self.config,
                                 session_id=session_id,
+                                evidence=turn_evidence(packet),
                             )
                         except Exception:
                             logger.debug("Cross-tier audit scheduling failed (non-fatal)", exc_info=True)
@@ -5160,6 +5162,7 @@ class AgentCore:
                                     model_pool=self.model_pool,
                                     config=self.config,
                                     session_id=session_id,
+                                    evidence=turn_evidence(packet),
                                 )
                             except Exception:
                                 logger.debug("Cross-tier audit scheduling failed (non-fatal)", exc_info=True)
