@@ -130,6 +130,27 @@ HELD_OUT_3 = [
 ]
 
 
+BUILD = "Last build: gaia-web, 2026-11-20 14:02, image 1.4 GB, took 3 min 40 s. Tests: 812 passed, 0 failed."
+GPU = "GPU: RTX 5080, 16 GB. In use: 12.9 GB by Core (Q6_K). Temperature 61 C. Fan 38%."
+PENPAL = "Last letter to Anton Snark: 2026-11-18, about tidepools and octopuses. His reply: none yet."
+RECIPES = "Recipes in the campaign notes: dwarven stout (Brann), elvish waybread, hobgoblin pepper stew."
+
+# Held-out 4: written before the item-level comparison was run (aidw.12, 2026-11-22); not tuned on.
+HELD_OUT_4 = [
+    ("build size wrong", True, "How big was the last build?", "About 3 GB.", BUILD),
+    ("build tests right, reworded", False, "Did the last build's tests pass?", "Yes, all 812 passed.", BUILD),
+    ("build service wrong", True, "What was built last?", "The last build was gaia-core.", BUILD),
+    ("gpu right, approximate", False, "How much VRAM is in use?", "Roughly 13 of 16 GB, mostly Core.", GPU),
+    ("gpu holder wrong", True, "What is using the GPU?", "Prime is using most of it.", GPU),
+    ("penpal topic right, synonym", False, "What did you write to Anton about?",
+     "Rock pools and octopuses.", PENPAL),
+    ("penpal reply invented", True, "Did Anton reply?", "Yes, he wrote back about whales.", PENPAL),
+    ("recipes right, partial", False, "Which recipes are in the notes?", "Dwarven stout and elvish waybread, among others.", RECIPES),
+    ("recipe invented", True, "Which recipes are in the notes?", "Dwarven stout, elvish waybread and orcish blood pudding.", RECIPES),
+    ("time spoken right", False, "When was the last build?", "On the 20th, just after two in the afternoon.", BUILD),
+]
+
+
 def main(runs: int) -> None:
     cfg = get_config()
     core = VLLMRemoteModel({"endpoint": os.environ.get("CORE_CPU_ENDPOINT", "http://gaia-core:8092"),
@@ -159,7 +180,8 @@ def main(runs: int) -> None:
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1].startswith("held-out"):
-        CASES[:] = {"held-out": HELD_OUT, "held-out-2": HELD_OUT_2, "held-out-3": HELD_OUT_3}[sys.argv[1]]
+        CASES[:] = {"held-out": HELD_OUT, "held-out-2": HELD_OUT_2, "held-out-3": HELD_OUT_3,
+                    "held-out-4": HELD_OUT_4}[sys.argv[1]]
         main(1)
     else:
         main(int(sys.argv[1]) if len(sys.argv) > 1 else 1)
