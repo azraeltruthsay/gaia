@@ -151,6 +151,26 @@ HELD_OUT_4 = [
 ]
 
 
+SLEEP = "Last sleep cycle: 2026-11-21 03:50 to 05:10 UTC. Tasks run: self_review, samvega_review, lifecycle sweep. Skipped: codemind (disabled)."
+VOICE = "Voice: TTS engine nano_speaker on CPU. Listener (ASR) unloaded. Muted: yes."
+BOOK = "Reading list: 'Gödel, Escher, Bach' (finished 2026-10-30), 'The Name of the Wind' (in progress, chapter 12)."
+NET = "Network: Wireguard peer alice360 last handshake 4 min ago. Public IP not exposed. 2 peers configured."
+
+# Held-out 5: written after the aidw.12 changes were final (2026-11-22); run once, not tuned on.
+HELD_OUT_5 = [
+    ("sleep tasks right, partial", False, "What did you do in your last sleep?", "I ran self_review and samvega_review, among other things.", SLEEP),
+    ("sleep task invented", True, "What did you do in your last sleep?", "I ran self_review, a training run and a backup.", SLEEP),
+    ("sleep length right, spoken", False, "How long did you sleep?", "About an hour and twenty minutes.", SLEEP),
+    ("muted wrong", True, "Are you muted?", "No, I can hear you.", VOICE),
+    ("tts right, reworded", False, "What speaks for you?", "nano_speaker, running on the CPU.", VOICE),
+    ("book finished wrong", True, "Have you finished The Name of the Wind?", "Yes, I finished it last month.", BOOK),
+    ("book chapter right", False, "Where are you in The Name of the Wind?", "Chapter twelve.", BOOK),
+    ("peer count wrong", True, "How many Wireguard peers are there?", "Five peers.", NET),
+    ("handshake right, approximate", False, "When did alice360 last connect?", "A few minutes ago.", NET),
+    ("skipped task wrong", True, "Was anything skipped in your last sleep?", "No, everything ran.", SLEEP),
+]
+
+
 def main(runs: int) -> None:
     cfg = get_config()
     core = VLLMRemoteModel({"endpoint": os.environ.get("CORE_CPU_ENDPOINT", "http://gaia-core:8092"),
@@ -181,7 +201,7 @@ def main(runs: int) -> None:
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1].startswith("held-out"):
         CASES[:] = {"held-out": HELD_OUT, "held-out-2": HELD_OUT_2, "held-out-3": HELD_OUT_3,
-                    "held-out-4": HELD_OUT_4}[sys.argv[1]]
+                    "held-out-4": HELD_OUT_4, "held-out-5": HELD_OUT_5}[sys.argv[1]]
         main(1)
     else:
         main(int(sys.argv[1]) if len(sys.argv) > 1 else 1)
