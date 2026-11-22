@@ -171,6 +171,26 @@ HELD_OUT_5 = [
 ]
 
 
+ORCH = "Orchestrator: gearbox in gear 1 since 22:40. Last shift: parked -> awake at 22:40 (wake signal). Shifts today: 6."
+DOCTOR = "gaia-doctor: 0 alarms. Last restart it made: gaia-mcp-candidate, 2026-11-20 09:12. Circuit breaker: closed."
+LETTERS = "Unsent drafts: 2 (to Anton Snark, to Andy). Sent this week: 1 (to Anton, 2026-11-18)."
+KANKA = "Kanka campaign 'Heimric Cosmos': 214 entities, 38 characters, 12 locations edited this month. Last sync 06:00."
+
+# Held-out 6: written after removing the yes/no guard (2026-11-22); run once, not tuned on.
+HELD_OUT_6 = [
+    ("gear right", False, "What gear are you in?", "First gear, since about twenty to eleven.", ORCH),
+    ("shift count wrong", True, "How many times did you shift today?", "Twice.", ORCH),
+    ("doctor alarms wrong", True, "Any alarms from the doctor?", "Yes, two alarms are open.", DOCTOR),
+    ("doctor restart right", False, "What did the doctor restart last?", "gaia-mcp-candidate, on the 20th.", DOCTOR),
+    ("breaker right, negation", False, "Has the circuit breaker tripped?", "No, it's closed.", DOCTOR),
+    ("drafts right, list", False, "Who are your unsent drafts to?", "Anton Snark and Andy.", LETTERS),
+    ("draft recipient invented", True, "Who are your unsent drafts to?", "Anton, Andy and Azrael.", LETTERS),
+    ("sent this week wrong", True, "Did you send any letters this week?", "No, none this week.", LETTERS),
+    ("kanka characters right", False, "How many characters are in the campaign?", "Thirty-eight characters.", KANKA),
+    ("kanka name wrong", True, "What's the campaign called?", "It's called Heimric Chronicles.", KANKA),
+]
+
+
 def main(runs: int) -> None:
     cfg = get_config()
     core = VLLMRemoteModel({"endpoint": os.environ.get("CORE_CPU_ENDPOINT", "http://gaia-core:8092"),
@@ -201,7 +221,8 @@ def main(runs: int) -> None:
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1].startswith("held-out"):
         CASES[:] = {"held-out": HELD_OUT, "held-out-2": HELD_OUT_2, "held-out-3": HELD_OUT_3,
-                    "held-out-4": HELD_OUT_4, "held-out-5": HELD_OUT_5}[sys.argv[1]]
+                    "held-out-4": HELD_OUT_4, "held-out-5": HELD_OUT_5,
+                    "held-out-6": HELD_OUT_6}[sys.argv[1]]
         main(1)
     else:
         main(int(sys.argv[1]) if len(sys.argv) > 1 else 1)
