@@ -310,8 +310,10 @@ def _ground_findings(findings: List[AuditFinding], user_input: str, final_respon
         # it up (aidw.7 found flags being "confirmed" against the clock).
         call, found = (look_up or fg.look_up)(user_input, model_pool)
         evidence = f"{found}\n\n{evidence}".strip() if found else evidence
+    # aidw.11: the blind check when Core is on the GPU; the lexical fallback if not.
+    gen = fg._core_generate(model_pool) if model_pool is not None else None
     for f in checkable:
-        f.status = fg.confirm(f.claim, final_response, evidence, user_input)
+        f.status = fg.confirm(f.claim, final_response, evidence, user_input, gen)
     logger.info("Cross-tier audit: grounding %s%s",
                 ", ".join(f"{f.category}={f.status}" for f in findings),
                 f" (looked up {call})" if call else "")

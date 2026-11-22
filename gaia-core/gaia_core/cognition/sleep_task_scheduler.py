@@ -1618,12 +1618,15 @@ class SleepTaskScheduler:
     def _run_samvega_review(self, **kwargs) -> None:
         """aidw.7: review and verify her open Samvega findings."""
         from gaia_core.cognition import samvega_review
-        from gaia_core.cognition.self_review import model_generator
+        from gaia_core.cognition.self_review import chat_generator, model_generator
         if self.model_pool is None:
             logger.info("samvega_review skipped: no model pool")
             return
         result = samvega_review.run(model_generator(self.model_pool, max_tokens=300, temperature=0.2),
-                                    check_interrupted=self.check_interrupted)
+                                    check_interrupted=self.check_interrupted,
+                                    # aidw.11: verification by the blind check
+                                    confirm_generate=chat_generator(self.model_pool, roles=("core", "prime"),
+                                                                    max_tokens=300, temperature=0.0))
         logger.info("samvega_review: %s", result)
 
     def _run_issue_investigation(self, **kwargs) -> None:

@@ -24,6 +24,7 @@ judgment (engagement, deflection, identity: not a matter of evidence).
 from __future__ import annotations
 
 import logging
+import os
 import re
 from types import SimpleNamespace
 from typing import Any, Optional, Tuple
@@ -204,7 +205,18 @@ def unsupported(claim: str, known: str) -> list:
     return words + [x for x in unbacked(claim, known) if x.lower().rstrip("s") not in words]
 
 
-def confirm(claim: str, reply: str, evidence: str, question: str = "") -> str:
+def confirm(claim: str, reply: str, evidence: str, question: str = "", generate=None) -> str:
+    """Does the claim hold up against the evidence? With a model at hand
+    (`generate`), the blind check; without one, the lexical fallback."""
+    # GROUNDING_VERDICT=lexical brings back the word-overlap verdict (aidw.11).
+    if generate is not None and os.environ.get("GROUNDING_VERDICT", "blind").lower() != "lexical":
+        return confirm_blind(claim, reply, evidence, question, generate)
+    return confirm_lexical(claim, reply, evidence, question)
+
+
+def confirm_lexical(claim: str, reply: str, evidence: str, question: str = "") -> str:
+    """Word-overlap verdict (aidw.4): kept only as the fallback when no model
+    is available. Misses negation, trips on synonyms (aidw.11)."""
     claim = (claim or "").strip()
     if not claim:
         return UNVERIFIED  # no words of hers quoted: nothing to check
@@ -326,7 +338,7 @@ def check_claims(question: str, reply: str, evidence: str, model_pool,
     look_up_fn = look_up_fn or look_up
     results, cache = [], {}
     for claim in extract_self_claims(reply, generate, question):
-        if has_lookup(evidence) and confirm(claim, reply, evidence, question) == REJECTED:
+        if has_lookup(evidence) and confirm(claim, reply, evidence, question, generate) == REJECTED:
             results.append({"claim": claim, "status": "backed", "call": "", "evidence": ""})
             continue
         # What she should have looked up for the question: it is what the
@@ -337,7 +349,7 @@ def check_claims(question: str, reply: str, evidence: str, model_pool,
         if call in cache and not ev:
             ev = cache[call]
         cache[call] = ev
-        status = confirm(claim, reply, f"{evidence}\n{ev}".strip(), question) if ev else UNVERIFIED
+        status = confirm(claim, reply, f"{evidence}\n{ev}".strip(), question, generate) if ev else UNVERIFIED
         results.append({"claim": claim, "status": status, "call": call, "evidence": ev[:2000]})
     if results:
         logger.info("Claim check: %s", "; ".join(f"{r['status']}: {r['claim'][:60]!r}"
@@ -369,3 +381,176 @@ def _core_generate(model_pool):
             except Exception:
                 pass
     return generate
+
+
+
+# ── Blind check (aidw.11): no model ever sees a claim it is asked to approve ──
+#
+# 1. From the claim alone: the questions it answers, with its answers.
+# 2. From the source alone (the claim unseen): answers to those questions,
+#    or NOT IN SOURCE.
+# 3. Two short answers side by side, neither marked as hers: same, different
+#    or unclear.
+# Code decides: a different answer = contradicted (confirmed); else a same
+# answer = backed (rejected); else unverified. Shown a claim and a page, a
+# model says the page supports it (blind-fact-checking; the C1 replay:
+# Prime vouched for invented rooms). Word overlap missed negation and
+# tripped on synonyms.
+
+_QUESTIONS_PROMPT = (
+    "Here is a statement, said in answer to: \"{question}\"\n\nSTATEMENT: {claim}\n\n"
+    "Write up to 3 short questions about facts this statement answers (what something has or is, names, "
+    "numbers, lists, yes/no), each followed by the answer the statement gives, in this format:\n"
+    "Q: <question>\nA: <the statement's answer>\n"
+    "Make each question specific and sensible on its own: name the thing it is about (not \"it\", "
+    "\"there\" or \"the shelf\"), in the statement's own terms (if it speaks of rooms, ask about rooms; "
+    "if of files, ask about files). If the statement gives a list, ask one question whose answer is the "
+    "whole list, not one question per item. Ask only about what the statement says outright, never "
+    "about what it leaves unsaid."
+)
+_ANSWER_PROMPT = (
+    "Answer each question using only the source below. Answer briefly. If the source does not answer "
+    "that question, write NOT IN SOURCE; do not answer with something else the source says. "
+    "When the source gives the whole answer (a full list, an exact figure, a plain yes or no), "
+    "end the answer with (complete)."
+    "\n\nSOURCE:\n{evidence}\n\nQUESTIONS:\n{questions}\n\n"
+    "Write one line per question: <number>: <answer>"
+)
+_COMPARE_PROMPT = (
+    "For each question below there are two answers. Could both answers be true at once?\n"
+    "CONSISTENT: they agree, even in different words, or one is just less complete than the other "
+    "(\"red and blue\" / \"red, blue and green\"; \"none\" / \"0\").\n"
+    "CONFLICT: they cannot both be true (\"Paris\" / \"Lyon\"; \"7\" / \"9\"; \"yes\" / \"no\"; "
+    "two different lists naming the same set of things).\n"
+    "ADDS: answer 2 names things answer 1 does not mention at all.\n"
+    "OFF-TOPIC: one of them does not answer the question.\n\n{pairs}\n\n"
+    "Write one line per question: <number>: CONSISTENT, CONFLICT, ADDS or OFF-TOPIC"
+)
+_QA_RE = re.compile(r"^\s*Q\s*[:.]\s*(.+?)\s*\n\s*A\s*[:.]\s*(.+?)\s*$", re.I | re.M)
+_NUM_LINE_RE = re.compile(r"^\s*(\d+)\s*[:.)]\s*(.+?)\s*$", re.M)
+_COMPLETE_RE = re.compile(r"\s*\(complete\)\s*\.?\s*$", re.I)
+_NOT_IN = re.compile(r"not\s+in\s+(?:the\s+)?source|does\s+not\s+say|doesn'?t\s+say|not\s+(?:stated|mentioned)", re.I)
+
+
+def _numbered(raw: str, n: int) -> dict:
+    out = {}
+    for m in _NUM_LINE_RE.finditer(raw or ""):
+        i = int(m.group(1))
+        if 1 <= i <= n and i not in out:
+            out[i] = m.group(2).strip()
+    return out
+
+
+def confirm_blind(claim: str, reply: str, evidence: str, question: str, generate) -> str:
+    claim = (claim or "").strip()
+    if not claim:
+        return UNVERIFIED
+    if not in_reply(claim, reply):
+        return REJECTED  # a finding about words she didn't say
+    if not (evidence or "").strip():
+        return UNVERIFIED
+    try:
+        raw = generate([{"role": "user", "content": _QUESTIONS_PROMPT.format(
+            question=(question or "")[:300], claim=claim[:600])}]) or ""
+        qa = [(q.strip(), a.strip()) for q, a in _QA_RE.findall(raw)][:3]
+        if not qa:
+            return UNVERIFIED
+        qs = "\n".join(f"{i}. {q}" for i, (q, _) in enumerate(qa, 1))
+        src = _numbered(generate([{"role": "user", "content": _ANSWER_PROMPT.format(
+            evidence=evidence[:3000], questions=qs)}]) or "", len(qa))
+        pairs, idx, complete = [], [], []
+        for i, (q, a) in enumerate(qa, 1):
+            s_ans = src.get(i, "")
+            if not s_ans or _NOT_IN.search(s_ans):
+                continue
+            whole = bool(_COMPLETE_RE.search(s_ans))
+            s_ans = _COMPLETE_RE.sub("", s_ans).strip()
+            idx.append(i)
+            complete.append(whole)
+            pairs.append(f"{len(idx)}. {q}\n   Answer 1: {s_ans}\n   Answer 2: {a}")
+        if not pairs:
+            return UNVERIFIED
+        # Short answers to the same question are compared by code where they
+        # have a shape code can read (yes/no, numbers, lists); the model only
+        # compares the rest.
+        words = [compare_short(qa[j - 1][1], _COMPLETE_RE.sub("", src[j]).strip(), whole)
+                 for j, whole in zip(idx, complete)]
+        need = [k for k, w in enumerate(words) if w is None]
+        if need:
+            sub = [pairs[k].split(". ", 1)[1] for k in need]
+            got = _numbered(generate([{"role": "user", "content": _COMPARE_PROMPT.format(
+                pairs="\n".join(f"{n}. {t}" for n, t in enumerate(sub, 1)))}]) or "", len(sub))
+            for n, k in enumerate(need, 1):
+                words[k] = got.get(n, "").upper()
+    except Exception:
+        logger.debug("Blind check failed", exc_info=True)
+        return UNVERIFIED
+    logger.info("Blind check: %s", "; ".join(f"{qa[j - 1][0][:50]!r} -> {w[:9]}" for j, w in zip(idx, words)))
+    # Naming things a complete answer doesn't have is an invention; naming
+    # things a partial answer doesn't have is only unsupported.
+    if any(w.startswith("CONFLICT") or (w.startswith("ADDS") and whole)
+           for w, whole in zip(words, complete)):
+        return CONFIRMED
+    if any(w.startswith("CONSISTENT") for w in words):
+        return REJECTED
+    return UNVERIFIED
+
+
+
+_YES = re.compile(r"^\s*(?:yes|yeah|correct|true)\b", re.I)
+_NO = re.compile(r"^\s*(?:no|not|none|false|never)\b", re.I)
+_SPLIT = re.compile(r"\s*(?:,|;|/|\n|\band\b|\bor\b)\s*", re.I)
+# A list item is a noun phrase; a part with a verb is a clause
+# ("the other two are empty"), which the model compares instead.
+_VERB_RE = re.compile(r"\b(?:is|are|was|were|has|have|had|holds?|contains?|covers?|does|do|did|will|can)\b", re.I)
+_LISTISH = re.compile(r"[,;/\n]")   # "and" alone ("drizzly and 14 degrees") doesn't make a list
+
+
+def _items(answer: str) -> list:
+    text = re.sub(r"\([^)]*\)", " ", answer or "")      # "problems (0 memories)" -> "problems"
+    out = []
+    for part in _SPLIT.split(text):
+        st = _stems(part)
+        if st:
+            out.append(st)
+    return out
+
+
+def compare_short(claim_ans: str, source_ans: str, complete: bool):
+    """CONFLICT / CONSISTENT / ADDS for two short answers code can read,
+    else None (the model compares). Claim's answer vs the source's."""
+    c, s_ = (claim_ans or "").strip(), (source_ans or "").strip()
+    if not c or not s_:
+        return None
+    bare = lambda t: _NUM_WORDS.get(re.sub(r"[^a-z]", "", t.lower()), t)   # "Thirteen." -> "13"
+    c, s_ = bare(c), bare(s_)
+    cy, cn, sy, sn = bool(_YES.match(c)), bool(_NO.match(c)), bool(_YES.match(s_)), bool(_NO.match(s_))
+    if (cy or cn) and (sy or sn) and len(c.split()) <= 12 and len(s_.split()) <= 12:
+        return "CONSISTENT" if (cy == sy) else "CONFLICT"
+    cnums, snums = _numbers(_numerize(c)), _numbers(_numerize(s_))
+    if cnums and snums and not _items_beyond_numbers(c, s_):
+        return "CONFLICT" if unbacked_numbers(_numerize(c), _numerize(s_)) else "CONSISTENT"
+    ci, si = _items(c), _items(s_)
+    # A list is short parts ("problems, preferences and milestones"); clauses
+    # ("Milestones has 4 memories; the other two are empty") go to the model.
+    def is_list(t):
+        parts = [p for p in _SPLIT.split(re.sub(r"\([^)]*\)", " ", t)) if p.strip()]
+        return (bool(_LISTISH.search(re.sub(r"\([^)]*\)", " ", t))) and len(parts) >= 2
+                and all(len(p.split()) <= 6 and not _VERB_RE.search(p) for p in parts))
+    if (len(si) >= 2 or len(ci) >= 2) and is_list(c) and (len(si) < 2 or is_list(s_)):
+        said = _stems(s_)   # everything the source answer says, parentheses included
+        new = [it for it in ci if not (it & said)]
+        if not new:
+            return "CONSISTENT"
+        # Nothing in common: two different lists for the same thing.
+        if complete or (si and len(new) == len(ci)):
+            return "CONFLICT"
+        return "ADDS"
+    return None
+
+
+def _items_beyond_numbers(c: str, s_: str) -> bool:
+    """A numeric answer that also names things ("3: problems, preferences")
+    is compared as a list, not a count."""
+    strip = lambda t: re.sub(r"[\d.,]+", " ", _numerize(t))
+    return any(_LISTISH.search(strip(t)) and len(_items(strip(t))) >= 2 for t in (c, s_))

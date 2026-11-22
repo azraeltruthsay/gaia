@@ -126,7 +126,7 @@ def maybe_amend(finding_path, *, question: str, said: str, evidence: str, ground
         _skip("no different answer came")
         return None
     # The correction must hold up against the same evidence.
-    if fg.confirm(new, new, evidence, question) == fg.CONFIRMED:
+    if fg.confirm(new, new, evidence, question, generate) == fg.CONFIRMED:
         _skip("the rewrite didn't hold up against the evidence either")
         return None
     note = f"I checked {source_phrase(grounding_call)} and corrected this"

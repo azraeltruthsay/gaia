@@ -153,3 +153,42 @@ def test_world_state_alone_is_not_evidence():
     f = [AuditFinding("confabulation", "invented rooms", claim="my health monitoring and watchdog systems")]
     _ground_findings(f, "What's in your Operational wing?", INVENTED, "[world state]\nClock: 21:15 UTC", None, look_up)
     assert calls and f[0].status == fg.CONFIRMED
+
+
+# ── aidw.11: blind check ────────────────────────────────────────────────
+
+def test_compare_short_shapes():
+    assert fg.compare_short("No", "Yes, there is", True) == "CONFLICT"
+    assert fg.compare_short("Yes", "Yes (complete)", True) == "CONSISTENT"
+    assert fg.compare_short("Thirteen", "13", True) == "CONSISTENT"
+    assert fg.compare_short("five", "4", True) == "CONFLICT"
+    assert fg.compare_short("health monitoring, watchdog systems", "problems, preferences, milestones", False) == "CONFLICT"
+    assert fg.compare_short("problems, preferences", "problems, preferences, milestones", True) == "CONSISTENT"
+    assert fg.compare_short("The Raven, by Poe", "The Raven (Poe)", True) == "CONSISTENT"
+    assert fg.compare_short("Milestones has 4 memories; the other two are empty", "problems, preferences", True) is None
+
+
+def _scripted(*answers):
+    it = iter(answers)
+    return lambda messages: next(it)
+
+
+def test_blind_negation_and_ledger_of_steps():
+    gen = _scripted("Q: Does the palace have a library wing?\nA: No.", "1: Yes (complete)")
+    claim = "No, my palace doesn't have a library wing."
+    assert fg.confirm(claim, claim, "6 wings: technical, ..., library.", "Do you have a library wing?", gen) == fg.CONFIRMED
+
+
+def test_blind_not_in_source_is_unverified_and_model_compares_the_rest():
+    gen = _scripted("Q: What does GAIA use for short-term context?\nA: A rolling window.", "1: NOT IN SOURCE")
+    c = "For shorter-term context I have a rolling window that compresses as it ages."
+    assert fg.confirm(c, c, "6 wings ...", "How do you remember?", gen) == fg.UNVERIFIED
+    gen2 = _scripted("Q: What is the weather in Tokyo today?\nA: Drizzly and about 14 degrees.",
+                     "1: light rain, high 14 C")
+    c2 = "Drizzly, about 14 degrees at most."
+    assert fg.confirm(c2, c2, "Tokyo: light rain, high 14 C", "Weather?", gen2) == fg.REJECTED
+
+
+def test_without_a_model_falls_back_to_lexical():
+    assert fg.confirm("has twelve wings and 9 rooms", "The palace has twelve wings and 9 rooms.",
+                      NAVIGATE, "", None) == fg.CONFIRMED

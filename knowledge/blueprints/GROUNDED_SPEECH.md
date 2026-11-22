@@ -267,3 +267,28 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
   Limits: MiniLM misses some same-kind phrasings ("read me your blueprint
   for gaia-web" < 0.40); a wrong lookup that "works" can become an example
   until a Samvega finding corrects it.
+- 2026-11-22: **Blind check** (`aidw.11`) replaces the word-overlap verdict
+  wherever a model is at hand (`finding_grounding.confirm_blind`; switch:
+  `GROUNDING_VERDICT=lexical`). No model sees a claim it is asked to approve:
+  (1) from the claim alone, the questions it answers with its answers;
+  (2) from the source alone, answers or NOT IN SOURCE, marked (complete)
+  when whole; (3) short answers compared by code where they have a shape
+  (yes/no, numbers, noun-phrase lists; disjoint lists = conflict), by the
+  model otherwise (CONSISTENT / CONFLICT / ADDS / OFF-TOPIC).
+  Measured (`scripts/confirm_eval.py`: a tuned set of 14 and three held-out
+  sets of 10, each written before the next round of changes):
+
+  | | tuned | held-out 1 | held-out 2 | held-out 3 | 7 real turns e2e |
+  |---|---|---|---|---|---|
+  | lexical | 11/14 | 9/10 | 8/10 | 6/10 | 7/7 |
+  | blind (shipped) | 12/14 | 8/10 | 10/10 | 8/10 | 7/7 |
+
+  Wins: negation, "loaded" vs "available", spoken numbers, paraphrase;
+  "not in source" is unverified instead of a false alarm. Weak link: the
+  comparison of two short answers. The 12B's holistic judgement is lenient
+  (it called "rooms covering health monitoring…" consistent with "problems,
+  preferences, milestones"), and the code rules keep needing patches (an
+  earlier variant scored 41/44 on the sets but missed the Grotto rooms end
+  to end). Stopped tuning there; next is an item-level model comparison
+  (`aidw.12`). Known misses: hedges ("…among others"), spoken times ("half
+  past three" vs 15:30).

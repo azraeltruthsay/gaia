@@ -29,6 +29,12 @@ def finding(tmp_path, monkeypatch):
     return p
 
 
+def _steps(*answers):
+    """The rewrite, then the blind check's steps, in order (aidw.11)."""
+    it = iter(answers)
+    return lambda messages: next(it, "")
+
+
 def _ref(p):
     return json.loads(p.read_text())["message_ref"]
 
@@ -46,7 +52,8 @@ def test_corrects_the_message_with_a_note(finding):
         calls.append((session_id, containing, text, note))
         return f"{text}\n\n*(Edited: {note}.)*"
 
-    out = _amend(finding, lambda m: GOOD, revise)
+    out = _amend(finding, _steps(GOOD, "Q: What rooms are in the Operational wing?\nA: problems, preferences and milestones",
+                                 "1: problems, preferences, milestones (complete)"), revise)
     assert out and out.startswith(GOOD)
     sid, containing, text, note = calls[0]
     assert sid == SID and SAID.startswith(containing) and text == GOOD
@@ -57,7 +64,9 @@ def test_corrects_the_message_with_a_note(finding):
 
 
 def test_a_rewrite_that_is_wrong_too_is_not_used(finding):
-    out = _amend(finding, lambda m: "The wing has twelve rooms, including the watchdog kennel and immune vault.",
+    out = _amend(finding, _steps("The wing has twelve rooms, including the watchdog kennel and immune vault.",
+                                 "Q: How many rooms does the Operational wing have?\nA: twelve",
+                                 "1: 3 (complete)"),
                  lambda *a: pytest.fail("must not edit"))
     assert out is None
     f = L.show(finding.stem)

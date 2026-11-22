@@ -171,7 +171,7 @@ def run_call(call: str) -> str:
 
 
 def verify(f: dict, replay: Callable[[str], str] = replay_answer,
-           rerun: Callable[[str], str] = run_call) -> str:
+           rerun: Callable[[str], str] = run_call, confirm_generate=None) -> str:
     from gaia_common.utils import samvega_ledger as ledger
     from gaia_core.cognition import finding_grounding as fg
     q, call = f.get("question") or "", f.get("checked_with") or ""
@@ -185,7 +185,7 @@ def verify(f: dict, replay: Callable[[str], str] = replay_answer,
     evidence = rerun(call)
     if not answer or not evidence:
         return "replay inconclusive"
-    if fg.confirm(answer, answer, evidence, q) == fg.CONFIRMED:
+    if fg.confirm(answer, answer, evidence, q, confirm_generate) == fg.CONFIRMED:
         ledger.note(f["id"], f"Replay: still not what {call} shows: \"{answer[:200]}\"", by="replay")
         return "still wrong"
     ledger.set_status(f["id"], "verified", reason=f"Replay: \"{answer[:200]}\" agrees with {call}.",
@@ -195,7 +195,7 @@ def verify(f: dict, replay: Callable[[str], str] = replay_answer,
 
 def run(generate: Callable[[str, str], str], *, replay: Callable[[str], str] = replay_answer,
         rerun: Callable[[str], str] = run_call, check_interrupted: Callable[[], None] = lambda: None,
-        max_findings: int = MAX_PER_RUN) -> dict:
+        max_findings: int = MAX_PER_RUN, confirm_generate=None) -> dict:
     """Review and verify up to `max_findings` active findings, oldest first."""
     from gaia_common.utils import samvega_ledger as ledger
     active = list(reversed(ledger.list_findings(status="active", limit=200)["findings"]))
@@ -212,7 +212,7 @@ def run(generate: Callable[[str, str], str], *, replay: Callable[[str], str] = r
             outcome["review"] = _act(f, decision, shown) if decision else "no answer"
             f = ledger.show(f["id"])
         if f.get("status") in ("amended", "investigating", "fixed"):
-            outcome["verify"] = verify(f, replay, rerun)
+            outcome["verify"] = verify(f, replay, rerun, confirm_generate)
         logger.info("Samvega review %s: %s", f["id"], outcome)
         done.append(outcome)
     return {"reviewed": done, "active": len(active)}
