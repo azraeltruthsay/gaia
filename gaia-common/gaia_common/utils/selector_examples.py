@@ -62,3 +62,69 @@ def add(question: str, call: str, source: str, ref: str = "") -> bool:
         f.write(json.dumps({"ts": time.time(), "question": question, "call": call.strip(), **parsed,
                             "source": source, "ref": ref}, ensure_ascii=False) + "\n")
     return True
+
+
+# ── Retrieval (aidw.2): nearest examples by meaning, not by keywords ──────
+
+MIN_SIMILARITY = 0.40  # measured on MiniLM 2026-11-22: unrelated 0.08-0.28, same kind 0.38-0.43, paraphrase 0.66+
+SAMVEGA_BONUS = 0.05   # a call that corrected a confirmed mistake outranks a routine one
+_cache = {"mtime": None, "rows": [], "vecs": None, "model": None}
+
+
+def call_label(tool: str, params: dict) -> str:
+    return f"{tool}({', '.join(f'{k}={v}' for k, v in (params or {}).items())})"
+
+
+def _vectors(embed, texts):
+    import numpy as np
+    v = embed.encode(list(texts), normalize_embeddings=True, show_progress_bar=False)
+    return np.asarray(v, dtype="float32")
+
+
+def nearest(question: str, embed, k: int = 3, min_sim: float = MIN_SIMILARITY) -> List[dict]:
+    """The k examples whose questions mean most nearly the same as `question`
+    (cosine similarity of sentence embeddings), above `min_sim`. One per call."""
+    question = re.sub(r"^[^:\n]{1,64}:\s", "", (question or "").strip(), count=1)
+    if not question or embed is None:
+        return []
+    try:
+        p = path()
+        mtime = p.stat().st_mtime if p.exists() else None
+        if mtime is None:
+            return []
+        if _cache["mtime"] != mtime or _cache["model"] is not embed:
+            rows = read()
+            _cache.update(mtime=mtime, rows=rows, model=embed,
+                          vecs=_vectors(embed, [r["question"] for r in rows]) if rows else None)
+        rows, vecs = _cache["rows"], _cache["vecs"]
+        if not rows or vecs is None:
+            return []
+        q = _vectors(embed, [question])[0]
+        scored = []
+        for r, s in zip(rows, (vecs @ q).tolist()):
+            s += SAMVEGA_BONUS if r.get("source") == "samvega" else 0.0
+            if s >= min_sim:
+                scored.append((s, r))
+        scored.sort(key=lambda x: -x[0])
+        out, seen = [], set()
+        for s, r in scored:
+            if r["call"] in seen:
+                continue
+            seen.add(r["call"])
+            out.append({**r, "similarity": round(s, 3)})
+            if len(out) >= k:
+                break
+        return out
+    except Exception:
+        import logging
+        logging.getLogger("GAIA.SelectorExamples").debug("nearest failed", exc_info=True)
+        return []
+
+
+def prompt_block(examples: List[dict]) -> str:
+    """The examples as the selector reads them."""
+    if not examples:
+        return ""
+    lines = [f'- "{e["question"][:200]}" -> {e["call"]}' for e in examples]
+    return ("EARLIER QUESTIONS LIKE THIS, AND THE CALL THAT ANSWERED THEM (from your own history; "
+            "use one if this request asks the same kind of thing):\n" + "\n".join(lines) + "\n")

@@ -501,6 +501,7 @@ def select_tool(
     model,
     temperature: float = 0.15,
     decide: bool = False,
+    examples: str = "",
 ) -> Tuple[Optional[SelectedTool], List[SelectedTool]]:
     """
     Use low-temperature LLM generation to select the appropriate tool.
@@ -533,6 +534,9 @@ def select_tool(
     # this issue" gives the selector nothing to resolve "that"/"this" against
     # and no evidence to put in issue(file)'s params — omitted entirely when
     # there's no history, so plain tool requests ("read /foo") don't pay for it.
+    # aidw.2: her own earlier questions that mean the same, with the call that
+    # answered them (selector_examples.nearest, by embedding similarity).
+    examples_block = f"\n{examples}" if examples else ""
     history_text = _recent_conversation(packet)
     history_block = (
         f"\nRECENT CONVERSATION (resolve \"it\"/\"that\"/\"this\" in the request against this):\n{history_text}\n"
@@ -562,7 +566,7 @@ IMPORTANT: Select a domain tool and specify the action. Examples:
   selected_tool="file", params='{{"action": "read", "path": "/foo"}}'
   selected_tool="issue", params='{{"action": "note", "id": "<id>", "text": "<what you found>"}}'
 If you need to discover available actions, use introspect with action="tools".
-{history_block}
+{examples_block}{history_block}
 USER REQUEST: {user_input}
 
 CONTEXT FROM PACKET:

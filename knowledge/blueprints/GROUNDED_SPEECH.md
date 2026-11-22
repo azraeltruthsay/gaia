@@ -248,3 +248,22 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
   (0 memories), and milestones (4 memories)" → **verified**. The loop Azrael
   described, end to end: noticed, corrected in place, reviewed in sleep,
   verified.
+- 2026-11-22: **A2 live** (`aidw.2`). Her selector sees the nearest of her own
+  earlier questions with the call that answered them, found by **meaning**
+  (all-MiniLM-L6-v2 cosine similarity, `selector_examples.nearest`), not by
+  keywords; she decides whether one applies. Examples come from Samvega
+  lessons (C4, ranked +0.05) and from her own lookups that worked (read-only
+  calls). Threshold 0.40, measured: unrelated 0.08–0.28, same kind with a
+  different subject 0.38–0.43, paraphrase 0.66+.
+  Eval with examples (production Core, GPU, two passes): 14/14 lookups,
+  12/12 left tool-free, 0.58 s; examples attached only where relevant.
+  Paraphrase set: 5/5, and she adapts rather than copies (the Operational
+  example → wing=technical / creative). One lesson-style example (test copy
+  only) turned the blueprint miss (`manage(blueprint)` *generates* a
+  blueprint) into `palace(read)` on the blueprint shelf for unseen
+  services. Live: "Which rooms does your technical wing have?" retrieved the
+  Grotto lesson (0.575), chose wing=technical, answered with the three real
+  rooms, and left a new example.
+  Limits: MiniLM misses some same-kind phrasings ("read me your blueprint
+  for gaia-web" < 0.40); a wrong lookup that "works" can become an example
+  until a Samvega finding corrects it.

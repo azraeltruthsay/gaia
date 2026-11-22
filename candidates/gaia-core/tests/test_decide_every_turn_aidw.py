@@ -79,3 +79,13 @@ def test_off_the_gpu_the_gate_decides(monkeypatch):
     monkeypatch.setenv("TOOL_DECIDE_EVERY_TURN", "1")
     monkeypatch.setattr("gaia_core.cognition.agent_core._core_on_gpu", lambda: False)
     assert AgentCore._decide_every_turn(_self(), _plan("list_tree"), "What's in your Operational wing?") is False
+
+
+def test_examples_reach_the_selector_prompt(monkeypatch):
+    monkeypatch.setenv("OUTCOME_LEDGER_ENABLED", "0")
+    m = _Model()
+    block = 'EARLIER QUESTIONS LIKE THIS, AND THE CALL THAT ANSWERED THEM (x):\n- "q" -> palace(action=navigate)\n'
+    tool_selector.select_tool(_packet(), "Which rooms does your operational wing have?", m, decide=True, examples=block)
+    assert block in m.prompts[-1]
+    tool_selector.select_tool(_packet(), "Which rooms does your operational wing have?", m, decide=True)
+    assert "EARLIER QUESTIONS" not in m.prompts[-1]

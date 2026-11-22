@@ -10769,6 +10769,7 @@ Start your response with the first line of the file."""
                     model=selection_model,
                     temperature=selection_temp,
                     decide=decide,
+                    examples=self._selector_examples(user_input),
                 )
         finally:
             if selection_model_name:
@@ -10895,6 +10896,8 @@ Start your response with the first line of the file."""
         try:
             result = self._execute_mcp_tool(primary_tool, session_id=session_id)
             packet.tool_routing.execution_result = result
+            if result.success and forced_tool is None and primary_tool.selection_confidence < 0.9:
+                self._note_selector_example(user_input, primary_tool)
             packet.tool_routing.execution_status = (
                 ToolExecutionStatus.EXECUTED if result.success
                 else ToolExecutionStatus.FAILED
@@ -11347,6 +11350,35 @@ Start your response with the first line of the file."""
                 error=str(e),
                 execution_time_ms=elapsed_ms
             )
+
+    def _selector_examples(self, user_input: str) -> str:
+        """aidw.2: the nearest of her earlier questions (by meaning) with the
+        call that answered them, for the selector. Empty if the embedding
+        model isn't loaded yet; never waits for it."""
+        try:
+            from gaia_common.utils import selector_examples
+            embed = self.model_pool.get_embed_model(timeout=0, lazy_load=False)
+            found = selector_examples.nearest(asking_text(user_input or ""), embed)
+            if found:
+                logger.info("Selector examples: %s", "; ".join(
+                    f"{e['call']} ({e['similarity']})" for e in found))
+            return selector_examples.prompt_block(found)
+        except Exception:
+            logger.debug("Selector examples unavailable", exc_info=True)
+            return ""
+
+    def _note_selector_example(self, user_input: str, tool) -> None:
+        """A lookup her selector chose that worked becomes an example (read-only
+        calls only; a confirmed Samvega finding outranks it if it was wrong)."""
+        try:
+            from gaia_common.utils import selector_examples
+            from gaia_core.cognition.finding_grounding import _read_only
+            params = {k: v for k, v in (tool.params or {}).items() if not str(k).startswith("_")}
+            if _read_only(tool.tool_name, params):
+                selector_examples.add(asking_text(user_input or ""),
+                                      selector_examples.call_label(tool.tool_name, params), source="turn")
+        except Exception:
+            logger.debug("Selector example not recorded", exc_info=True)
 
     def _decide_every_turn(self, plan: Plan, user_input: str) -> bool:
         """aidw.1 (GROUNDED_SPEECH.md, part A): with no keyword to go on, her

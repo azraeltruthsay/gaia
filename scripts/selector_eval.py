@@ -128,7 +128,17 @@ def score(tag: str, ledger: str) -> None:
     print(f"total: {total}/{len(CASES)}")
 
 
-def direct(engine: str, runs: int, only: list) -> None:
+CASES_A2 = [
+    # (message, tool, a param that must be right) — paraphrases of stored examples
+    ("Which rooms does your operational wing have?", "palace", ("wing", "operational")),
+    ("Tell me what the Operational wing contains", "palace", ("wing", "operational")),
+    ("Which rooms does your technical wing have?", "palace", ("wing", "technical")),
+    ("What's stored in your technical wing?", "palace", ("wing", "technical")),
+    ("What's in your creative wing?", "palace", ("wing", "creative")),
+]
+
+
+def direct(engine: str, runs: int, only: list, examples: bool = False, a2: bool = False) -> None:
     """The routing decision alone, in-process, against a live Core engine:
     real intent detection, the keyword gate, then the selector. Compares
     the gate (today) with she-decides (aidw.1). Run in gaia-core-candidate
@@ -173,6 +183,10 @@ def direct(engine: str, runs: int, only: list) -> None:
                 intent=SimpleNamespace(user_intent=intent),
                 context=SimpleNamespace(available_mcp_tools=None, relevant_history_snippet=[]),
             )
+            ex = ""
+            if examples and embed is not None:
+                from gaia_common.utils import selector_examples
+                ex = selector_examples.prompt_block(selector_examples.nearest(msg, embed))
             out = {}
             for mode in ("gate", "decide"):
                 routed = keyword or (mode == "decide" and decide)
@@ -180,7 +194,8 @@ def direct(engine: str, runs: int, only: list) -> None:
                 if routed:
                     t0 = time.time()
                     try:
-                        sel, _ = select_tool(pkt, msg, model, decide=(mode == "decide" and not keyword))
+                        sel, _ = select_tool(pkt, msg, model, decide=(mode == "decide" and not keyword),
+                                             examples=ex if mode == "decide" else "")
                     except Exception as e:
                         sel = None
                         print(f"   selector error: {e}")
@@ -190,7 +205,22 @@ def direct(engine: str, runs: int, only: list) -> None:
                 good = (tool in fam) if expected == "look" else (tool == "")
                 rows[mode][expected] += good
                 out[mode] = f"{'ok ' if good else 'BAD'} {tool or ('none' if routed else '-'):11s}{secs:4.1f}s"
-            print(f"{i:2d} {expected:4s} {intent[:12]:12s} gate[{out['gate']}]  decide[{out['decide']}]  {msg[:48]}", flush=True)
+            print(f"{i:2d} {expected:4s} {intent[:12]:12s} gate[{out['gate']}]  decide[{out['decide']}]"
+                  f"{' +ex' if ex else '    '}  {msg[:48]}", flush=True)
+    if a2:
+        from gaia_common.utils import selector_examples
+        good = 0
+        for msg, tool, (k, v) in CASES_A2:
+            found = selector_examples.nearest(msg, embed) if embed is not None else []
+            pkt = SimpleNamespace(header=SimpleNamespace(session_id="a2", packet_id="a2"),
+                                  intent=SimpleNamespace(user_intent="list_tree"),
+                                  context=SimpleNamespace(available_mcp_tools=None, relevant_history_snippet=[]))
+            sel, _ = select_tool(pkt, msg, model, decide=True, examples=selector_examples.prompt_block(found))
+            got = (sel.tool_name, str((sel.params or {}).get(k, "")).lower()) if sel else ("", "")
+            ok = got[0] == tool and got[1] == v
+            good += ok
+            print(f"A2 {'ok ' if ok else 'BAD'} {got[0]:8s} {k}={got[1]:12s} ex={[e['call'] for e in found]}  {msg}")
+        print(f"A2 paraphrases: {good}/{len(CASES_A2)}")
     for mode in ("gate", "decide"):
         r = rows[mode]
         l = lat[mode]
@@ -213,11 +243,13 @@ def main() -> None:
     d.add_argument("--engine", default="http://gaia-core:8092")
     d.add_argument("--runs", type=int, default=1)
     d.add_argument("--only", type=int, nargs="*", default=[])
+    d.add_argument("--examples", action="store_true", help="give the decide-mode selector its nearest examples")
+    d.add_argument("--a2", action="store_true", help="also run the paraphrase set (CASES_A2)")
     a = ap.parse_args()
     if a.cmd == "send":
         send(a.core_url, a.tag, a.only, a.timeout)
     elif a.cmd == "direct":
-        direct(a.engine, a.runs, a.only)
+        direct(a.engine, a.runs, a.only, examples=a.examples, a2=a.a2)
     else:
         score(a.tag, a.ledger)
 
