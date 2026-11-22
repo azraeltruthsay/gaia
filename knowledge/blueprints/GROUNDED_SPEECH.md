@@ -219,3 +219,10 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
   problems (0 memories), preferences (0 memories), and milestones (4
   memories)." That test also caught a backfill mistake (mine): the C2 entry
   had been attached to the audit of the *next* message; corrected, noted.
+  Live (Azrael's go-ahead, age limit lifted once): her 21:16:07 Grotto reply
+  with the invented rooms now reads "Three rooms in the operational wing:
+  problems (0 memories), preferences (0 memories), and milestones (4
+  memories). … *(Edited: I checked my memory palace and corrected this.)*";
+  `sv-e499ad9f` → amended. Her session history wasn't updated that time
+  only because a day-old message has left the 8-message live window; within
+  the 30-minute limit it is still there.
