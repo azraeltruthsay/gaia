@@ -292,3 +292,30 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
   to end). Stopped tuning there; next is an item-level model comparison
   (`aidw.12`). Known misses: hedges ("…among others"), spoken times ("half
   past three" vs 15:30).
+- 2026-11-22: **Item-level comparison** (`aidw.12`) replaces step 3's holistic
+  judgement and the list rules. Step 1 (claim alone) writes each answer's
+  items separated by semicolons; step 3 shows the model those exact items
+  next to the source's answer and asks, per item, HAS / CONTRADICTS / LACKS;
+  code counts (a contradiction, or items a complete answer lacks, or nothing
+  in common = conflict; all present = consistent; some lacking from a
+  partial answer = adds). Code still settles plain yes/no, plain figures,
+  and items whose figures all match the source's answer (whole numbers,
+  2.5% for large ones). Bracketed detail and hedges ("among others",
+  "roughly") are dropped from items. A list or figure answer from step 1
+  must be in the claim's words (step 1 sometimes invents).
+  Also fixed: a claim with no content word ("About 3 GB.") was treated as
+  words she didn't say.
+
+  | | tuned | h1 | h2 | h3 | h4 | h5 | h6 | real turns |
+  |---|---|---|---|---|---|---|---|---|
+  | lexical | 11/14 | 9 | 8 | 6 | 4 | 5 | 7 | 7/7 |
+  | item-level | 13/14 | 10 | 10 | 10 | 8 | 9 | 8 | 7/7 (×2) |
+
+  Honest reading: h1–h3 shaped aidw.11; h4 and h5 were traced during this
+  work; **h6 is the only set never looked at before its one run: 8/10 vs
+  7/10.** First runs of the fresh sets: h4 7 vs 4, h5 6 vs 5, h6 8 vs 7.
+  Tried and reverted: a word-overlap guard on step 1's yes/no questions
+  (it dropped legitimate rephrasings: "finished it" -> "finish reading").
+  Known misses: spoken times against clock times ("twenty to eleven" vs
+  22:40), an invented list item left unverified rather than confirmed,
+  step 1 occasionally asking about what the claim doesn't say.

@@ -158,14 +158,43 @@ def test_world_state_alone_is_not_evidence():
 # ── aidw.11: blind check ────────────────────────────────────────────────
 
 def test_compare_short_shapes():
+    """Code settles only plain yes/no and plain figures (aidw.12); lists and
+    descriptions go to the item-level model step (None)."""
     assert fg.compare_short("No", "Yes, there is", True) == "CONFLICT"
     assert fg.compare_short("Yes", "Yes (complete)", True) == "CONSISTENT"
     assert fg.compare_short("Thirteen", "13", True) == "CONSISTENT"
     assert fg.compare_short("five", "4", True) == "CONFLICT"
-    assert fg.compare_short("health monitoring, watchdog systems", "problems, preferences, milestones", False) == "CONFLICT"
-    assert fg.compare_short("problems, preferences", "problems, preferences, milestones", True) == "CONSISTENT"
-    assert fg.compare_short("The Raven, by Poe", "The Raven (Poe)", True) == "CONSISTENT"
-    assert fg.compare_short("Milestones has 4 memories; the other two are empty", "problems, preferences", True) is None
+    assert fg.compare_short("About 3 GB.", "1.4 GB", True) == "CONFLICT"
+    assert fg.compare_short("health monitoring, watchdog systems", "problems, preferences, milestones", False) is None
+    assert fg.compare_short("Roughly 13 of 16 GB, mostly Core.", "12.9 GB", True) is None
+
+
+def test_claim_items_and_verdicts():
+    assert fg.claim_items("Dwarven stout; elvish waybread, among others") == ["Dwarven stout", "elvish waybread"]
+    assert fg.claim_items("Problems (bugs and fixes); preferences; milestones") == ["Problems", "preferences", "milestones"]
+    assert fg.item_verdict([("a", "HAS"), ("b", "HAS")], True) == "CONSISTENT"
+    assert fg.item_verdict([("a", "HAS"), ("b", "CONTRADICTS")], False) == "CONFLICT"
+    assert fg.item_verdict([("a", "HAS"), ("b", "LACKS")], False) == "ADDS"
+    assert fg.item_verdict([("a", "HAS"), ("b", "LACKS")], True) == "CONFLICT"     # a complete answer lacks it
+    assert fg.item_verdict([("a", "LACKS"), ("b", "LACKS")], False) == "CONFLICT"  # nothing in common
+    assert fg.item_verdict([], False) == "UNCLEAR"
+
+
+def test_blind_items_invented_list_and_rounded_figure():
+    gen = _scripted("Q: What rooms are in the Operational wing?\nA: health monitoring; watchdog systems; immune system",
+                    "1: problems, preferences, milestones (complete)",
+                    "1.1 | LACKS\n1.2 | LACKS\n1.3 | LACKS")
+    c = "Rooms there cover health monitoring, watchdog systems and immune system."
+    assert fg.confirm(c, c, "3 rooms: problems, preferences, milestones", "Rooms?", gen) == fg.CONFIRMED
+    gen2 = _scripted("Q: How many lookups are in the palace?\nA: nearly 4,000 lookups; 122 memories",
+                     "1: 3994 lookups, 122 memories")
+    c2 = "There are nearly 4,000 lookups and 122 memories."
+    assert fg.confirm(c2, c2, "3994 lookups, 122 stored memories", "Overview?", gen2) == fg.REJECTED
+
+
+def test_short_claim_without_content_words_is_hers():
+    assert fg.in_reply("About 3 GB.", "About 3 GB.")
+    assert not fg.in_reply("About 3 GB.", "It was big.")
 
 
 def _scripted(*answers):

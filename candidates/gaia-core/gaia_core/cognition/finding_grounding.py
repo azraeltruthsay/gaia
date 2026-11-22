@@ -192,7 +192,9 @@ def in_reply(claim: str, reply: str) -> bool:
     """The auditor's quote is really hers: most of its words are in the reply."""
     c = _stems(claim)
     if not c:
-        return False
+        # "About 3 GB.": no content word to match, so match the text itself
+        norm = lambda t: re.sub(r"\s+", " ", (t or "").strip().lower())
+        return bool(norm(claim)) and norm(claim) in norm(reply)
     return len(c & _stems(reply)) / len(c) >= 0.7
 
 
@@ -405,8 +407,8 @@ _QUESTIONS_PROMPT = (
     "Make each question specific and sensible on its own: name the thing it is about (not \"it\", "
     "\"there\" or \"the shelf\"), in the statement's own terms (if it speaks of rooms, ask about rooms; "
     "if of files, ask about files). If the statement gives a list, ask one question whose answer is the "
-    "whole list, not one question per item. Ask only about what the statement says outright, never "
-    "about what it leaves unsaid."
+    "whole list, not one question per item, and separate the items of that answer with semicolons "
+    "(A: X; Y; Z). Ask only about what the statement says outright, never about what it leaves unsaid."
 )
 _ANSWER_PROMPT = (
     "Answer each question using only the source below. Answer briefly. If the source does not answer "
@@ -416,20 +418,34 @@ _ANSWER_PROMPT = (
     "\n\nSOURCE:\n{evidence}\n\nQUESTIONS:\n{questions}\n\n"
     "Write one line per question: <number>: <answer>"
 )
-_COMPARE_PROMPT = (
-    "For each question below there are two answers. Could both answers be true at once?\n"
-    "CONSISTENT: they agree, even in different words, or one is just less complete than the other "
-    "(\"red and blue\" / \"red, blue and green\"; \"none\" / \"0\").\n"
-    "CONFLICT: they cannot both be true (\"Paris\" / \"Lyon\"; \"7\" / \"9\"; \"yes\" / \"no\"; "
-    "two different lists naming the same set of things).\n"
-    "ADDS: answer 2 names things answer 1 does not mention at all.\n"
-    "OFF-TOPIC: one of them does not answer the question.\n\n{pairs}\n\n"
-    "Write one line per question: <number>: CONSISTENT, CONFLICT, ADDS or OFF-TOPIC"
+_ITEMS_PROMPT = (
+    "Each question below has an answer and a numbered list of things. For each thing, say whether the "
+    "answer:\n"
+    "HAS it: the answer says the same thing, in any words (\"rock pools\" / \"tidepools\"; "
+    "\"just after two\" / \"14:02\"; \"empty\" / \"0\").\n"
+    "CONTRADICTS it: the answer says something that cannot be true at the same time (a different figure, "
+    "the opposite yes or no, a different person or thing in that place).\n"
+    "LACKS it: the answer does not mention it.\n\n{pairs}\n\n"
+    "Write one line per thing: <thing number> | HAS, CONTRADICTS or LACKS"
 )
+_ITEM_LINE_RE = re.compile(r"^\s*(\d+)\.(\d+)\s*[|:.)-]?\s*(?:[^|\n]*\|\s*)?(HAS|CONTRADICTS|LACKS)\b", re.I | re.M)
+_HEDGE_RE = re.compile(r"\b(?:among others|and (?:so on|more|others)|etc\.?|roughly|about|around|approximately|"
+                       r"nearly|almost|or so|mostly)\b", re.I)
 _QA_RE = re.compile(r"^\s*Q\s*[:.]\s*(.+?)\s*\n\s*A\s*[:.]\s*(.+?)\s*$", re.I | re.M)
 _NUM_LINE_RE = re.compile(r"^\s*(\d+)\s*[:.)]\s*(.+?)\s*$", re.M)
 _COMPLETE_RE = re.compile(r"\s*\(complete\)\s*\.?\s*$", re.I)
 _NOT_IN = re.compile(r"not\s+in\s+(?:the\s+)?source|does\s+not\s+say|doesn'?t\s+say|not\s+(?:stated|mentioned)", re.I)
+
+
+def _from_claim(q: str, a: str, claim: str, question: str) -> bool:
+    # A yes/no question is kept: step 1 rephrases ("finished it" -> "finish
+    # reading"), and judging it by shared words dropped the very questions
+    # that catch a wrong yes/no (held-out-5, aidw.12). Only list and figure
+    # answers must be the claim's own words.
+    if _YES.match(a) or _NO.match(a):
+        return True
+    parts = [p for p in claim_items(a) if p.strip()]
+    return all(in_reply(p, claim) for p in parts) if parts else in_reply(a, claim)
 
 
 def _numbered(raw: str, n: int) -> dict:
@@ -452,7 +468,12 @@ def confirm_blind(claim: str, reply: str, evidence: str, question: str, generate
     try:
         raw = generate([{"role": "user", "content": _QUESTIONS_PROMPT.format(
             question=(question or "")[:300], claim=claim[:600])}]) or ""
-        qa = [(q.strip(), a.strip()) for q, a in _QA_RE.findall(raw)][:3]
+        qa = [(q.strip(), a.strip()) for q, a in _QA_RE.findall(raw)]
+        # Step 1 may invent: "Was the build done today? Yes" of a statement
+        # that never says today. Keep a question only if it comes from the
+        # claim: its answer in the claim's words, or for a yes/no, its
+        # content in the claim or the question she was asked.
+        qa = [(q, a) for q, a in qa if _from_claim(q, a, claim, question)][:3]
         if not qa:
             return UNVERIFIED
         qs = "\n".join(f"{i}. {q}" for i, (q, _) in enumerate(qa, 1))
@@ -470,18 +491,41 @@ def confirm_blind(claim: str, reply: str, evidence: str, question: str, generate
             pairs.append(f"{len(idx)}. {q}\n   Answer 1: {s_ans}\n   Answer 2: {a}")
         if not pairs:
             return UNVERIFIED
-        # Short answers to the same question are compared by code where they
-        # have a shape code can read (yes/no, numbers, lists); the model only
-        # compares the rest.
+        # Yes/no and plain figures are compared by code; everything else item
+        # by item by the model, and code counts the items (aidw.12).
         words = [compare_short(qa[j - 1][1], _COMPLETE_RE.sub("", src[j]).strip(), whole)
                  for j, whole in zip(idx, complete)]
         need = [k for k, w in enumerate(words) if w is None]
         if need:
-            sub = [pairs[k].split(". ", 1)[1] for k in need]
-            got = _numbered(generate([{"role": "user", "content": _COMPARE_PROMPT.format(
-                pairs="\n".join(f"{n}. {t}" for n, t in enumerate(sub, 1)))}]) or "", len(sub))
+            blocks, items_of = [], {}
             for n, k in enumerate(need, 1):
-                words[k] = got.get(n, "").upper()
+                j = idx[k]
+                things = claim_items(qa[j - 1][1])
+                items_of[n] = things
+                blocks.append(f"{n}. {qa[j - 1][0]}\n   Answer: {_COMPLETE_RE.sub('', src[j]).strip()}\n"
+                              + "\n".join(f"   {n}.{t}. {thing}" for t, thing in enumerate(things, 1)))
+            # An item whose figures all match the source's answer (whole
+            # numbers; large ones within 2.5%: "nearly 4,000" for 3,994) is
+            # settled by code; the model judges the rest.
+            settled = {}
+            for n, k in enumerate(need, 1):
+                s_ans = _numerize(_COMPLETE_RE.sub("", src[idx[k]]))
+                for t, thing in enumerate(items_of[n], 1):
+                    nums = _numbers(_numerize(thing))
+                    if nums and _numbers(s_ans) and not unbacked_numbers(_numerize(thing), s_ans):
+                        settled[(n, t)] = "HAS"
+            open_items = [(n, t) for n in items_of for t in range(1, len(items_of[n]) + 1)
+                          if (n, t) not in settled]
+            marks = dict(settled)
+            if open_items:
+                raw_items = generate([{"role": "user", "content": _ITEMS_PROMPT.format(
+                    pairs="\n".join(blocks))}]) or ""
+                for m in _ITEM_LINE_RE.finditer(raw_items):
+                    key = (int(m.group(1)), int(m.group(2)))
+                    marks.setdefault(key, m.group(3).upper())
+            for n, k in enumerate(need, 1):
+                got = [(thing, marks.get((n, t))) for t, thing in enumerate(items_of[n], 1)]
+                words[k] = item_verdict([(th, mk) for th, mk in got if mk], complete[k])
     except Exception:
         logger.debug("Blind check failed", exc_info=True)
         return UNVERIFIED
@@ -499,58 +543,53 @@ def confirm_blind(claim: str, reply: str, evidence: str, question: str, generate
 
 _YES = re.compile(r"^\s*(?:yes|yeah|correct|true)\b", re.I)
 _NO = re.compile(r"^\s*(?:no|not|none|false|never)\b", re.I)
-_SPLIT = re.compile(r"\s*(?:,|;|/|\n|\band\b|\bor\b)\s*", re.I)
-# A list item is a noun phrase; a part with a verb is a clause
-# ("the other two are empty"), which the model compares instead.
-_VERB_RE = re.compile(r"\b(?:is|are|was|were|has|have|had|holds?|contains?|covers?|does|do|did|will|can)\b", re.I)
-_LISTISH = re.compile(r"[,;/\n]")   # "and" alone ("drizzly and 14 degrees") doesn't make a list
-
-
-def _items(answer: str) -> list:
-    text = re.sub(r"\([^)]*\)", " ", answer or "")      # "problems (0 memories)" -> "problems"
-    out = []
-    for part in _SPLIT.split(text):
-        st = _stems(part)
-        if st:
-            out.append(st)
-    return out
+_PLAIN_NUMBER = re.compile(r"^\W*(?:about|around|roughly|nearly|almost|over|under|~)?\s*[\d][\d.,]*\s*[a-z%]{0,12}\W*$", re.I)
 
 
 def compare_short(claim_ans: str, source_ans: str, complete: bool):
-    """CONFLICT / CONSISTENT / ADDS for two short answers code can read,
-    else None (the model compares). Claim's answer vs the source's."""
+    """CONFLICT / CONSISTENT for two short answers whose shape code reads
+    with certainty — a plain yes/no, a plain figure — else None, and the
+    model compares item by item (aidw.12)."""
     c, s_ = (claim_ans or "").strip(), (source_ans or "").strip()
     if not c or not s_:
         return None
     bare = lambda t: _NUM_WORDS.get(re.sub(r"[^a-z]", "", t.lower()), t)   # "Thirteen." -> "13"
     c, s_ = bare(c), bare(s_)
     cy, cn, sy, sn = bool(_YES.match(c)), bool(_NO.match(c)), bool(_YES.match(s_)), bool(_NO.match(s_))
-    if (cy or cn) and (sy or sn) and len(c.split()) <= 12 and len(s_.split()) <= 12:
+    if (cy or cn) and (sy or sn) and len(c.split()) <= 4 and len(s_.split()) <= 4:
         return "CONSISTENT" if (cy == sy) else "CONFLICT"
-    cnums, snums = _numbers(_numerize(c)), _numbers(_numerize(s_))
-    if cnums and snums and not _items_beyond_numbers(c, s_):
-        return "CONFLICT" if unbacked_numbers(_numerize(c), _numerize(s_)) else "CONSISTENT"
-    ci, si = _items(c), _items(s_)
-    # A list is short parts ("problems, preferences and milestones"); clauses
-    # ("Milestones has 4 memories; the other two are empty") go to the model.
-    def is_list(t):
-        parts = [p for p in _SPLIT.split(re.sub(r"\([^)]*\)", " ", t)) if p.strip()]
-        return (bool(_LISTISH.search(re.sub(r"\([^)]*\)", " ", t))) and len(parts) >= 2
-                and all(len(p.split()) <= 6 and not _VERB_RE.search(p) for p in parts))
-    if (len(si) >= 2 or len(ci) >= 2) and is_list(c) and (len(si) < 2 or is_list(s_)):
-        said = _stems(s_)   # everything the source answer says, parentheses included
-        new = [it for it in ci if not (it & said)]
-        if not new:
-            return "CONSISTENT"
-        # Nothing in common: two different lists for the same thing.
-        if complete or (si and len(new) == len(ci)):
-            return "CONFLICT"
-        return "ADDS"
+    c_n, s_n = _numerize(c), _numerize(s_)
+    if _PLAIN_NUMBER.match(c_n) and _PLAIN_NUMBER.match(s_n):
+        return "CONFLICT" if unbacked_numbers(c_n, s_n) else "CONSISTENT"
     return None
 
 
-def _items_beyond_numbers(c: str, s_: str) -> bool:
-    """A numeric answer that also names things ("3: problems, preferences")
-    is compared as a list, not a count."""
-    strip = lambda t: re.sub(r"[\d.,]+", " ", _numerize(t))
-    return any(_LISTISH.search(strip(t)) and len(_items(strip(t))) >= 2 for t in (c, s_))
+def claim_items(answer: str) -> list:
+    """The claim's answer as the things it names: split where step 1 put
+    semicolons (from the claim alone), bracketed detail and hedges dropped
+    ("Dwarven stout; elvish waybread, among others")."""
+    parts = [p for p in re.split(r"\s*;\s*", answer or "") if p.strip()] or [answer or ""]
+    out = []
+    for p in parts:
+        p = _HEDGE_RE.sub(" ", re.sub(r"\([^)]*\)", " ", p))
+        p = re.sub(r"\s+", " ", p).strip(" ,.")
+        if p:
+            out.append(p)
+    return out or [answer.strip()]
+
+
+def item_verdict(items: list, complete: bool) -> str:
+    """Count the items: a contradiction is a conflict; things a complete
+    answer doesn't have, or an answer sharing nothing with the source's, are
+    a conflict too; all present is consistent; some missing from a partial
+    answer only adds."""
+    if not items:
+        return "UNCLEAR"
+    marks = [m for _, m in items]
+    if "CONTRADICTS" in marks:
+        return "CONFLICT"
+    if "LACKS" in marks:
+        if complete or "HAS" not in marks:
+            return "CONFLICT"
+        return "ADDS"
+    return "CONSISTENT"
