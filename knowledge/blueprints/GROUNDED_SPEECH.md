@@ -205,3 +205,17 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
   Grotto's invented Operational rooms (`sv-e499ad9f`), opened from the C1
   replay; live, she listed it, described it from the evidence, and moved it
   to investigating.
+- 2026-11-22: **C3** (`aidw.6`). `gaia_core/cognition/samvega_amend.py`, called
+  by the audit right after it files a confirmed finding: if the message is
+  in a Discord channel and under 30 minutes old, she answers the question
+  again from the evidence (`tool_answer_messages`, the lookup-turn shape),
+  code checks the new answer against the same evidence, and `revise.py`
+  edits the message as a major correction ("*(Edited: I checked my memory
+  palace and corrected this.)*", history updated, `/shared/revisions.jsonl`);
+  the finding moves to `amended`. A corrected message replaces the old
+  follow-up post. DMs and web chat aren't editable yet (revise.py), so
+  those findings stay open with a note. Rewrite tested on production Core
+  for the Grotto finding, 3/3: "Three rooms in the operational wing:
+  problems (0 memories), preferences (0 memories), and milestones (4
+  memories)." That test also caught a backfill mistake (mine): the C2 entry
+  had been attached to the audit of the *next* message; corrected, noted.

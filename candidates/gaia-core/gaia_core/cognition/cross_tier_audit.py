@@ -541,6 +541,7 @@ def run_cross_tier_audit_sync(
     evidence: str = "",
     look_up=None,
     claim_check=None,
+    amend=None,
 ) -> AuditResult:
     """Synchronous cross-tier audit. Reads config; usually called from a thread."""
     cfg: Dict[str, Any] = {}
@@ -686,8 +687,27 @@ def run_cross_tier_audit_sync(
     # calculation run in code, or a page she reads); only a confirmed
     # correction is posted, as hers, and kept in her history. The finding is
     # filed either way.
+    # aidw.6: a confirmed finding about a fresh message: she corrects the
+    # message itself (revise.py, with a note saying what changed), instead of
+    # a follow-up underneath it.
+    amended = None
+    if samvega_path and session_id and cfg.get("amend_enabled", True) and any(
+            f.status == "confirmed" for f in findings):
+        try:
+            from gaia_core.cognition.samvega_amend import maybe_amend
+            from gaia_core.cognition.self_review import chat_generator
+            from gaia_common.utils import samvega_ledger as ledger
+            hit = ledger.find(os.path.basename(samvega_path).rsplit(".", 1)[0])
+            amended = (amend or maybe_amend)(
+                samvega_path, question=user_input, said=final_response, evidence=checked_evidence,
+                grounding_call=grounding_call, session_id=session_id,
+                message_ref=(hit[1].get("message_ref") if hit else {}) or {},
+                generate=chat_generator(model_pool, roles=("core", "prime"), max_tokens=500, temperature=0.3))
+        except Exception:
+            logger.debug("Cross-tier audit: amend failed", exc_info=True)
+
     posted = False
-    if samvega_path and followup and session_id:
+    if samvega_path and followup and session_id and not amended:
         posted = _post_confirmed_correction(session_id, user_input, final_response, model_pool, cfg)
 
     logger.info(
@@ -695,7 +715,7 @@ def run_cross_tier_audit_sync(
         journal_entry_id, clean, len(findings), elapsed_ms,
         f"{verdict_ms:.0f}ms{', only' if verdict_only else ''}" if verdict_first else "off",
         os.path.basename(samvega_path) if samvega_path else "-",
-        "posted (confirmed)" if posted else ("filed only" if samvega_path else "no"),
+        "amended" if amended else "posted (confirmed)" if posted else ("filed only" if samvega_path else "no"),
     )
 
     return AuditResult(
