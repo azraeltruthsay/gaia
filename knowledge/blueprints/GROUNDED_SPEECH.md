@@ -226,3 +226,25 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
   `sv-e499ad9f` → amended. Her session history wasn't updated that time
   only because a day-old message has left the 8-message live window; within
   the 30-minute limit it is still there.
+- 2026-11-22: **C4 live** (`aidw.7`). Sleep task `samvega_review` (every 2 h,
+  `SAMVEGA_REVIEW_ENABLED`), `gaia_core/cognition/samvega_review.py`: up to 3
+  active findings per run, oldest first. She is shown what she was asked,
+  what she said, the checking call and what the source showed, and writes
+  LESSON / ISSUE+SYMPTOM+CAUSE / DISMISS; code files an issue (source
+  `samvega`, linked by `issue_id`, then the self-repair loop), notes a
+  lesson, and records the question with the call that answers it in
+  `/shared/selector_examples.jsonl` (`gaia_common/utils/selector_examples.py`,
+  for A2). Verification is code's: the question is asked again as a private
+  turn (`samvega-replay-*`, source `api`: no post, no wake, the audit skips
+  it), the checking call runs again, `finding_grounding.confirm` compares;
+  holds up → verified, doesn't → a note with what she said this time.
+  Findings now record `question` and `turn_looked_up`.
+  Fixed on the way (C1 bug): the world-state block counted as evidence, so
+  the audit's own flags were "confirmed" against the clock without a lookup.
+  Live, on the Grotto finding `sv-e499ad9f`: her lesson ("I should have
+  checked the actual room list with palace(action=navigate, wing=operational)
+  before describing them"), one selector example, and a replay answering
+  "Three rooms in the Operational wing: problems (0 memories), preferences
+  (0 memories), and milestones (4 memories)" → **verified**. The loop Azrael
+  described, end to end: noticed, corrected in place, reviewed in sleep,
+  verified.

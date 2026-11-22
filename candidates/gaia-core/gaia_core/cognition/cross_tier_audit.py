@@ -305,8 +305,11 @@ def _ground_findings(findings: List[AuditFinding], user_input: str, final_respon
         if f.category not in fg.CHECKABLE:
             f.status = fg.JUDGMENT
     call = ""
-    if checkable and not (evidence or "").strip():
-        call, evidence = (look_up or fg.look_up)(user_input, model_pool)
+    if checkable and not fg.has_lookup(evidence):
+        # The world-state block alone isn't evidence about what she said: look
+        # it up (aidw.7 found flags being "confirmed" against the clock).
+        call, found = (look_up or fg.look_up)(user_input, model_pool)
+        evidence = f"{found}\n\n{evidence}".strip() if found else evidence
     for f in checkable:
         f.status = fg.confirm(f.claim, final_response, evidence, user_input)
     logger.info("Cross-tier audit: grounding %s%s",
@@ -326,6 +329,7 @@ def _maybe_emit_samvega(
     session_id: Optional[str] = None,
     evidence: str = "",
     grounding_call: str = "",
+    turn_evidence: str = "",
 ) -> Optional[str]:
     """Emit a samvega artifact when findings are serious. Returns path or None.
 
@@ -405,7 +409,9 @@ def _maybe_emit_samvega(
     # noted if not — with where the message was, for C3 to correct it.
     try:
         from gaia_common.utils import samvega_ledger as ledger
+        from gaia_core.cognition.finding_grounding import has_lookup
         ledger.stamp(out, {**ledger.initial_fields(artifact.grounding, session_id or "", final_response),
+                           "question": user_input or "", "turn_looked_up": has_lookup(turn_evidence),
                            "claim": artifact.claim, "evidence": artifact.evidence,
                            "grounding_call": artifact.grounding_call, "grounding": artifact.grounding,
                            "findings": artifact.findings})
@@ -554,6 +560,11 @@ def run_cross_tier_audit_sync(
     if not cfg.get("enabled", True):
         return AuditResult(clean=True, skipped_reason="disabled_in_config")
 
+    # aidw.7: a replay of an old question (samvega_review) is checked there;
+    # auditing it here would file the old mistake again as a new finding.
+    if (session_id or "").startswith("samvega-replay-"):
+        return AuditResult(clean=True, skipped_reason="samvega_replay")
+
     if not _claim_entry(journal_entry_id):
         return AuditResult(clean=True, skipped_reason="already_audited")
 
@@ -674,6 +685,7 @@ def run_cross_tier_audit_sync(
         session_id=session_id,
         evidence=checked_evidence,
         grounding_call=grounding_call,
+        turn_evidence=evidence,
     )
 
     # e8hf Phase B: a flagged-and-samvega-serious turn gets a visible,

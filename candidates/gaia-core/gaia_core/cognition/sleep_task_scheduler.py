@@ -516,6 +516,21 @@ class SleepTaskScheduler:
                 min_interval_seconds=4 * 3600,
             ))
 
+        # aidw.7: she works through her ledger of mistakes (Samvega findings):
+        # a lesson, an issue for the self-repair loop, or a dismissal; then a
+        # replay of the original question verifies it. SAMVEGA_REVIEW_ENABLED=0
+        # turns it off.
+        if os.environ.get("SAMVEGA_REVIEW_ENABLED", "1") != "0":
+            self.register_task(SleepTask(
+                task_id="samvega_review",
+                task_type="SELF_IMPROVE",
+                priority=4,
+                interruptible=True,
+                estimated_duration_seconds=300,
+                handler=self._run_samvega_review,
+                min_interval_seconds=2 * 3600,
+            ))
+
         # a0aw.9: she looks into an open issue that names no place yet (her
         # playbook's "Find it" steps, search and read over the candidate code)
         # and notes where the bug is, for CodeMind. ISSUE_INVESTIGATION_ENABLED=0
@@ -1599,6 +1614,17 @@ class SleepTaskScheduler:
             check_interrupted=self.check_interrupted,
         )
         logger.info("self_review: %s", {k: v for k, v in result.items() if k != "refused"})
+
+    def _run_samvega_review(self, **kwargs) -> None:
+        """aidw.7: review and verify her open Samvega findings."""
+        from gaia_core.cognition import samvega_review
+        from gaia_core.cognition.self_review import model_generator
+        if self.model_pool is None:
+            logger.info("samvega_review skipped: no model pool")
+            return
+        result = samvega_review.run(model_generator(self.model_pool, max_tokens=300, temperature=0.2),
+                                    check_interrupted=self.check_interrupted)
+        logger.info("samvega_review: %s", result)
 
     def _run_issue_investigation(self, **kwargs) -> None:
         """a0aw.9: look into one open issue and note where the bug is."""

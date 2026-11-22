@@ -126,6 +126,8 @@ def summary(p: Path, d: dict, full: bool = False) -> dict:
             "message_ref": d.get("message_ref") or {},
             "history": d.get("history") or [],
             "trigger": d.get("trigger") or "",
+            "question": d.get("question") or "",
+            "turn_looked_up": d.get("turn_looked_up"),
         })
     return out
 

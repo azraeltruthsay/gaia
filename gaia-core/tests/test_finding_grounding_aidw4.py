@@ -139,3 +139,17 @@ def test_unbacked_numbers():
     assert fg.unbacked_numbers("12 wings", "122 memories") == [12.0]
     assert fg.unbacked_numbers("nearly 4,000 lookups", "3994 lookups") == []
     assert fg.unbacked_numbers("9 rooms", "3 rooms") == [9.0]
+
+
+def test_world_state_alone_is_not_evidence():
+    assert not fg.has_lookup("[world state]\nClock: 21:15 UTC")
+    assert fg.has_lookup("[palace]\n3 rooms\n\n[world state]\nClock")
+    calls = []
+
+    def look_up(q, pool, decide=True):
+        calls.append(q)
+        return "palace(action=navigate, wing=operational)", NAVIGATE
+
+    f = [AuditFinding("confabulation", "invented rooms", claim="my health monitoring and watchdog systems")]
+    _ground_findings(f, "What's in your Operational wing?", INVENTED, "[world state]\nClock: 21:15 UTC", None, look_up)
+    assert calls and f[0].status == fg.CONFIRMED

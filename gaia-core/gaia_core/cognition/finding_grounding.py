@@ -72,8 +72,17 @@ def turn_evidence(packet: Any, limit: int = EVIDENCE_CHARS) -> str:
         pass
     text = "\n\n".join(p for p in parts if p.strip())
     if world:
-        text = (text + "\n\n[world state]\n" + world).strip()
+        text = (text + f"\n\n{WORLD_MARK}\n" + world).strip()
     return text[:limit]
+
+
+WORLD_MARK = "[world state]"
+
+
+def has_lookup(evidence: str) -> bool:
+    """Whether the evidence holds something the turn looked up, beyond the
+    world-state block every turn carries (clock, load, which minds)."""
+    return bool((evidence or "").split(WORLD_MARK, 1)[0].strip())
 
 
 def _read_only(tool: str, params: dict) -> bool:
@@ -317,7 +326,7 @@ def check_claims(question: str, reply: str, evidence: str, model_pool,
     look_up_fn = look_up_fn or look_up
     results, cache = [], {}
     for claim in extract_self_claims(reply, generate, question):
-        if (evidence or "").strip() and confirm(claim, reply, evidence, question) == REJECTED:
+        if has_lookup(evidence) and confirm(claim, reply, evidence, question) == REJECTED:
             results.append({"claim": claim, "status": "backed", "call": "", "evidence": ""})
             continue
         # What she should have looked up for the question: it is what the
