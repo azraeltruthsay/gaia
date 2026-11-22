@@ -550,6 +550,7 @@ def run_cross_tier_audit_sync(
     look_up=None,
     claim_check=None,
     amend=None,
+    claims_checked: bool = False,
 ) -> AuditResult:
     """Synchronous cross-tier audit. Reads config; usually called from a thread."""
     cfg: Dict[str, Any] = {}
@@ -635,7 +636,8 @@ def run_cross_tier_audit_sync(
     # check them against (2026-11-21 replay). So her statements about herself
     # are checked whether or not it flagged: Core lists them, a read-only
     # lookup gets the facts, code compares.
-    if cfg.get("claim_check", True):
+    # aidw.8: already checked before it was sent (and found fine or fixed)
+    if cfg.get("claim_check", True) and not claims_checked:
         try:
             from gaia_core.cognition import finding_grounding as fg
             have = {f.claim for f in findings}
@@ -757,6 +759,7 @@ def schedule_cross_tier_audit(
     config,
     session_id: Optional[str] = None,
     evidence: str = "",
+    claims_checked: bool = False,
 ) -> Optional[threading.Thread]:
     """Spawn a daemon thread to run the audit. Returns immediately.
 
@@ -782,6 +785,7 @@ def schedule_cross_tier_audit(
                 config=config,
                 session_id=session_id,
                 evidence=evidence,
+                claims_checked=claims_checked,
             )
         except Exception:
             logger.exception("Cross-tier audit: thread crashed")

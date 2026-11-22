@@ -183,6 +183,10 @@ Runtime toggles (docker-compose `gaia-core` env):
 | `THOUGHT_SEED_MAX_PENDING` | 2000 | Cap the thought-seed backlog (was an 11k landfill); planters back off, heartbeat prunes. |
 | `GAIA_USER_TZ` | America/Los_Angeles | Operator timezone for world-state local-time (zoneinfo, OS-portable). |
 | `GAIA_LOCALE_CITY` / `_LAT` / `_LON` | unset | Locality organ (`locality.py`): place + live environment in the `[Here & Now]` block. City defaults to a name derived from the tz; lat+lon enable open-meteo weather (cached 15m, degrades to season+daylight offline). |
+| `TOOL_DECIDE_EVERY_TURN` | 1 | Her tool selector decides tool/none on every non-social turn while Core is on the GPU; off the GPU the keyword gate decides (`agent_core._decide_every_turn`, aidw.1). |
+| `PRE_SEND_CHECK` | 1 | Before a deliberated reply goes out, her statements about herself are checked; one regrounding round if one is contradicted (`pre_send_check.py`, aidw.8). GPU only; +~0.2–2 s, ~5 s when it regrounds. |
+| `GROUNDING_VERDICT` | blind | `lexical` brings back the word-overlap verdict instead of the blind, item-level check (`finding_grounding.confirm`, aidw.11/.12). |
+| `SAMVEGA_REVIEW_ENABLED` | 1 | Sleep task: she reviews open Samvega findings (lesson / issue / dismiss); a replay verifies (`samvega_review.py`, aidw.7). |
 
 The **Locality organ** (`gaia_common/utils/locality.py`) is the *spatial* half of presence — workstation-as-body,
 city, operator-nearby + live season/daylight/weather — folded with the *felt temporal* surface into one

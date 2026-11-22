@@ -115,6 +115,13 @@ def maybe_amend(finding_path, *, question: str, said: str, evidence: str, ground
     if len(containing) < 12:
         _skip("too little of the message to find it by")
         return None
+    # aidw.8: rewriting from a source that doesn't answer the question swaps
+    # one unsupported answer for another (her tool list, asked which tools
+    # she uses most).
+    from gaia_core.cognition.pre_send_check import source_answers
+    if not source_answers(question, evidence, generate):
+        _skip("the evidence doesn't answer the question, so there is nothing to correct it from")
+        return None
     try:
         from gaia_common.utils.tool_call_parser import tool_answer_messages
         new = (generate(tool_answer_messages(question, grounding_call or "the lookup", evidence)) or "").strip()

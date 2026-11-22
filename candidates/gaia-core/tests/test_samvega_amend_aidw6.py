@@ -52,7 +52,7 @@ def test_corrects_the_message_with_a_note(finding):
         calls.append((session_id, containing, text, note))
         return f"{text}\n\n*(Edited: {note}.)*"
 
-    out = _amend(finding, _steps(GOOD, "Q: What rooms are in the Operational wing?\nA: problems, preferences and milestones",
+    out = _amend(finding, _steps("YES", GOOD, "Q: What rooms are in the Operational wing?\nA: problems, preferences and milestones",
                                  "1: problems, preferences, milestones (complete)"), revise)
     assert out and out.startswith(GOOD)
     sid, containing, text, note = calls[0]
@@ -64,7 +64,7 @@ def test_corrects_the_message_with_a_note(finding):
 
 
 def test_a_rewrite_that_is_wrong_too_is_not_used(finding):
-    out = _amend(finding, _steps("The wing has twelve rooms, including the watchdog kennel and immune vault.",
+    out = _amend(finding, _steps("YES", "The wing has twelve rooms, including the watchdog kennel and immune vault.",
                                  "Q: How many rooms does the Operational wing have?\nA: twelve",
                                  "1: 3 (complete)"),
                  lambda *a: pytest.fail("must not edit"))
@@ -83,7 +83,7 @@ def test_old_message_dm_and_web_are_left(finding):
 
 
 def test_message_not_found(finding):
-    assert _amend(finding, lambda m: GOOD, lambda *a: None) is None
+    assert _amend(finding, _steps("YES", GOOD), lambda *a: None) is None
     assert "couldn't be found" in L.show(finding.stem)["history"][-1]["note"]
 
 
@@ -91,3 +91,8 @@ def test_source_phrase_and_anchor():
     assert A.source_phrase(CALL) == "my memory palace"
     assert A.source_phrase("weird(x=1)") == "the source"
     assert A._anchor("[Prime]\n\nThe palace has six wings.\nMore") == "The palace has six wings."
+
+
+def test_evidence_that_doesnt_answer_is_not_rewritten_from(finding):
+    assert _amend(finding, _steps("NO"), lambda *a: pytest.fail("no edit")) is None
+    assert "doesn't answer the question" in L.show(finding.stem)["history"][-1]["note"]

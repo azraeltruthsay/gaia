@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from types import SimpleNamespace
 from typing import Any, Optional, Tuple
 
@@ -145,14 +146,25 @@ def look_up(question: str, model_pool, select=None, call=None, decide: bool = Tr
         if not _read_only(tool, params):
             logger.info("Samvega check: %s would change something; not run", label)
             return label, ""
+        hit = _CALL_CACHE.get(label)
+        if hit and time.time() - hit[0] < CALL_CACHE_S:
+            return label, hit[1]
         out = call(tool, params)
         if not out or (isinstance(out, dict) and out.get("ok") is False):
             return label, ""
         from gaia_common.utils.tool_call_parser import tool_result_text
-        return label, tool_result_text(out, limit=EVIDENCE_CHARS)
+        text = tool_result_text(out, limit=EVIDENCE_CHARS)
+        _CALL_CACHE[label] = (time.time(), text)
+        return label, text
     except Exception:
         logger.debug("Samvega check: look-up failed", exc_info=True)
         return "", ""
+
+
+# The same read-only call within a minute (two statements checked against
+# her tool list) is run once.
+CALL_CACHE_S = 60
+_CALL_CACHE: dict = {}
 
 
 def _stem(w: str) -> str:
@@ -329,7 +341,8 @@ def extract_self_claims(reply: str, generate, question: str = "") -> list:
 
 
 def check_claims(question: str, reply: str, evidence: str, model_pool,
-                 generate=None, look_up_fn=None) -> list:
+                 generate=None, look_up_fn=None, max_claims: int = MAX_CLAIMS,
+                 stop_on_confirmed: bool = False) -> list:
     """Each statement she made about herself, checked: against the turn's
     evidence first; what that doesn't hold, against what her selector would
     look up for it (read-only). Returns [{claim, status, call, evidence}]."""
@@ -339,7 +352,8 @@ def check_claims(question: str, reply: str, evidence: str, model_pool,
             return []
     look_up_fn = look_up_fn or look_up
     results, cache = [], {}
-    for claim in extract_self_claims(reply, generate, question):
+    _QUESTIONS_MEMO.clear()   # reuse within this check only (turn evidence, then a lookup)
+    for claim in extract_self_claims(reply, generate, question)[:max_claims]:
         if has_lookup(evidence) and confirm(claim, reply, evidence, question, generate) == REJECTED:
             results.append({"claim": claim, "status": "backed", "call": "", "evidence": ""})
             continue
@@ -353,6 +367,8 @@ def check_claims(question: str, reply: str, evidence: str, model_pool,
         cache[call] = ev
         status = confirm(claim, reply, f"{evidence}\n{ev}".strip(), question, generate) if ev else UNVERIFIED
         results.append({"claim": claim, "status": status, "call": call, "evidence": ev[:2000]})
+        if stop_on_confirmed and status == CONFIRMED:
+            break   # one is enough to act on (pre-send regrounds once)
     if results:
         logger.info("Claim check: %s", "; ".join(f"{r['status']}: {r['claim'][:60]!r}"
                                                  + (f" via {r['call']}" if r['call'] else "")
@@ -448,6 +464,9 @@ def _from_claim(q: str, a: str, claim: str, question: str) -> bool:
     return all(in_reply(p, claim) for p in parts) if parts else in_reply(a, claim)
 
 
+_QUESTIONS_MEMO: dict = {}   # cleared by each check_claims call
+
+
 def _numbered(raw: str, n: int) -> dict:
     out = {}
     for m in _NUM_LINE_RE.finditer(raw or ""):
@@ -466,8 +485,16 @@ def confirm_blind(claim: str, reply: str, evidence: str, question: str, generate
     if not (evidence or "").strip():
         return UNVERIFIED
     try:
-        raw = generate([{"role": "user", "content": _QUESTIONS_PROMPT.format(
-            question=(question or "")[:300], claim=claim[:600])}]) or ""
+        # Step 1 depends on the claim alone: checked against the turn's
+        # evidence and then a lookup, it is written once.
+        key = (claim[:600], (question or "")[:300])
+        raw = _QUESTIONS_MEMO.get(key)
+        if raw is None:
+            raw = generate([{"role": "user", "content": _QUESTIONS_PROMPT.format(
+                question=(question or "")[:300], claim=claim[:600])}]) or ""
+            if len(_QUESTIONS_MEMO) > 256:   # direct confirm() callers don't clear it
+                _QUESTIONS_MEMO.clear()
+            _QUESTIONS_MEMO[key] = raw
         qa = [(q.strip(), a.strip()) for q, a in _QA_RE.findall(raw)]
         # Step 1 may invent: "Was the build done today? Yes" of a statement
         # that never says today. Keep a question only if it comes from the

@@ -4349,6 +4349,14 @@ class AgentCore:
                                 _final_clean = _checks.cite_notes(_final_clean, _gr_results)
                         except Exception:
                             logger.debug("arithmetic/citation check failed", exc_info=True)
+                    # aidw.8 (GROUNDED_SPEECH.md part B): her statements about
+                    # herself are checked before the reply goes out.
+                    _presend = "skipped"
+                    if _final_clean:
+                        _final_clean, _presend = self._check_before_sending(
+                            packet, user_input, _final_clean, source, session_id, _delib_intent, _delib_casual)
+                        if _presend == "regrounded" and _delib_result:
+                            _delib_result.final_response = _final_clean
                     # wtfr: she said she'd look it up; now she does, after the
                     # turn, and posts what she found in this conversation
                     if _final_clean and source not in ("initiative", "heartbeat", "inner_voice") \
@@ -4454,6 +4462,7 @@ class AgentCore:
                                 config=self.config,
                                 session_id=session_id,
                                 evidence=turn_evidence(packet),
+                                claims_checked=_presend in ("ok", "regrounded"),
                             )
                         except Exception:
                             logger.debug("Cross-tier audit scheduling failed (non-fatal)", exc_info=True)
@@ -5113,6 +5122,11 @@ class AgentCore:
                             deep_focus=_delib_deep2,
                         )
                         if _delib_result and _delib_result.final_response:
+                            # aidw.8: checked before it goes out (see the OPERATOR path)
+                            _checked2, _presend2 = self._check_before_sending(
+                                packet, user_input, _delib_result.final_response, source, session_id,
+                                _delib_intent2, _delib_intent2 in _CASUAL_DELIB_INTENTS)
+                            _delib_result.final_response = _checked2
                             logger.info(
                                 "[DELIBERATION] %s | model=%s forbidden=%d confab=%d retried=%s elapsed=%.0fms",
                                 _delib_result.journal_entry_id or "(no-journal)",
@@ -5163,6 +5177,7 @@ class AgentCore:
                                     config=self.config,
                                     session_id=session_id,
                                     evidence=turn_evidence(packet),
+                                    claims_checked=_presend2 in ("ok", "regrounded"),
                                 )
                             except Exception:
                                 logger.debug("Cross-tier audit scheduling failed (non-fatal)", exc_info=True)
@@ -11350,6 +11365,28 @@ Start your response with the first line of the file."""
                 error=str(e),
                 execution_time_ms=elapsed_ms
             )
+
+    def _check_before_sending(self, packet, user_input: str, reply: str, source: str, session_id: str,
+                              intent: str, casual: bool):
+        """aidw.8: check her statements about herself before the reply goes
+        out; one grounding round if one doesn't hold up. Returns (text,
+        outcome). Never raises: a failed check sends the draft."""
+        question = packet.content.original_prompt or user_input or ""
+        try:
+            from gaia_core.cognition import pre_send_check
+            if not pre_send_check.applies(source, session_id, intent, question, casual):
+                return reply, "skipped"
+            text, outcome = pre_send_check.check_before_sending(
+                question, reply, turn_evidence(packet), self.model_pool)
+            if outcome != "skipped":
+                try:
+                    packet.metadata = {**(getattr(packet, "metadata", None) or {}), "presend_checked": outcome}
+                except Exception:
+                    pass
+            return text, outcome
+        except Exception:
+            logger.debug("Pre-send check failed; sending the draft", exc_info=True)
+            return reply, "error"
 
     def _selector_examples(self, user_input: str) -> str:
         """aidw.2: the nearest of her earlier questions (by meaning) with the

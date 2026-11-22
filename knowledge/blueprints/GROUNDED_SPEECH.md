@@ -319,3 +319,25 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
   Known misses: spoken times against clock times ("twenty to eleven" vs
   22:40), an invented list item left unverified rather than confirmed,
   step 1 occasionally asking about what the claim doesn't say.
+- 2026-11-22: **B live** (`aidw.8`, Azrael approved the vital-organ change).
+  A deliberated reply is complete before it is sent, and the answer checks
+  already run there, so no streaming change: `pre_send_check.py` runs after
+  them on both deliberation paths in `agent_core.py`. Person-facing,
+  non-social turns, Core on the GPU: up to 2 of her statements about
+  herself are checked (C1 extraction, blind item-level verdict, lookup when
+  the turn's evidence doesn't cover it). On the first contradicted one:
+  does the source answer the question at all? (asked of the source alone;
+  her tool list doesn't say which tools she uses most, and a rewrite from it
+  had claimed all 17 were "the ones I reach for most"); if so, she answers
+  again from it (lookup-turn shape), that answer is checked too, and it is
+  what goes out; else the draft goes out for the audit. The question and the
+  call become a selector example. The audit skips its own claim check when
+  B found the reply fine or regrounded it. C3's rewrite got the same
+  answerability gate.
+  Live: her draft for "How many wings does your memory palace have?" was
+  "Five — the Spire, the Citadel, the Foundry, the Arboretum, and the
+  Observatory"; sent: "Six wings: technical, identity, operational, creative,
+  samvega, and library." Cost: +0.2 s with nothing about herself, +1.7–2 s
+  when statements check out, ~5 s when it regrounds (from 14 s: stop at the
+  first contradicted statement, write a statement's questions once, run the
+  same read-only call once a minute). Switch: `PRE_SEND_CHECK=0`.
