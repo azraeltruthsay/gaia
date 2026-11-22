@@ -106,6 +106,12 @@ _SERVICE_RE = re.compile(
     r"|\b(sleep)\s+cycle\b", re.IGNORECASE)
 
 
+_SAMVEGA_LEDGER_RE = re.compile(
+    r"\bsa[mṃ]vega\b.*\b(?:ledger|findings?|mistakes?|open|active|status|list|recent|latest|any)\b"
+    r"|\b(?:ledger|findings?|mistakes?|open|active|recent|latest|any)\b.*\bsa[mṃ]vega\b",
+    re.IGNORECASE | re.DOTALL)
+
+
 def named_blueprint(text: str, directory: str = "") -> Optional[Tuple[str, str]]:
     """(path, title) of one service's blueprint, when a message asks for the
     blueprint of a named service; None for blueprints in general."""
@@ -133,6 +139,10 @@ def _named_in(text: str) -> Optional[Tuple[str, str]]:
     bp = named_blueprint(text)
     if bp:
         return bp
+    # aidw.5: "any open findings in your samvega ledger?" asks about her
+    # mistakes, which samvega(list) answers; only the system itself is the spec.
+    if _SAMVEGA_LEDGER_RE.search(text):
+        return None
     for pattern, filename, title in _NAMED:
         if re.search(pattern, text, re.IGNORECASE) and (_HERS_RE.search(text) or "gaia" in text.lower()):
             return f"{DOCS_DIR}/{filename}", title

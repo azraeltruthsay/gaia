@@ -203,6 +203,18 @@ DOMAIN_TOOLS: Dict[str, dict] = {
         },
     },
 
+    # ── Samvega: her ledger of mistakes (aidw.5) ───────────────────────
+    "samvega": {
+        "description": "Your ledger of mistakes: findings where something you said didn't hold up against the evidence — list them, show one, add a note, or move its status (investigating, fixed, dismissed)",
+        "actions": {
+            "list": {"params": {"status": "string?", "limit": "integer?"}, "maps_to": "samvega_list"},
+            "show": {"params": {"id": "string"}, "maps_to": "samvega_show"},
+            "note": {"params": {"id": "string", "text": "string"}, "maps_to": "samvega_note"},
+            "status": {"params": {"id": "string", "status": "string", "reason": "string?"},
+                       "maps_to": "samvega_status"},
+        },
+    },
+
     # ── Audio ──────────────────────────────────────────────────────────
     "audio": {
         "description": "Audio capture, transcription, and inbox management",
@@ -545,6 +557,17 @@ def _build_mappings():
         ("palace", "show"): ("palace", "read"),
         ("palace", "read_doc"): ("palace", "read"),
         ("palace", "get"): ("palace", "read"),
+        # samvega moves by their own verbs (aidw.5, live 2026-11-22)
+        ("samvega", "investigate"): ("samvega", "status"),
+        ("samvega", "dismiss"): ("samvega", "status"),
+        ("samvega", "fix"): ("samvega", "status"),
+        ("samvega", "resolve"): ("samvega", "status"),
+        ("samvega", "close"): ("samvega", "status"),
+        ("samvega", "reopen"): ("samvega", "status"),
+        ("samvega", "update"): ("samvega", "status"),
+        ("samvega", "open"): ("samvega", "show"),
+        ("samvega", "get"): ("samvega", "show"),
+        ("samvega", "view"): ("samvega", "show"),
         # asked how her palace works, she sent palace(overview) (zbwe)
         ("palace", "overview"): ("palace", "status"),
         ("palace", "about"): ("palace", "status"),

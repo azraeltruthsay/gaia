@@ -401,6 +401,16 @@ def _maybe_emit_samvega(
     out = save_samvega_artifact(artifact)
     if out is None:
         return None
+    # aidw.5: the finding enters the ledger — open if evidence confirmed it,
+    # noted if not — with where the message was, for C3 to correct it.
+    try:
+        from gaia_common.utils import samvega_ledger as ledger
+        ledger.stamp(out, {**ledger.initial_fields(artifact.grounding, session_id or "", final_response),
+                           "claim": artifact.claim, "evidence": artifact.evidence,
+                           "grounding_call": artifact.grounding_call, "grounding": artifact.grounding,
+                           "findings": artifact.findings})
+    except Exception:
+        logger.debug("Cross-tier audit: ledger stamp failed", exc_info=True)
     logger.info(
         "Cross-tier audit: samvega %s emitted (%d findings, weight=%.2f, root_cause=%s)",
         out.name, len(findings), weight, root_cause,

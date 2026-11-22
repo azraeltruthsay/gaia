@@ -192,3 +192,16 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
   question picked worse sources (2/7).
   Note: the audit follows deliberated turns; turns answered from a routed
   lookup take another path and aren't audited (they have their evidence).
+- 2026-11-22: **C2 live** (`aidw.5`). `gaia_common/utils/samvega_ledger.py`:
+  short ids (`sv-xxxxxxxx`, from the file stem), statuses with history,
+  `message_ref` (platform, channel or user, sent-at, opening words), issue
+  link. The 2,223 artifacts from before read as `legacy`, untouched; new
+  findings are stamped `open` (confirmed) or `noted` by the audit. Her tool
+  `samvega(list/show/note/status)` takes her own verbs (investigate, dismiss,
+  fix…) and param names; dismissed/fixed need a reason; `verified` is
+  refused from any call. A confirmed finding reads as what she said against
+  what the source shows, not the old auditor's prose. "…your samvega
+  ledger?" goes to the tool, not the Samvega Spec. First entry: the
+  Grotto's invented Operational rooms (`sv-e499ad9f`), opened from the C1
+  replay; live, she listed it, described it from the evidence, and moved it
+  to investigating.

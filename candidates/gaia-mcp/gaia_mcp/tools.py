@@ -158,6 +158,9 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         # Check domain-level sensitivity before delegating
         if not pre_approved and is_sensitive(method, action):
             raise PermissionError(f"Tool '{method}(action={action})' requires explicit approval.")
+        if method == "samvega":
+            # aidw.5: the verb she used ("investigate") is the move she meant
+            params = {**(params or {}), "_verb": str(action)}
         return await execute_limb(legacy_name, params, approval_store, pre_approved=True)
 
     # Fabric domain: pattern param selects which fabric tool to run
@@ -326,6 +329,11 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
         "palace_read": lambda p: _palace_read_impl(p),
         "palace_search": lambda p: _palace_search_impl(p),
         "palace_library_sync": lambda p: _get_palace().library.sync(),
+        # aidw.5: her ledger of mistakes. verified is never set from a call.
+        "samvega_list": lambda p: _samvega("list", p),
+        "samvega_show": lambda p: _samvega("show", p),
+        "samvega_note": lambda p: _samvega("note", p),
+        "samvega_status": lambda p: _samvega("status", p),
         "palace_status": lambda p: _palace_status_impl(p),
         # 0vuz: lookup memory — what GAIA has looked up, with provenance
         "palace_store_lookup": lambda p: _palace_store_lookup_impl(p),
@@ -1523,6 +1531,34 @@ def _palace_search_impl(params: dict) -> dict:
                                 include_lookups=params.get("include_lookups", True) is not False,
                                 asker=str(params.get("_asker") or ""),
                                 include_conversations=True, include_library=True)
+
+
+def _samvega(action: str, p: dict) -> dict:
+    """samvega(list/show/note/status): her findings as a tracker (aidw.5)."""
+    from gaia_common.utils import samvega_ledger as ledger
+    ref = str(p.get("id") or p.get("finding_id") or p.get("finding") or p.get("ref") or "").strip()
+    # The verb she used is the move she meant: samvega(investigate, ...) live
+    # 2026-11-22; and a note carrying a status is a status change.
+    verb = str(p.get("_verb") or p.get("action") or "").lower()
+    moves = {"investigate": "investigating", "dismiss": "dismissed", "fix": "fixed", "resolve": "fixed",
+             "close": "fixed", "reopen": "open"}
+    if verb in moves and not p.get("status"):
+        p = {**p, "status": moves[verb]}
+        action = "status"
+    if action == "note" and p.get("status") and not (p.get("text") or p.get("note")):
+        action = "status"
+    if action == "list":
+        try:
+            limit = max(1, min(int(p.get("limit") or 10), 50))
+        except (TypeError, ValueError):
+            limit = 10
+        return ledger.list_findings(status=str(p.get("status") or "active").lower(), limit=limit)
+    if action == "show":
+        return ledger.show(ref)
+    if action == "note":
+        return ledger.note(ref, str(p.get("text") or p.get("note") or ""), by="GAIA")
+    return ledger.set_status(ref, str(p.get("status") or ""), reason=str(p.get("reason") or p.get("note") or ""),
+                             by="GAIA", as_code=False)
 
 
 def _palace_status_impl(params: dict) -> dict:
