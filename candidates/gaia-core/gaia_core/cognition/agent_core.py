@@ -11461,8 +11461,14 @@ Start your response with the first line of the file."""
         # zbwe (Grotto 2026-11-21): "What's in your Operational wing?" read as
         # chat (list_tree), no tool ran, and she described rooms she doesn't
         # have. A question about her palace goes to the palace tool.
+        # aidw.9: where her selector decides every turn (Core on the GPU), it
+        # decides palace questions too; the keyword only routes off the GPU.
+        # PALACE_KEYWORD_ON_GPU=1 brings the keyword back there.
         if asks_about_palace(asking_text(user_input or ""), self.config.constants.get("MEMPALACE", {})):
-            return True
+            if (os.environ.get("PALACE_KEYWORD_ON_GPU", "0").strip().lower() in ("1", "true", "yes", "on")
+                    or not self._decide_every_turn(plan, user_input)):
+                return True
+            logger.info("Palace question: her selector decides (aidw.9)")
 
         # Create a minimal packet for the check
         # We don't have a full packet yet, so we check against the raw input

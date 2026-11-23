@@ -146,6 +146,8 @@ def direct(engine: str, runs: int, only: list, examples: bool = False, a2: bool 
     engine); nothing is sent to a conversation and the ledger is off."""
     import os
     os.environ["OUTCOME_LEDGER_ENABLED"] = "0"
+    # _core_on_gpu asks this engine, not the candidate's own CPU engine (aidw.9).
+    os.environ["CORE_CPU_ENDPOINT"] = engine
     import logging
     logging.disable(logging.WARNING)
     from types import SimpleNamespace
@@ -165,6 +167,7 @@ def direct(engine: str, runs: int, only: list, examples: bool = False, a2: bool 
     except Exception as e:
         print(f"(no embed model: {e}; intent detection uses the LLM path)")
     fake = SimpleNamespace(config=cfg)
+    fake._decide_every_turn = lambda p, m: AgentCore._decide_every_turn(fake, p, m)
     os.environ["TOOL_DECIDE_EVERY_TURN"] = "1"
     rows = {"gate": {"look": 0, "none": 0}, "decide": {"look": 0, "none": 0}}
     lat = {"gate": [], "decide": []}

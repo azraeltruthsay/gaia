@@ -341,3 +341,18 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
   when statements check out, ~5 s when it regrounds (from 14 s: stop at the
   first contradicted statement, write a statement's questions once, run the
   same read-only call once a minute). Switch: `PRE_SEND_CHECK=0`.
+- 2026-11-23: **Step 6, measured** (`aidw.9`). What retired and what stays:
+  - `asks_about_palace` steps aside wherever her selector decides every turn
+    (Core on the GPU): `selector_eval.py direct --examples`, palace cases ×2,
+    keyword on 8/8, keyword off 8/8 (the blueprint→`manage` miss is the same
+    either way). Off the GPU the selector doesn't run, so the keyword still
+    routes there. `PALACE_KEYWORD_ON_GPU=1` brings it back. Live on
+    production: Operational wing and palace overview via `[decide]`, both
+    grounded; a poem stays tool-free.
+  - **Verb aliases stay.** Asked 12 palace/Samvega questions twice, she
+    still sent `palace.search` (1/2) and `samvega.dismiss` (2/2): the
+    aliases still catch real calls. New verbs still go through tool_gaps.
+  - `_SAMVEGA_LEDGER_RE` stays: it isn't a router, it keeps the founding-docs
+    router from taking Samvega questions.
+  - The number-word map stays: since aidw.12 it is part of the blind check's
+    own code comparison (`_numerize`), not a patch.

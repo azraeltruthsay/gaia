@@ -89,3 +89,30 @@ def test_examples_reach_the_selector_prompt(monkeypatch):
     assert block in m.prompts[-1]
     tool_selector.select_tool(_packet(), "Which rooms does your operational wing have?", m, decide=True)
     assert "EARLIER QUESTIONS" not in m.prompts[-1]
+
+
+# aidw.9: where her selector decides every turn, it decides palace questions
+# too (measured 8/8 with the keyword off); off the GPU the keyword routes.
+def _routing_self(on_gpu, monkeypatch):
+    monkeypatch.setenv("TOOL_DECIDE_EVERY_TURN", "1")
+    monkeypatch.setattr("gaia_core.cognition.agent_core._core_on_gpu", lambda: on_gpu)
+    s = SimpleNamespace(config=SimpleNamespace(constants={"TOOL_ROUTING": {"ENABLED": True}, "MEMPALACE": {}}))
+    s._decide_every_turn = lambda p, t: AgentCore._decide_every_turn(s, p, t)
+    return s
+
+
+def test_palace_keyword_steps_aside_on_gpu(monkeypatch):
+    monkeypatch.delenv("PALACE_KEYWORD_ON_GPU", raising=False)
+    s = _routing_self(True, monkeypatch)
+    assert AgentCore._should_use_tool_routing(s, _plan("chat"), "Give me an overview of your memory palace") is False
+
+
+def test_palace_keyword_routes_off_gpu(monkeypatch):
+    s = _routing_self(False, monkeypatch)
+    assert AgentCore._should_use_tool_routing(s, _plan("chat"), "Give me an overview of your memory palace") is True
+
+
+def test_palace_keyword_can_come_back_on_gpu(monkeypatch):
+    monkeypatch.setenv("PALACE_KEYWORD_ON_GPU", "1")
+    s = _routing_self(True, monkeypatch)
+    assert AgentCore._should_use_tool_routing(s, _plan("chat"), "Give me an overview of your memory palace") is True
