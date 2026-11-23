@@ -39,3 +39,35 @@ def test_edits_her_latest_matching_message_only(monkeypatch):
     assert old == "Morning Andy. Yes" and mine_new.edited == "Morning Azrael. Yes"
     assert theirs.edited is None and mine_old.edited is None
     assert asyncio.run(di.edit_own_message("5", "", "x")) is None
+
+
+def test_edits_in_a_dm_by_user_id(monkeypatch):
+    """aidw.10: a DM session names the person, not the channel."""
+    mine = Msg(1, "Twelve rooms, including a kennel.")
+    dm = Channel([Msg(7, "rooms?"), mine])
+    user = SimpleNamespace(dm_channel=None)
+
+    async def create_dm():
+        return dm
+    user.create_dm = create_dm
+    bot = SimpleNamespace(is_ready=lambda: True, user=SimpleNamespace(id=1),
+                          get_user=lambda uid: user if uid == 7 else None,
+                          get_channel=lambda cid: (_ for _ in ()).throw(AssertionError("not a channel")))
+    monkeypatch.setattr(di, "_bot", bot)
+
+    async def on_loop(coro, timeout=30.0):
+        return await coro
+    monkeypatch.setattr(di, "_await_on_bot_loop", on_loop)
+    old = asyncio.run(di.edit_own_message("", "Twelve rooms", "Three rooms.", user_id="7"))
+    assert old.startswith("Twelve rooms") and mine.edited == "Three rooms."
+
+
+def test_web_edit_goes_out_as_an_event(tmp_path, monkeypatch):
+    import json
+    from gaia_web.routes import autonomous as au
+    log = tmp_path / "auto.jsonl"
+    monkeypatch.setattr(au, "_LOG_PATH", str(log))
+    assert au.append_edit_event("web_ab12cd34", "Twelve rooms", "Three rooms.")
+    rec = json.loads(log.read_text().splitlines()[-1])
+    assert rec["type"] == "edit" and rec["session_id"] == "web_ab12cd34"
+    assert rec["new_text"] == "Three rooms." and "text" not in rec   # old pages don't show it as new

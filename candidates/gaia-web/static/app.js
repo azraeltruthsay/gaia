@@ -237,6 +237,26 @@ document.addEventListener('alpine:init', () => {
       this._save();
     },
 
+    // aidw.10: she corrected one of her messages in this conversation.
+    editMessage(sessionId, containing, newText) {
+      if (!sessionId || !containing || !newText) return false;
+      const conv = Object.values(this.conversations).find(c => c.sessionId === sessionId);
+      if (!conv) return false;
+      for (let i = conv.messages.length - 1; i >= 0; i--) {
+        const m = conv.messages[i];
+        if ((m.type === 'gaia' || m.type === 'gaia-auto') && (m.text || '').includes(containing)) {
+          // Keep the "[Core]" / "[Prime]" label the page shows; her history has none.
+          const label = (m.text.match(/^\s*\[[^\]\n]{1,40}\]\s*/) || [''])[0];
+          m.text = /^\s*\[[^\]\n]{1,40}\]/.test(newText) ? newText : label + newText;
+          m.editedAt = new Date().toISOString();
+          conv.updatedAt = m.editedAt;
+          this._save();
+          return true;
+        }
+      }
+      return false;
+    },
+
     clearHistory() {
       const active = this.getActive();
       if (!active) return;
@@ -388,6 +408,10 @@ document.addEventListener('alpine:init', () => {
         this._autoSSE.onmessage = (evt) => {
           try {
             const data = JSON.parse(evt.data);
+            if (data.type === 'edit') {
+              this.editMessage(data.session_id, data.containing, data.new_text);
+              return;
+            }
             if (data.text) this.addMessage(data.text, 'gaia-auto');
           } catch { /* ignore */ }
         };

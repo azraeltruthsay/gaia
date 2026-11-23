@@ -267,7 +267,7 @@
         <div x-ref="messages" class="chat-fp-messages">
           <template x-for="msg in $store.chat.getMessages()" :key="msg.id">
             <div class="chat-msg" :class="msg.type">
-              <span class="chat-ts" x-text="formatTimestamp(msg.ts)"></span>
+              <span class="chat-ts" x-text="formatTimestamp(msg.ts) + (msg.editedAt ? ' (edited)' : '')"></span>
               <span class="chat-text" x-html="renderMessage(msg)"></span>
             </div>
           </template>

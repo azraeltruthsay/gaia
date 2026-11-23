@@ -52,6 +52,23 @@ def append_autonomous_message(text: str, source: str, session_id: str | None = N
         return False
 
 
+def append_edit_event(session_id: str, containing: str, text: str) -> bool:
+    """An edit to one of her web-chat messages (aidw.10): the page finds the
+    conversation with this session id and replaces her latest message that
+    contains `containing` with `text`. No ``text`` key at the top level, so a
+    page from before this change doesn't show it as a new message."""
+    entry = {"type": "edit", "session_id": session_id, "containing": containing,
+             "new_text": text, "timestamp": datetime.now(UTC).isoformat()}
+    try:
+        os.makedirs(os.path.dirname(_LOG_PATH), exist_ok=True)
+        with open(_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+        return True
+    except OSError:
+        logger.exception("Failed to append edit event for %s", session_id)
+        return False
+
+
 @router.get("/stream")
 async def autonomous_stream():
     """SSE endpoint — tails autonomous_messages.jsonl in real-time."""

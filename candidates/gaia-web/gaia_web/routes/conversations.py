@@ -199,20 +199,34 @@ async def retract_message(session_id: str, request: Request):
 
 @router.post("/{session_id}/edit")
 async def edit_message(session_id: str, request: Request):
-    """Edit her own latest message containing `containing` in a Discord channel
-    session to `text`. Her history is updated by gaia-core (revise.py)."""
+    """Edit her own latest message containing `containing` to `text`. Her
+    history is updated by gaia-core (revise.py).
+
+    - Discord channel or DM: edited on Discord; returns the text it replaced.
+    - Web chat (aidw.10): the messages live in the browser, so an ``edit``
+      event goes out on the autonomous stream and the page swaps the text in
+      that conversation. gaia-web can't see the old text; gaia-core has it.
+    """
     try:
         body = await request.json()
     except Exception:
         body = {}
-    if not session_id.startswith("discord_channel_"):
-        return JSONResponse(status_code=400, content={"error": "only Discord channel sessions"})
     containing, text = (body or {}).get("containing", ""), (body or {}).get("text", "")
     if not containing.strip() or not text.strip():
         return JSONResponse(status_code=400, content={"error": "need 'containing' and 'text'"})
-    from gaia_web.discord_interface import edit_own_message
-    old = await edit_own_message(session_id[len("discord_channel_"):], containing, text)
-    return {"edited": old is not None, "old": old}
+    if session_id.startswith("discord_channel_"):
+        from gaia_web.discord_interface import edit_own_message
+        old = await edit_own_message(session_id[len("discord_channel_"):], containing, text)
+        return {"edited": old is not None, "old": old}
+    if session_id.startswith("discord_dm_"):
+        from gaia_web.discord_interface import edit_own_message
+        old = await edit_own_message("", containing, text, user_id=session_id[len("discord_dm_"):])
+        return {"edited": old is not None, "old": old}
+    if session_id.startswith("web_"):
+        from gaia_web.routes.autonomous import append_edit_event
+        ok = append_edit_event(session_id, containing, text)
+        return {"edited": ok, "old": None}
+    return JSONResponse(status_code=400, content={"error": "unknown session type"})
 
 
 @router.post("/{session_id}/pool-summary")

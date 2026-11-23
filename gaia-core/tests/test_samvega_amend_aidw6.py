@@ -73,13 +73,29 @@ def test_a_rewrite_that_is_wrong_too_is_not_used(finding):
     assert f["status"] == "open" and "didn't hold up" in f["history"][-1]["note"]
 
 
-def test_old_message_dm_and_web_are_left(finding):
+def test_old_message_is_left(finding):
     old = {**_ref(finding), "sent_at": (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()}
     assert _amend(finding, lambda m: GOOD, lambda *a: pytest.fail("no"), ref=old) is None
     assert "minutes old" in L.show(finding.stem)["history"][-1]["note"]
-    for sid in ("discord_dm_596925786208993283", "web_abc"):
-        assert _amend(finding, lambda m: GOOD, lambda *a: pytest.fail("no"), sid=sid) is None
     assert L.show(finding.stem)["status"] == "open"
+
+
+# aidw.10: DMs and web chat are amended too; other sessions are left.
+@pytest.mark.parametrize("sid", ["discord_dm_596925786208993283", "web_abc12345"])
+def test_dm_and_web_are_amended(finding, sid):
+    seen = []
+
+    def revise(session_id, containing, text, reason, note):
+        seen.append(session_id)
+        return text
+    out = _amend(finding, _steps("YES", GOOD, "Q: What rooms are in the Operational wing?\nA: problems, preferences and milestones",
+                                 "1: problems, preferences, milestones (complete)"), revise, sid=sid)
+    assert out == GOOD and seen == [sid]
+
+
+def test_other_sessions_are_left(finding):
+    assert _amend(finding, lambda m: GOOD, lambda *a: pytest.fail("no"), sid="cli_local") is None
+    assert "can be edited" in L.show(finding.stem)["history"][-1]["note"]
 
 
 def test_message_not_found(finding):

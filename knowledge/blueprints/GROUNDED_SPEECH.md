@@ -356,3 +356,15 @@ Samvega stops being a pile and becomes a tracker, the way beads are for us.
     router from taking Samvega questions.
   - The number-word map stays: since aidw.12 it is part of the blind check's
     own code comparison (`_numerize`), not a patch.
+- 2026-11-23: **C3 reaches DMs and web chat** (`aidw.10`). gaia-web's edit
+  route takes `discord_dm_<user>` (her DM channel, opened from the user id)
+  and `web_<id>`: a web-chat message lives only in the browser, so an `edit`
+  event goes out on the autonomous stream and the page swaps the text in the
+  conversation with that session id (keeping its `[Core]` label, marked
+  "(edited)"). There her history is the record: revise.py edits a web
+  message only if her history holds it, and takes the old text from there.
+  Live: a web-chat poem revised → the event on the stream, history updated,
+  old text in revisions.jsonl; a message she never sent → not revised. An
+  open page gets the edit; a closed one keeps its copy (her history, which
+  she answers from, is right either way). DM path tested with a fake bot,
+  not yet on a real DM.

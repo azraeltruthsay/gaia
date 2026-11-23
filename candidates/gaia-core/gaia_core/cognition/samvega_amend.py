@@ -17,8 +17,7 @@ When a finding is confirmed against evidence (C1) and the message is fresh:
   4. the finding moves to `amended`, with the new text.
 
 Fixing the cause (why she didn't look) is left to sleep (C4); the finding
-stays active until then. Discord channels only for now: revise.py can't edit
-a DM or a web-chat message yet.
+stays active until then. Discord channels and DMs, and web chat (aidw.10).
 """
 from __future__ import annotations
 
@@ -77,8 +76,8 @@ def _revise_http(session_id: str, containing: str, text: str, reason: str, note:
 
 def amendable(session_id: str, message_ref: Dict[str, Any], max_age_s: float = MAX_AGE_S) -> str:
     """'' if the message can be corrected now, else why not."""
-    if not (session_id or "").startswith("discord_channel_"):
-        return "only Discord channel messages can be edited yet"
+    if not (session_id or "").startswith(("discord_channel_", "discord_dm_", "web_")):
+        return "only Discord and web-chat messages can be edited"
     age = _age_s((message_ref or {}).get("sent_at", ""))
     if age is None:
         return "no time recorded for the message"

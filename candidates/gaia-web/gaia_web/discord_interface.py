@@ -1325,9 +1325,11 @@ async def retract_own_message(channel_id: str, containing: str = "", within: int
         return None
 
 
-async def edit_own_message(channel_id: str, containing: str, new_text: str, within: int = 40) -> Optional[str]:
-    """Edit her most recent message in a channel containing `containing` (among
-    the last `within`) to `new_text`. Only her own messages; Discord marks the
+async def edit_own_message(channel_id: str, containing: str, new_text: str, within: int = 40,
+                           user_id: str = "") -> Optional[str]:
+    """Edit her most recent message containing `containing` (among the last
+    `within`) to `new_text`, in a channel, or in her DM with `user_id` when
+    that is given instead (aidw.10). Only her own messages; Discord marks the
     message "(edited)" itself. Returns the text it replaced, or None."""
     global _bot
     if not _bot or not _bot.is_ready():
@@ -1335,21 +1337,26 @@ async def edit_own_message(channel_id: str, containing: str, new_text: str, with
         return None
     if not (containing or "").strip() or not (new_text or "").strip():
         return None
+    where = f"DM with {user_id}" if user_id else f"channel {channel_id}"
 
     async def _edit():
-        channel = _bot.get_channel(int(channel_id)) or await _bot.fetch_channel(int(channel_id))
+        if user_id:
+            user = _bot.get_user(int(user_id)) or await _bot.fetch_user(int(user_id))
+            channel = user.dm_channel or await user.create_dm()
+        else:
+            channel = _bot.get_channel(int(channel_id)) or await _bot.fetch_channel(int(channel_id))
         async for msg in channel.history(limit=within):
             if msg.author.id == _bot.user.id and containing in msg.content:
                 old = msg.content
                 await msg.edit(content=new_text[:2000])
-                logger.info("Discord: edited her message in channel %s", channel_id)
+                logger.info("Discord: edited her message in %s", where)
                 return old
         return None
 
     try:
         return await _await_on_bot_loop(_edit(), timeout=30.0)
     except Exception as e:
-        logger.error("Failed to edit in channel %s: %s", channel_id, e, exc_info=True)
+        logger.error("Failed to edit in %s: %s", where, e, exc_info=True)
         return None
 
 
