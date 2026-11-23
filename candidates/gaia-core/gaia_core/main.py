@@ -1835,6 +1835,7 @@ async def process_packet(packet_data: Dict[str, Any]):
             _pending_tool_calls = []
             _seen_tool_calls = set()  # Dedup repeated tool calls
             _tool_texts_for_observer: list = []
+            _tool_evidence: list = []   # wtfr: only calls that returned something
 
             # Suppress tool calls on tool-free conversational intents — Core
             # habitually emits e.g. worldstate() even on a greeting, which adds
@@ -2399,6 +2400,13 @@ async def process_packet(packet_data: Dict[str, Any]):
                         # 0kv2: with its name, so "the Discord API rejected
                         # that" is backed by the discord call it describes.
                         _tool_texts_for_observer.append(f"{_tool_label} ({tc.tool_name}): {_tool_text}")
+                        # wtfr: an error is not evidence. "No issue ''" backed "I have
+                        # no open issues" in the audit's blind check (2026-11-23).
+                        _ar_ok = rpc_result.get("ok") and not (
+                            isinstance(actual_result, dict)
+                            and (actual_result.get("ok") is False or (actual_result.get("error") and len(actual_result) <= 2)))
+                        if _ar_ok:
+                            _tool_evidence.append(f"{_tool_label} ({tc.tool_name}): {_tool_text}")
                         # Continuation system prompt: the previous turn's
                         # full system prompt is NOT carried into this second
                         # generation. Without explicit guidance, the model
@@ -2732,6 +2740,23 @@ async def process_packet(packet_data: Dict[str, Any]):
                     _agent_core._lookup_feedback(full_response, packet)
                 except Exception:
                     logger.debug("Lookup feedback after inline tool call failed", exc_info=True)
+                # wtfr: a reply after an inline tool call streamed out before
+                # any answer check could run ("the 2024 IBC takes effect May 3,
+                # 2027", on nothing the search showed). The audit deliberated
+                # turns get runs on it now, with what the tool returned as its
+                # evidence; a confirmed finding corrects the message (aidw.6).
+                if source in ("web", "discord") and _tool_texts_for_observer:
+                    # with no successful call there is no evidence; the audit
+                    # then looks up what the question needs itself
+                    try:
+                        from gaia_core.cognition.cross_tier_audit import schedule_cross_tier_audit
+                        schedule_cross_tier_audit(
+                            user_input=user_input or "", thinking="", final_response=full_response,
+                            journal_entry_id=None, model_pool=_agent_core.model_pool,
+                            config=_agent_core.config, session_id=session_id,
+                            evidence="\n".join(_tool_evidence)[:8000])
+                    except Exception:
+                        logger.debug("Audit after inline tool call failed to start", exc_info=True)
                 # wtfr: "I'll re-verify and get back to you" said after a
                 # tool call is a promise too
                 if source in ("web", "discord"):

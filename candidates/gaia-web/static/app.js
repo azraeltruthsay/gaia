@@ -237,6 +237,18 @@ document.addEventListener('alpine:init', () => {
       this._save();
     },
 
+    addMessageTo(sessionId, text, type) {
+      const conv = Object.values(this.conversations).find(c => c.sessionId === sessionId);
+      if (!conv) return false;
+      conv.messages.push({ text, type, id: this._nextMsgId++, ts: new Date().toISOString() });
+      conv.updatedAt = new Date().toISOString();
+      if (conv.messages.length > CHAT_MAX_STORED) {
+        conv.messages = conv.messages.slice(-CHAT_MAX_STORED);
+      }
+      this._save();
+      return true;
+    },
+
     // aidw.10: she corrected one of her messages in this conversation.
     editMessage(sessionId, containing, newText) {
       if (!sessionId || !containing || !newText) return false;
@@ -412,7 +424,15 @@ document.addEventListener('alpine:init', () => {
               this.editMessage(data.session_id, data.containing, data.new_text);
               return;
             }
-            if (data.text) this.addMessage(data.text, 'gaia-auto');
+            if (!data.text) return;
+            // wtfr: a follow-up for one conversation (a promise kept, a long
+            // read finished) goes to that conversation, not whichever is open;
+            // one this page doesn't have belongs to another browser.
+            if (data.session_id) {
+              this.addMessageTo(data.session_id, data.text, 'gaia-auto');
+              return;
+            }
+            this.addMessage(data.text, 'gaia-auto');
           } catch { /* ignore */ }
         };
         this._autoSSE.onerror = () => {

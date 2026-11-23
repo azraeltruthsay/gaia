@@ -36,6 +36,17 @@ UNSURE = ("I'm not sure enough to answer that from memory, and my notes don't co
           "I'd want to look it up, or ask Andy.")
 UNSURE_PLAIN = ("I'm not sure enough to answer that from memory, and I couldn't confirm it "
                 "against a source. I'd want to look into it further.")
+
+
+def check_hedged(text: str) -> bool:
+    """The reply is the 'not sure' an answer check put in place of her answer
+    (her two minds disagreed), not her own reading of a source. It says
+    nothing about the pages she looked up (wtfr: a good SBCC page was marked
+    as failing the question after one)."""
+    t = re.sub(r"^\s*\[[^\]\n]{1,40}\]\s*", "", text or "").strip()
+    return t.startswith((UNSURE[:60], UNSURE_PLAIN[:60]))
+
+
 _WORD = re.compile(r"[a-z][a-z'-]{3,}")
 _NUM = re.compile(r"\d+(?:[.,]\d+)*")
 

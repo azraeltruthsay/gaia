@@ -31,6 +31,7 @@ _PROMISE_RE = re.compile(
     r"double[- ]check|re-?verify|re-?check|re-?calculate|re-?do|re-?work|verify|confirm)"
     r"|\bget\s+back\s+to\s+you\b|\bgive\s+me\s+a\s+(?:sec|second|moment|minute)\b",
     re.IGNORECASE)
+_TOOL_CALL_RE = re.compile(r"<\|tool\|?>|<tool_call(?:ing)?\b|<tool_response>", re.IGNORECASE)
 # "Can you check and get back to me?" -- "I can check." agrees to it
 _ASKED_TO_LOOK_RE = re.compile(
     r"\b(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:check|look|search|find|verify|confirm)|"
@@ -59,6 +60,12 @@ def made_promise(reply: str, asked: str = "") -> bool:
     """Her reply says she'll look something up (not just offers to), or agrees
     when asked to ("Can you check and get back to me?" -- "I can check.")."""
     text = (reply or "").strip()
+    # "Let me check." followed by her tool call: the call is the lookup, and
+    # its answer follows in the same reply (2026-11-23: issue(list) ran, then
+    # a promise lookup ran for nothing). What she says after a tool call is
+    # checked on its own, on the inline-tool path.
+    if _TOOL_CALL_RE.search(text):
+        return False
     if asked and _ASKED_TO_LOOK_RE.search(asked) and _AGREES_RE.match(text) and not text.rstrip().endswith("?"):
         return True
     m = _PROMISE_RE.search(text)

@@ -1370,6 +1370,10 @@ class AgentCore:
         if not grounding or not grounding.get("results"):
             return
         answer = strip_think_tags(response or "")
+        from gaia_core.cognition.engineering_mode import check_hedged
+        if check_hedged(answer):
+            logger.info("Lookup memory feedback skipped: the 'not sure' came from the answer check, not the page")
+            return
         params = {
             "question": grounding.get("memory_query") or grounding.get("query", ""),
             "answer": answer[:4000],

@@ -365,8 +365,13 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
             source=p.get("source", "self")),
         "issue_note": lambda p: _issue_ledger().note_issue(str(p.get("id", "")), p.get("text") or p.get("note", ""),
                                                           file=str(p.get("file") or "")),
-        "issue_status": lambda p: _issue_ledger().set_status(
-            str(p.get("id", "")), p.get("status", ""), note=p.get("note", ""), file=str(p.get("file") or "")),
+        # wtfr (2026-11-23): asked for her open issues, she sent
+        # issue(status, status=open) with no id; "no issue ''" came back and
+        # she said she had none. A status with no issue named asks which
+        # issues have it.
+        "issue_status": lambda p: (_issue_ledger().set_status(
+            str(p.get("id", "")), p.get("status", ""), note=p.get("note", ""), file=str(p.get("file") or ""))
+            if p.get("id") else _issue_ledger().list_issues(status=p.get("status", ""))),
         "issue_list": lambda p: (_issue_ledger().get_issue(str(p["id"])) if p.get("id")
                                  else _issue_ledger().list_issues(
                                      status=p.get("status", ""),
