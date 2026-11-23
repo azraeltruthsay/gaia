@@ -137,7 +137,8 @@ def test_a_self_introduction_is_not_saved_without_soft_intent():
 
 def test_a_failed_save_cannot_be_reported_as_done():
     core = _core((False, {"error": "disk full"}), said="I've updated it.")
-    assert "didn't work" in core._told_fact_reply(f"Update my knowledge base with this fact: {FACT}", "s")
+    said = core._told_fact_reply(f"Update my knowledge base with this fact: {FACT}", "s")
+    assert "failed" in said and "nothing was saved" in said   # wording since 9cec683
 
 
 def test_a_question_she_was_told_the_answer_to_comes_from_the_palace():
@@ -258,7 +259,8 @@ def test_other_questions_are_left_alone(monkeypatch):
 
 def test_words_that_say_nothing_give_way_to_the_facts(monkeypatch):
     core = _host_core("Your environment is as reported.", monkeypatch)
-    assert core._host_fact_reply("Tell me about your environment.", "s") == FACTS
+    # A question about the hardware: "environment" alone no longer asks (0878baa).
+    assert core._host_fact_reply("What hardware are you running on?", "s") == FACTS
 
 
 CONSTITUTION = "### Article VII: Consent Principle\n- Consent must be freely given."

@@ -59,8 +59,11 @@ def unbacked(reply: str, known: str) -> List[str]:
     # A file path is a claim too ("what I read from /proc/driver/nvidia/gpu/0").
     out = [p for p in dict.fromkeys(x.rstrip("/.") for x in _PATH_RE.findall(reply or "")) if p not in (known or "")]
     for claim in _CLAIM_RE.findall(body):
-        # Also as a substring: "9950" is backed by "9950X3D", "Gemma" by "Gemma4".
-        if not {w.rstrip("s") for w in _words(claim)} <= words and claim.lower() not in lowered and claim not in out:
+        # Also as a substring: "9950" is backed by "9950X3D", "Gemma" by "Gemma4";
+        # and run together, as a site's name is in its address: "History Hit"
+        # by historyhit.com (2026-11-23).
+        if (not {w.rstrip("s") for w in _words(claim)} <= words and claim.lower() not in lowered
+                and re.sub(r"\W+", "", claim.lower()) not in lowered and claim not in out):
             out.append(claim)
     return out
 
@@ -123,7 +126,60 @@ def check(question: str, reply: str, known: str, generate: Callable[[str], str])
     remaining = unbacked(reply, f"{base}\n{own}")
     if not remaining:
         return None
-    return {"verdict": "unbacked", "unbacked": remaining, "own_answer": own}
+    filled = {}
+    # Its weights know history, not her rooms or files: asked about herself,
+    # it fills what the sentence hints ("the ____ (secrets, keys…)" → "Vault",
+    # a room she hasn't got), so there the doubt stands.
+    for claim in ([] if _HERS_RE.search(question or "") else remaining[:_MAX_FILLS]):
+        filled[claim] = fill_blank(claim, reply, known, generate, question)
+    remaining = [c for c in remaining if not filled.get(c, {}).get("backed")]
+    if not remaining:
+        return None
+    return {"verdict": "unbacked", "unbacked": remaining, "own_answer": own,
+            "filled": {c: f["fill"] for c, f in filled.items() if f.get("fill")}}
+
+
+# Its own answer is short and answers the question, not every detail: "1903"
+# went unmentioned when asked about the Anunnaki, "Mesopotamian" when it listed
+# Akkadian, Babylonian, Assyrian (2026-11-23 DM). So each doubt gets one blind
+# question of its own: her sentence with the word blanked, which it fills.
+_MAX_FILLS = 4
+# About her things or her state: "your Operational Wing" however it's
+# capitalised, "are you", "do you remember". Not "do you think" or "can you
+# explain why the sky is blue": those it can fill.
+_HERS_RE = re.compile(r"\b(?:your|yours|yourself)\b|\b(?:are|were) you\b"
+                      r"|\byou(?:'ve| have| had| run| use| remember| recall| feel| keep| store)\b", re.IGNORECASE)
+_FILL_PROMPT = ("{context}{asked}Fill in the blank with what is true. Reply with only the missing words, "
+                "or \"unknown\" if you don't know.\n\n{sentence}")
+
+
+def blanked(reply: str, claim: str) -> str:
+    """Her sentence holding the claim, the claim replaced by a blank; '' if none."""
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", _plain(reply or "")):
+        if claim in sentence:
+            return sentence.replace(claim, "____").strip()
+    return ""
+
+
+def _same(claim: str, fill: str) -> bool:
+    """The fill names the claim: its words, plurals aside. A number whole:
+    "34" isn't in "1234567890", but "1903" is in "1903."."""
+    f = (fill or "").lower()
+    if re.fullmatch(r"[\d:.,]+", claim):
+        return bool(re.search(rf"(?<![\d.,:]){re.escape(claim)}(?![\d]|[.,:]\d)", f))
+    return {w.rstrip("s") for w in _words(claim)} <= {w.rstrip("s") for w in _words(f)}
+
+
+def fill_blank(claim: str, reply: str, known: str, generate: Callable[[str], str], question: str = "") -> dict:
+    """{'backed': its fill names the claim, 'fill': what it said}. A path, or a
+    sentence that is nothing but the blank, stays doubted."""
+    sentence = blanked(reply, claim)
+    if claim.startswith("/") or len(re.sub(r"_+", "", sentence).split()) < 3:
+        return {"backed": False, "fill": ""}
+    context = f"What is known: {known[:1500]}\n\n" if (known or "").strip() else ""
+    asked = f"Asked: {question[:300]}\n\n" if (question or "").strip() else ""
+    fill = (generate(_FILL_PROMPT.format(context=context, asked=asked, sentence=sentence)) or "").strip()
+    return {"backed": bool(fill) and _same(claim, fill), "fill": fill[:120]}
 
 
 _ABOUT_HER_RE = re.compile(r"\b(?:you|your|yours|yourself|gaia)\b", re.IGNORECASE)
@@ -136,6 +192,12 @@ _MAX_CLAIMS_FOR_DOUBT = 3
 _MAX_SENTENCE_CHARS = 280
 
 
+def about_her(question: str) -> bool:
+    """A question about GAIA herself, not about something it names."""
+    q = question or ""
+    return bool(_ABOUT_HER_RE.search(q)) and not _NAMES_SOMETHING_RE.search(q.replace("GAIA", ""))
+
+
 def is_necessary(question: str, result: Optional[dict], ran_tool: bool, had_source: bool) -> bool:
     """Whether what the check found is worth saying out loud."""
     if not result:
@@ -144,8 +206,7 @@ def is_necessary(question: str, result: Optional[dict], ran_tool: bool, had_sour
         return not ran_tool
     if result["verdict"] != "unbacked" or not result.get("unbacked"):
         return False
-    q = question or ""
-    if had_source or (_ABOUT_HER_RE.search(q) and not _NAMES_SOMETHING_RE.search(q.replace("GAIA", ""))):
+    if had_source or about_her(question):
         return True
     return "?" in (question or "") and len(result["unbacked"]) <= _MAX_CLAIMS_FOR_DOUBT
 

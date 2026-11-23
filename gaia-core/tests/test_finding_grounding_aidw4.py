@@ -221,3 +221,26 @@ def test_blind_not_in_source_is_unverified_and_model_compares_the_rest():
 def test_without_a_model_falls_back_to_lexical():
     assert fg.confirm("has twelve wings and 9 rooms", "The palace has twelve wings and 9 rooms.",
                       NAVIGATE, "", None) == fg.CONFIRMED
+
+
+def test_nothing_found_leaves_a_general_claim_unverified():
+    """2026-11-23 DM: a historiography answer, no lookup fit, so the evidence was
+    still only her world state. It was "confirmed" against the clock and rewritten."""
+    world = "[world state]\nClock: 21:22 UTC\nMinds: Core is Gemma4-12B (on the GPU, generating)"
+    f = [AuditFinding("confabulation", "unverifiable",
+                      claim="The narrative we inherit is shaped by whoever wrote it down"),
+         AuditFinding("deflection", "dodged")]
+    call, ev = _ground_findings(f, "Why don't we see the history from the other perspective?",
+                                "The narrative we inherit is shaped by whoever wrote it down.",
+                                world, None, lambda q, p, decide=True: ("", ""))
+    assert call == "" and f[0].status == fg.UNVERIFIED and f[1].status == fg.JUDGMENT
+
+
+def test_world_state_still_checks_what_she_says_about_herself(monkeypatch):
+    seen = []
+    monkeypatch.setattr(fg, "confirm", lambda *a, **k: seen.append(a) or fg.CONFIRMED)
+    f = [AuditFinding("self_claims", "wrong mind", claim="Prime is generating on the GPU")]
+    _ground_findings(f, "Which mind is talking?", "Prime is generating on the GPU.",
+                     "[world state]\nMinds: Core is Gemma4-12B (on the GPU, generating)", None,
+                     lambda q, p, decide=True: ("", ""))
+    assert seen and f[0].status == fg.CONFIRMED

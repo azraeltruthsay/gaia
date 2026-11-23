@@ -112,3 +112,15 @@ def test_source_phrase_and_anchor():
 def test_evidence_that_doesnt_answer_is_not_rewritten_from(finding):
     assert _amend(finding, _steps("NO"), lambda *a: pytest.fail("no edit")) is None
     assert "doesn't answer the question" in L.show(finding.stem)["history"][-1]["note"]
+
+
+def test_world_state_alone_is_no_source_to_correct_from(finding):
+    """2026-11-23 DM: rewritten from her clock and recent events, noted as
+    "I checked the source and corrected this"."""
+    out = A.maybe_amend(finding, question="Why don't we see the other perspective?", said=SAID,
+                        evidence="[world state]\nClock: 21:22 UTC\nRecent Events: ...", grounding_call="",
+                        session_id=SID, message_ref=_ref(finding),
+                        generate=lambda m: pytest.fail("must not generate"),
+                        revise=lambda *a: pytest.fail("must not edit"))
+    assert out is None
+    assert "nothing was looked up" in json.dumps(L.show(finding.stem))

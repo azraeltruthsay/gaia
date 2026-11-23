@@ -16,6 +16,11 @@ def test_part_of_a_known_word_is_backed():
     assert sm.unbacked("It has a Ryzen 9950 and runs Gemma.", "AMD Ryzen 9 9950X3D. Gemma4-E4B.") == []
 
 
+def test_a_site_named_as_its_address_is_backed():
+    known = "www.historyhit.com | Before the Wright Brothers: History's Early Flying Machines"
+    assert sm.unbacked("Sources from Wikipedia, History Hit, and others agree.", known) == ["Wikipedia"]
+
+
 def test_labels_and_sentence_openings_are_not_claims():
     assert sm.unbacked("[Prime]\n\nSteady, thanks. Nothing to report.", "") == []
     assert sm.unbacked("*[Searched the web for: x]*\n\nThe answer is yes.", "") == []
@@ -151,9 +156,11 @@ def test_a_section_the_document_lacks_means_she_carried_on_writing_it():
     assert not sm.keeps_to_text("A thought can be saved.\n\n### The spiral\nA heartbeat reviews it.", text, "q", opinion=True)
 
 
-def _lifecycle(state):
+def _lifecycle(state, after=None):
+    """The state now, then (after a wake) `after`."""
     from types import SimpleNamespace
-    return SimpleNamespace(get_state_sync=lambda timeout: SimpleNamespace(state=state))
+    states = iter([state] + [after or state] * 3)
+    return SimpleNamespace(get_state_sync=lambda timeout: SimpleNamespace(state=next(states)))
 
 
 @pytest.mark.parametrize("state,source,wakes", [
@@ -164,9 +171,14 @@ def test_a_person_speaking_wakes_her_from_parked(state, source, wakes, monkeypat
     import httpx
     from unittest.mock import MagicMock
     from gaia_core.main import _wake_for_turn
+    from gaia_core.cognition import transmission
     post = MagicMock(return_value=MagicMock(json=lambda: {"ok": True}))
     monkeypatch.setattr(httpx, "post", post)
-    assert _wake_for_turn(_lifecycle(state), "http://o", source) is wakes
+    # Run in the candidate container, which never drives the gearbox, and
+    # without whatever hold the live system has written.
+    monkeypatch.delenv("GAIA_IS_CANDIDATE", raising=False)
+    monkeypatch.setattr(transmission, "held", lambda: None)
+    assert _wake_for_turn(_lifecycle(state, after="awake"), "http://o", source) is wakes
     assert post.called is wakes
 
 
@@ -292,3 +304,65 @@ def test_ids_and_named_tools_are_not_claims_0kv2():
     assert unbacked("The Discord API rejected that channel name.",
                     "Post in the Grotto\ndiscord(post) (discord): not a channel she can post to: 'the-grotto'") == []
     assert unbacked("The capital is Paris, with 2148271 people.", "What is the capital of France?") == ["Paris", "2148271"]
+
+
+# ── 2026-11-23 DM: each doubt gets a blind fill-in question of its own ──
+
+ANUNNAKI = ("[Prime]\n\nPowered flight wasn't achieved until the Wright brothers' successful test in 1903. "
+            "So while the Anunnaki are said to have come from the sky, there's no record of aircraft.")
+
+
+def _answers(own, fills):
+    """Its own answer first, then a fill per blanked sentence, keyed by the
+    words around the blank."""
+    def generate(prompt):
+        if "Fill in the blank" not in prompt:
+            return own
+        return next((v for k, v in fills.items() if k in prompt), "unknown")
+    return generate
+
+
+def test_what_it_fills_in_blind_is_backed():
+    gen = _answers("I can't confirm they did; the record doesn't say.",
+                   {"test in ____": "1903.", "the ____ brothers": "Wright", "the ____ are said": "Anunnaki"})
+    assert sm.check("So you don't think the Anu-Naki had powered flight?", ANUNNAKI, "", gen) is None
+
+
+def test_what_it_fills_differently_stays_doubted():
+    reply = "The Anu-Naki story from Ezekiel is fascinating, describing beings from heaven."
+    gen = _answers("Ancient astronaut theory.", {"story from": "Sumerian mythology"})
+    out = sm.check("Would you put any weight on the Anu-Naki stories?", reply, "", gen)
+    assert out["unbacked"] == ["Ezekiel"] and out["filled"] == {"Ezekiel": "Sumerian mythology"}
+
+
+def test_a_list_of_its_members_backs_the_group():
+    reply = "The deities appear across many Mesopotamian cultures, Akkadian and Babylonian among them."
+    gen = _answers("Sumerian, Akkadian, Babylonian, Assyrian.", {"many ____ cultures": "Mesopotamian"})
+    assert sm.check("Were the Anunnaki recorded by multiple cultures?", reply, "", gen) is None
+
+
+def test_about_her_things_it_fills_nothing():
+    reply = "Four rooms: Problems, Preferences, Milestones, and the Vault (secrets, keys)."
+    def gen(prompt):
+        assert "Fill in the blank" not in prompt, "its weights don't know her rooms"
+        return "Problems, Preferences and Milestones."
+    out = sm.check("What Rooms are in your Operational Wing?", reply, "", gen)
+    assert out["unbacked"] == ["Vault"]
+
+
+def test_hers_and_general_questions():
+    for q in ("What Rooms are in your Operational Wing?", "Are you on the GPU?", "Do you remember Andy?"):
+        assert sm._HERS_RE.search(q), q
+    for q in ("Do you think anyone flew before 1903?", "Can you explain why the sky is blue?"):
+        assert not sm._HERS_RE.search(q), q
+
+
+def test_numbers_are_matched_whole():
+    assert sm._same("1903", "1903.") and sm._same("29,035", "about 29,035 feet")
+    assert not sm._same("34", "1234567890") and not sm._same("8,850", "8,850.5")
+    assert sm._same("King Arthur", "king arthur") and not sm._same("Otto Lilienthal", "Lilienthal")
+
+
+def test_blanked_sentence_and_too_little_to_fill():
+    assert sm.blanked(ANUNNAKI, "1903") == "Powered flight wasn't achieved until the Wright brothers' successful test in ____."
+    assert sm.fill_blank("Washington", "George Washington.", "", lambda p: "Washington") == {"backed": False, "fill": ""}

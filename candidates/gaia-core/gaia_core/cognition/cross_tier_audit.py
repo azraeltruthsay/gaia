@@ -312,7 +312,15 @@ def _ground_findings(findings: List[AuditFinding], user_input: str, final_respon
         evidence = f"{found}\n\n{evidence}".strip() if found else evidence
     # aidw.11: the blind check when Core is on the GPU; the lexical fallback if not.
     gen = fg._core_generate(model_pool) if model_pool is not None else None
+    looked_up = fg.has_lookup(evidence)
     for f in checkable:
+        # Nothing found either: the world-state block (clock, load, which
+        # minds) can speak to her, not to history. Against it a general claim
+        # shares nothing and read as a conflict, and the amend rewrote a sound
+        # answer "from the source" with no source (2026-11-23 DM).
+        if not looked_up and f.category != "self_claims":
+            f.status = fg.UNVERIFIED
+            continue
         f.status = fg.confirm(f.claim, final_response, evidence, user_input, gen)
     logger.info("Cross-tier audit: grounding %s%s",
                 ", ".join(f"{f.category}={f.status}" for f in findings),

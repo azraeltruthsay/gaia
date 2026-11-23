@@ -107,8 +107,10 @@ def maybe_amend(finding_path, *, question: str, said: str, evidence: str, ground
     if why:
         _skip(why)
         return None
-    if not (evidence or "").strip():
-        _skip("no evidence to answer from")
+    if not fg.has_lookup(evidence):
+        # The world-state block alone isn't a source: the note would say "I
+        # checked the source" of a rewrite from nothing (2026-11-23 DM).
+        _skip("nothing was looked up to answer from")
         return None
     containing = _anchor(said)
     if len(containing) < 12:
@@ -138,7 +140,8 @@ def maybe_amend(finding_path, *, question: str, said: str, evidence: str, ground
     note = f"I checked {source_phrase(grounding_call)} and corrected this"
     try:
         final = (revise or _revise_http)(session_id, containing, new,
-                                         f"samvega {ledger.short_id(ref)}: confirmed against {grounding_call}", note)
+                                         f"samvega {ledger.short_id(ref)}: confirmed against "
+                                         f"{grounding_call or 'the turn’s lookup'}", note)
     except Exception as e:
         logger.warning("Samvega amend: revise failed: %s", e)
         final = None
