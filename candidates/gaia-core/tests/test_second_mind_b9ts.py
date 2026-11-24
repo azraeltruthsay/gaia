@@ -418,3 +418,41 @@ def test_unchecked_is_not_said_to_be_absent():
         assert sm.followup("x", "", result, lambda p, d=denial: d) == plain
     ok = "I didn't check /gaia/GAIA_Project this turn."
     assert sm.followup("x", "", result, lambda p: ok) == ok
+
+
+# w8c9: an AI-written page called research is said plainly, without a generation.
+_SUMER_KNOWN = ('{"results": [{"title": "Cradle of civilization - Wikipedia", "url": '
+                '"https://en.wikipedia.org/wiki/Cradle_of_civilization"}, {"title": "Civilizations Before Sumer | Ithy", '
+                '"url": "https://ithy.com/article/civilizations-before-sumer-63fi3vq1"}]}')
+_SUMER_REPLY = ("Yes — evidence points to several earlier ones. Archaeological finds like the Ubaid Culture "
+                "(c. 6500 BCE) in Mesopotamia show irrigation, trade, and large temples preceding Sumer. "
+                "Research published recently on sites like Ithy confirms that while Sumer is famous, "
+                "it wasn't the first to build a complex society.")
+
+
+def test_ai_page_called_research_is_corrected():
+    from gaia_core.cognition import second_mind as sm
+
+    def gen(_):
+        raise AssertionError("no generation needed")
+    q = "Do you think there were human civilizations earlier than the Sumerians?"
+    result = sm.check(q, _SUMER_REPLY, _SUMER_KNOWN, gen)
+    assert result == {"verdict": "ai_page_as_research", "unbacked": [], "sites": ["ithy.com"]}
+    assert sm.is_necessary(q, result, ran_tool=True, had_source=True)
+    said = sm.followup(_SUMER_REPLY, _SUMER_KNOWN, result, gen)
+    assert said.startswith("One correction: ithy.com is a site whose pages an AI writes")
+
+
+def test_ai_page_named_plainly_is_fine():
+    from gaia_core.cognition import second_mind as sm
+    assert sm.ai_pages_as_research("Ithy, an AI answer site, lists the Ubaid culture.", _SUMER_KNOWN) == []
+    assert sm.ai_pages_as_research("Research on Wikipedia shows the Ubaid culture.", _SUMER_KNOWN) == []
+    # Not among this turn's sources: nothing to say about it.
+    assert sm.ai_pages_as_research("Research on Ithy shows it.", '{"url": "https://en.wikipedia.org/x"}') == []
+
+
+def test_short_ai_site_names_need_the_address():
+    from gaia_core.cognition import second_mind as sm
+    known = '{"url": "https://you.com/search?q=x"}'
+    assert sm.ai_pages_as_research("Research shows you were right.", known) == []
+    assert sm.ai_pages_as_research("Research on you.com shows it.", known) == ["you.com"]

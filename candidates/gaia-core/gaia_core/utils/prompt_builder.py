@@ -12,6 +12,7 @@ from typing import Any, List, Dict, Optional
 
 # [GCP v0.3] Import the new packet structure
 from gaia_common.utils.lookup_memory import TRUST_WORDS
+from gaia_common.utils.source_kinds import site_kind
 from gaia_common.protocols.cognition_packet import CognitionPacket, ToolExecutionStatus
 from gaia_core.config import Config
 from gaia_common.utils.tokenizer import count_tokens
@@ -2001,6 +2002,8 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                                     if r.get("trust") in ("disputed", "corroborated", "validated"):
                                         _note += f", {TRUST_WORDS[r['trust']]}"
                                     _cite = ", ".join(x for x in (title, f"looked up {_when}" if _when else "") if x)
+                                    _kind = site_kind(url or "")
+                                    _cite = ", ".join(x for x in (_cite, _kind) if x)
                                     parts.append(f"- {snippet[:600]} ({_cite}{_note}; {url})")
                                 elif r.get("study"):
                                     # oeql: her checked study notes; she cites
@@ -2015,7 +2018,10 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                                     # again, and Prime made the rest up.
                                     parts.append(f"- {snippet[:1600]} ({url})")
                                 else:
-                                    parts.append(f"- {title}: {snippet[:_snip]} ({url})")
+                                    # w8c9: the kind of site, to weigh it by
+                                    _kind = site_kind(url or "")
+                                    parts.append(f"- {title}: {snippet[:_snip]} "
+                                                 f"({_kind + ', ' if _kind else ''}{url})")
                     if _n_study and _n_study == _n_shown and not disputed:
                         # oeql: her own notebook, part of her mind (Azrael) --
                         # not 'candidate context, verify with tools'

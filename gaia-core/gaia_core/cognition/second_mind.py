@@ -166,12 +166,41 @@ def states_something(reply: str) -> bool:
     return bool(_CLAIM_RE.findall(_plain(reply)) or _PATH_RE.search(reply or "") or _FILE_RE.search(reply or ""))
 
 
+_RESEARCH_RE = re.compile(r"\b(?:research\w*|stud(?:y|ies)|scholar\w*|published|peer[- ]reviewed|papers?|"
+                          r"journals?|scientists?|academics?)\b", re.IGNORECASE)
+_URL_RE = re.compile(r"https?://[^\s\"'<>)\]]+")
+
+
+def ai_pages_as_research(reply: str, known: str) -> List[str]:
+    """AI-written answer pages among the sources that the reply calls research
+    (w8c9: "Research published recently on sites like Ithy confirms...").
+    The page's name being in her sources is why the doubt check passed it."""
+    from urllib.parse import urlparse
+    from gaia_common.utils.source_kinds import AI_ANSWER, site_kind
+    hosts = {urlparse(u).netloc.lower().split(":")[0].removeprefix("www.")
+             for u in _URL_RE.findall(known or "") if site_kind(u) == AI_ANSWER}
+    found = set()
+    for sentence in re.split(r"(?<=[.!?])\s+|\n", _plain(reply)):
+        if not _RESEARCH_RE.search(sentence):
+            continue
+        for host in hosts:
+            name = host.split(".")[-2] if "." in host else host
+            # "you" (you.com) is a word; a short name counts only as the address.
+            pattern = re.escape(host) if len(name) < 4 else rf"\b{re.escape(name)}\b"
+            if re.search(pattern, sentence, re.IGNORECASE):
+                found.add(host)
+    return sorted(found)
+
+
 def check(question: str, reply: str, known: str, generate: Callable[[str], str]) -> Optional[dict]:
     """What the other mind makes of a reply; None if nothing needs asking.
     A reply with no names or numbers beyond what is known costs no generation."""
     reply = (reply or "")[:_MAX_REPLY_CHARS]
     if _FAKE_RESULT_RE.search(reply):
         return {"verdict": "fake_tool_result", "unbacked": []}
+    ai_pages = ai_pages_as_research(reply, known)
+    if ai_pages:
+        return {"verdict": "ai_page_as_research", "unbacked": [], "sites": ai_pages}
     base = f"{question}\n{known}"
     claims = [c for c in unbacked(reply, base) if not exists_here(c)]
     if not claims:
@@ -263,6 +292,8 @@ def is_necessary(question: str, result: Optional[dict], ran_tool: bool, had_sour
         return False
     if result["verdict"] == "fake_tool_result":
         return not ran_tool
+    if result["verdict"] == "ai_page_as_research":
+        return True
     if result["verdict"] != "unbacked" or not result.get("unbacked"):
         return False
     if had_source or about_her(question):
@@ -278,6 +309,11 @@ _DENIES_RE = re.compile(r"\b(?:do(?:n't|n’t| not)|does(?:n't|n’t| not)|did(?
 def _plain_followup(result: dict) -> str:
     if result["verdict"] == "fake_tool_result":
         return "That tool result wasn't real: no tool ran, so please don't rely on it."
+    if result["verdict"] == "ai_page_as_research":
+        sites = result["sites"]
+        what = f"{sites[0]} is a site" if len(sites) == 1 else f"{' and '.join(sites)} are sites"
+        return (f"One correction: {what} whose pages an AI writes, not published research, "
+                "so that part is less solid than I made it sound.")
     return f"I can't back up what I just said about {', '.join(result['unbacked'][:3])}, so please check that."
 
 

@@ -441,7 +441,10 @@ def _result_line(row: dict) -> str:
     title = row.get("source") or row.get("title") or row.get("name") or ""
     url = row.get("url") or row.get("link") or row.get("href") or ""
     when = row.get("looked_up") or ""
-    where = ", ".join(x for x in (title, f"looked up {when}" if when else "", url) if x)
+    # w8c9: what kind of site it is, so an AI-written page isn't taken for research.
+    from gaia_common.utils.source_kinds import site_kind
+    kind = site_kind(url) if url.startswith(("http://", "https://")) else None
+    where = ", ".join(x for x in (title, kind, f"looked up {when}" if when else "", url) if x)
     flags = [f for f in ("stale", "disputed") if row.get(f)]
     line = f"- {' '.join(str(body).split())}" if body else f"- {title}"
     if where and (body or url):
@@ -585,7 +588,10 @@ def tool_result_text(result: Any, limit: int = 4000, question: str = "") -> str:
             if result.get("hint"):
                 text += f"\n{result['hint']}"
         elif isinstance(result.get("content") or result.get("text"), str):
-            head = [x for x in (result.get("title"), result.get("url")) if x]
+            from gaia_common.utils.source_kinds import site_kind
+            _url = str(result.get("url") or "")
+            _kind = site_kind(_url) if _url.startswith(("http://", "https://")) else None
+            head = [x for x in (result.get("title"), _url, f"({_kind})" if _kind else "") if x]
             # The part asked for, and it says so: cut off without a word, both
             # minds invented what came after (g47g).
             from gaia_common.utils.doc_sections import excerpt_for
