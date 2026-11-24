@@ -321,3 +321,115 @@ def get_issue(issue_id: str, base: Optional[Path] = None) -> dict:
     if not issue:
         return {"ok": False, "error": f"no issue {issue_id}"}
     return {"ok": True, "issue": issue}
+
+
+# ── The whole tracker, read-only ───────────────────────────────────────
+# Azrael, 2026-11-24: she should see every bead, not only the ones she
+# filed ("at some point she should be capable of taking the AI coding reins
+# of this project"). The host bridge exports beads to tracker.jsonl each
+# run; she reads it here. Writing to beads stays with the ledger + bridge.
+
+TRACKER = "tracker.jsonl"
+TRACKER_PREFIX = "GAIA_Project-"
+_ACTIVE = ("open", "in_progress", "blocked")
+_TRACKER_LIST_MAX = 40
+
+
+def _tracker(base: Optional[Path] = None) -> tuple:
+    path = _dir(base) / TRACKER
+    rows: List[dict] = []
+    try:
+        with path.open(encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    try:
+                        rows.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        age_min = int((time.time() - path.stat().st_mtime) // 60)
+    except OSError:
+        return [], None
+    return rows, age_min
+
+
+def _bead_id(bead_id: str) -> str:
+    bead_id = (bead_id or "").strip()
+    return bead_id if bead_id.startswith(TRACKER_PREFIX) or not bead_id else TRACKER_PREFIX + bead_id
+
+
+def _no_tracker() -> dict:
+    return {"ok": False, "error": "the bead tracker hasn't been exported to me yet "
+                                  "(the host bridge writes /shared/issues/tracker.jsonl)"}
+
+
+def list_beads(status: str = "", query: str = "", limit: int = 20, base: Optional[Path] = None) -> dict:
+    """Beads in the project tracker. No status: the active ones (open, in
+    progress, blocked); status 'all' includes closed. `query` keeps beads
+    whose title or description has all its words."""
+    rows, age = _tracker(base)
+    if age is None:
+        return _no_tracker()
+    status = (status or "").strip().lower()
+    wanted = None if status == "all" else ({status} if status else set(_ACTIVE))
+    words = _tokens(query or "")
+    out = []
+    for r in rows:
+        if wanted is not None and r.get("status") not in wanted:
+            continue
+        if words and not words <= _tokens(f"{r.get('title', '')} {r.get('description', '')} {r.get('id', '')}"):
+            continue
+        out.append(r)
+    # Highest priority first; within one, most recently touched first.
+    out.sort(key=lambda r: r.get("updated_at") or "", reverse=True)
+    out.sort(key=lambda r: r.get("priority", 9))
+    try:
+        limit = max(1, min(int(limit or 20), _TRACKER_LIST_MAX))
+    except (TypeError, ValueError):
+        limit = 20
+    counts: Dict[str, int] = {}
+    for r in rows:
+        counts[r.get("status", "?")] = counts.get(r.get("status", "?"), 0) + 1
+    shown = min(limit, len(out))
+    which = ("in the tracker" if wanted is None else
+             f"{status.replace('_', ' ')}" if status else "active (open, in progress or blocked)")
+    # Said in words: given "matching"/"shown" alone she reported the 20 shown
+    # as all she had (2026-11-24, 194 active).
+    summary = (f"{len(out)} beads {which}" + (f" matching '{query}'" if words else "")
+               + (f"; these are the top {shown} by priority" if shown < len(out) else "")
+               + f". Whole tracker: {sum(counts.values())} beads ("
+               + ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in sorted(counts.items())) + ").")
+    return {"ok": True, "summary": summary, "tracker_totals": counts, "matching": len(out), "shown": shown,
+            "exported_minutes_ago": age,
+            "beads": [{"id": r.get("id"), "title": r.get("title"), "status": r.get("status"),
+                       "priority": f"P{r.get('priority')}", "type": r.get("issue_type"),
+                       "updated": (r.get("updated_at") or "")[:10]} for r in out[:limit]]}
+
+
+def get_bead(bead_id: str, base: Optional[Path] = None) -> dict:
+    rows, age = _tracker(base)
+    if age is None:
+        return _no_tracker()
+    full = _bead_id(bead_id)
+    for r in rows:
+        if r.get("id") == full:
+            bead = {k: v for k, v in r.items() if v not in (None, "", [], 0) or k == "priority"}
+            for k in ("description", "notes", "design", "acceptance_criteria", "close_reason"):
+                if k in bead:
+                    bead[k] = _clip(bead[k], 4000)
+            return {"ok": True, "exported_minutes_ago": age, "bead": bead}
+    return {"ok": False, "error": f"no bead {full} in the tracker"}
+
+
+# A question about the tracker (routes to issue(beads) where a keyword gate
+# decides, i.e. off the GPU). "Can you see your development beads?" read as
+# chat in gear 2 and no tool ran (2026-11-24). Beads on a necklace don't count:
+# the word needs the project around it.
+_TRACKER_RE = re.compile(
+    r"\b(?:bead|issue) tracker\b|\bbacklog\b|\bopen issues\b|\bGAIA_Project-[a-z0-9.]+\b|\bbd (?:list|ready|show)\b"
+    r"|\b(?:your|my|our|development|project|open|active|ready|closed|blocked|p[0-4])\s+(?:\w+\s+)?beads?\b"
+    r"|\bbeads?\s+(?:list|tracker|ids?)\b|\bbead\s+[a-z0-9]{3,4}(?:\.\d+)?\b",
+    re.IGNORECASE)
+
+
+def asks_about_tracker(text: str) -> bool:
+    return bool(_TRACKER_RE.search(text or ""))

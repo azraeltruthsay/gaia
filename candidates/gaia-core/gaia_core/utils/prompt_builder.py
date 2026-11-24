@@ -1270,6 +1270,18 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
                     elif "Internal error:" in _err_str:
                         _idx = _err_str.find("Internal error:")
                         _err_str = _err_str[_idx:].split("\n")[0]
+                    # 2026-11-24: in the system prompt (~12k chars) this
+                    # note was ignored: "service_id is required" came back
+                    # and she described a PROJECTS/ folder that doesn't
+                    # exist. A failure is answered in the tool-answer shape,
+                    # like a result: in the user turn, the call named.
+                    # Approval requests keep their own flow.
+                    if "approval" not in _err_str.lower():
+                        _action = (tr.get('params') or {}).get('action')
+                        _routed_answer = (f"{tool_name}({_action})" if _action and _action not in tool_name
+                                          else tool_name,
+                                          f"It failed: {_err_str[:300]}\nNothing came back from it.")
+                        break
                     tool_result_content = (
                         f"Tool call to '{tool_name}' failed: {_err_str}\n"
                         "Acknowledge the failure to the user briefly in one "

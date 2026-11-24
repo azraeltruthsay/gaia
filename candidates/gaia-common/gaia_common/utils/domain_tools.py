@@ -340,7 +340,12 @@ DOMAIN_TOOLS: Dict[str, dict] = {
     # instead afterward when asked to "note" or "file" something (6839) — the
     # description now says explicitly not to use file/write for this.
     "issue": {
-        "description": "Your issue ledger — bugs you find in yourself; each becomes a bead. Use this, not file/write, when asked to note, log, track, or file something as a bug or issue. file needs evidence: the lines introspect showed you",
+        "description": ("Beads, the project's issue tracker, and your issue ledger. beads lists the tracker "
+                        "(every bead in the project; status all includes closed, query searches) and bead shows "
+                        "one by id: use these, not file or manage, when asked about beads, issues, bugs or "
+                        "what's being worked on. list shows the issues you filed yourself; each becomes a bead. "
+                        "Use file, not file/write, when asked to note, log, track, or file something as a bug or "
+                        "issue. file needs evidence: the lines introspect showed you"),
         "actions": {
             "file": {
                 "params": {"title": "string", "symptom": "string", "evidence": "string",
@@ -350,6 +355,8 @@ DOMAIN_TOOLS: Dict[str, dict] = {
             "note": {"params": {"id": "string", "text": "string"}, "maps_to": "issue_note"},
             "status": {"params": {"id": "string", "status": "string", "note": "string?"}, "maps_to": "issue_status"},
             "list": {"params": {"status": "string?", "id": "string?"}, "maps_to": "issue_list"},
+            "beads": {"params": {"status": "string?", "query": "string?", "limit": "int?"}, "maps_to": "issue_beads"},
+            "bead": {"params": {"id": "string"}, "maps_to": "issue_bead"},
         },
     },
 

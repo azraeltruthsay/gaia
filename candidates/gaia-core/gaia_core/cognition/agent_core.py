@@ -10726,6 +10726,7 @@ Start your response with the first line of the file."""
         from gaia_core.cognition.tool_selector import (
             select_tool, review_selection,
             initialize_tool_routing, inject_tool_result_into_packet,
+            fixable_tool_error,
         )
 
         _meta = metadata or {}
@@ -10989,10 +10990,76 @@ Start your response with the first line of the file."""
             empty=not bool(getattr(_res, "output", None)),
             latency_ms=getattr(_res, "execution_time_ms", None))
 
+        # Step 4b: one more try when the call failed on something a second
+        # choice can fix (2026-11-24: "Wing 'all' not found", "Unknown action
+        # 'status'", "service_id is required" — the error lists what would
+        # work). Only a read: a retry never changes anything.
+        if (forced_tool is None and _res is not None and not getattr(_res, "success", False)
+                and fixable_tool_error(getattr(_res, "error", "") or "")):
+            self._retry_failed_tool(packet, user_input, primary_tool, _res.error, decide, session_id)
+
         # Step 5: Inject result into packet context
         packet = inject_tool_result_into_packet(packet)
 
         return packet
+
+    def _retry_failed_tool(self, packet, user_input: str, failed_tool, error: str,
+                           decide: bool, session_id: str) -> None:
+        """Select again with the failure shown; run the new call if it only
+        reads and differs from the failed one. The packet keeps whichever
+        result is better: the retry's if it worked, else the first failure."""
+        from gaia_core.cognition.tool_selector import select_tool
+        from gaia_core.cognition.finding_grounding import _read_only
+        failed = (f"{failed_tool.tool_name}({json.dumps(failed_tool.params or {}, default=str)[:300]}) -> "
+                  f"{(error or '')[:400]}")
+        model, name = None, None
+        for cand in ("core", "prime", "cpu_prime"):
+            try:
+                model = self.model_pool.acquire_model(cand)
+                if model is not None:
+                    name = cand
+                    break
+            except Exception:
+                continue
+        if model is None:
+            return
+        try:
+            tool, _alts = select_tool(packet=packet, user_input=user_input, model=model,
+                                      temperature=0.15, decide=decide, failed=failed)
+        except Exception:
+            logger.debug("Tool retry: selection failed", exc_info=True)
+            return
+        finally:
+            try:
+                self.model_pool.release_model(name)
+            except Exception:
+                pass
+        if tool is None:
+            logger.info("Tool retry: nothing better than %s", failed_tool.tool_name)
+            return
+        same = (tool.tool_name == failed_tool.tool_name and (tool.params or {}) == (failed_tool.params or {}))
+        if same or not _read_only(tool.tool_name, tool.params or {}):
+            logger.info("Tool retry: %s(%s) not tried (%s)", tool.tool_name, (tool.params or {}).get("action", ""),
+                        "same call" if same else "would change something")
+            return
+        logger.info("Tool retry: %s failed (%s); trying %s %s", failed_tool.tool_name, (error or "")[:80],
+                    tool.tool_name, json.dumps(tool.params or {}, default=str)[:200])
+        try:
+            result = self._execute_mcp_tool(tool, session_id=session_id)
+        except Exception as e:
+            logger.info("Tool retry: %s raised %s", tool.tool_name, e)
+            return
+        outcome_ledger.record(
+            "tool_execution", session_id, packet.header.packet_id,
+            path="retry", tool=tool.tool_name, action=(tool.params or {}).get("action", ""),
+            param_keys=outcome_ledger.param_keys(tool.params), confidence=tool.selection_confidence,
+            gate="passed", ok=bool(result.success), error=outcome_ledger.clip(result.error or ""),
+            empty=not bool(result.output), latency_ms=result.execution_time_ms)
+        if result.success:
+            packet.tool_routing.selected_tool = tool
+            packet.tool_routing.execution_result = result
+            packet.tool_routing.execution_status = ToolExecutionStatus.EXECUTED
+            logger.info("Tool retry: %s worked", tool.tool_name)
 
     def _handle_pending_write_response(
         self,
@@ -11473,6 +11540,12 @@ Start your response with the first line of the file."""
                     or not self._decide_every_turn(plan, user_input)):
                 return True
             logger.info("Palace question: her selector decides (aidw.9)")
+
+        # Same for the bead tracker (2026-11-24): off the GPU the keyword
+        # routes it, on the GPU her selector decides (it chose issue(beads)).
+        from gaia_common.utils.issue_ledger import asks_about_tracker
+        if asks_about_tracker(asking_text(user_input or "")) and not self._decide_every_turn(plan, user_input):
+            return True
 
         # Create a minimal packet for the check
         # We don't have a full packet yet, so we check against the raw input

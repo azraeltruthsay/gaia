@@ -376,6 +376,12 @@ async def execute_limb(method: str, params: Dict, approval_store: ApprovalStore,
                                  else _issue_ledger().list_issues(
                                      status=p.get("status", ""),
                                      include_closed=bool(p.get("include_closed")))),
+        # 2cbi follow-up (2026-11-24): the whole bead tracker, read-only.
+        "issue_beads": lambda p: (_issue_ledger().get_bead(str(p["id"])) if p.get("id")
+                                  else _issue_ledger().list_beads(
+                                      status=p.get("status", ""), query=p.get("query") or p.get("q", ""),
+                                      limit=p.get("limit") or 20)),
+        "issue_bead": lambda p: _issue_ledger().get_bead(str(p.get("id") or p.get("bead") or "")),
         "replace": lambda p: _replace_impl(p),
         # Discord integration
         "send_discord_message": lambda p: _send_discord_message_impl(p),

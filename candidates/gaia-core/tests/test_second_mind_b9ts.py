@@ -366,3 +366,14 @@ def test_numbers_are_matched_whole():
 def test_blanked_sentence_and_too_little_to_fill():
     assert sm.blanked(ANUNNAKI, "1903") == "Powered flight wasn't achieved until the Wright brothers' successful test in ____."
     assert sm.fill_blank("Washington", "George Washington.", "", lambda p: "Washington") == {"backed": False, "fill": ""}
+
+
+def test_invented_file_and_folder_names_are_doubted():
+    # 2026-11-24 DM: only the path was doubted; the file names beside it went by.
+    reply = ("At the top level of projects: /gaia/GAIA_Project/PROJECTS/. I'd populate it with "
+             "PROJECT_TRAJECTORY.md, THEME.md, and RESOURCES/ dir.")
+    assert sm.unbacked(reply, "") == ["/gaia/GAIA_Project/PROJECTS", "PROJECT_TRAJECTORY.md", "THEME.md", "RESOURCES"]
+    assert sm.unbacked("It's in gaia-core.log and knowledge/x/PLAN.md", "gaia-core.log knowledge/x/PLAN.md") == []
+    assert sm.unbacked("Split across GPU/CPU, by NASA/ESA, see example.com", "") == []
+    assert sm.states_something("I'd write THEME.md")
+    assert sm.fill_blank("THEME.md", "I'd write THEME.md there.", "", lambda p: "THEME.md") == {"backed": False, "fill": ""}

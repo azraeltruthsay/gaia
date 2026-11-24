@@ -502,6 +502,7 @@ def select_tool(
     temperature: float = 0.15,
     decide: bool = False,
     examples: str = "",
+    failed: str = "",
 ) -> Tuple[Optional[SelectedTool], List[SelectedTool]]:
     """
     Use low-temperature LLM generation to select the appropriate tool.
@@ -519,7 +520,9 @@ def select_tool(
     # When the user names a specific tool or action, bypass LLM selection.
     # This prevents hallucinated tool calls when the selection model is weak.
     lowered = user_input.lower()
-    shortcut = _deterministic_tool_match(lowered, user_input)
+    # A second try after a failed call goes to the model: the shortcut would
+    # pick the same call again.
+    shortcut = None if failed else _deterministic_tool_match(lowered, user_input)
     if shortcut:
         logger.info("Tool selector: deterministic match → %s", shortcut.tool_name)
         _ledger(packet, path="deterministic", parsed=True, tool=shortcut.tool_name,
@@ -537,6 +540,15 @@ def select_tool(
     # aidw.2: her own earlier questions that mean the same, with the call that
     # answered them (selector_examples.nearest, by embedding similarity).
     examples_block = f"\n{examples}" if examples else ""
+    # 2026-11-24: the first call failed on something a second choice can fix
+    # (a wrong action, a missing parameter, a name that isn't there: the
+    # error usually lists what is).
+    failed_block = (
+        f"\nYOUR FIRST CALL FAILED: {failed}\nChoose a call that will work: fix the action or the "
+        "parameters from the error, or pick the tool that holds what was asked. Don't repeat the failed "
+        "call. If no call can answer it, choose no tool.\n"
+        if failed else ""
+    )
     history_text = _recent_conversation(packet)
     history_block = (
         f"\nRECENT CONVERSATION (resolve \"it\"/\"that\"/\"this\" in the request against this):\n{history_text}\n"
@@ -566,7 +578,7 @@ IMPORTANT: Select a domain tool and specify the action. Examples:
   selected_tool="file", params='{{"action": "read", "path": "/foo"}}'
   selected_tool="issue", params='{{"action": "note", "id": "<id>", "text": "<what you found>"}}'
 If you need to discover available actions, use introspect with action="tools".
-{examples_block}{history_block}
+{examples_block}{history_block}{failed_block}
 USER REQUEST: {user_input}
 
 CONTEXT FROM PACKET:
@@ -944,3 +956,23 @@ def inject_tool_result_into_packet(packet: CognitionPacket) -> CognitionPacket:
     ))
 
     return packet
+
+
+# Failures a second choice can fix: the call was wrong (an action, a
+# parameter, a name), not the service. Drawn from the outcome ledger
+# (2026-11-24). Not retried: the service being down or erroring, approval
+# waiting on a person, a site off the allowlist, a missing key.
+_FIXABLE_ERROR_RE = re.compile(
+    r"unknown action|not a valid, implemented tool|is required|are required|parameter required|"
+    r"needs the parameter|needs text|must be one of|valid types|invalid \w+|not found|"
+    r"is not a (?:file|directory)|path not allowed|which document|give \w+=",
+    re.IGNORECASE)
+_UNFIXABLE_ERROR_RE = re.compile(
+    r"approval|allowlist|api_key|connectionpool|max retries|server error|timed? ?out|404 client error",
+    re.IGNORECASE)
+
+
+def fixable_tool_error(error: str) -> bool:
+    """Whether a failed call's error says the call itself was wrong."""
+    error = error or ""
+    return bool(_FIXABLE_ERROR_RE.search(error)) and not _UNFIXABLE_ERROR_RE.search(error)

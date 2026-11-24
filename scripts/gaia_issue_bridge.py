@@ -10,7 +10,9 @@ The beads database is host-only (embedded Dolt), so this runs on the host:
                               fixed: note + label gaia-fixed-unverified (a person or
                               the promote step closes it); wontfix: note
   - then every mapped bead's current status goes back into beads.json, so she can
-    see when an issue she filed was closed.
+    see when an issue she filed was closed;
+  - and the whole tracker is exported to tracker.jsonl (identity fields dropped),
+    which she reads with issue(beads) / issue(bead).
 
 Events are mirrored in order and the offset only advances past an event once
 `bd` accepted it, so a failure retries on the next run. The shared volume is
@@ -116,6 +118,42 @@ def refresh_status(mapping: dict, dry: bool) -> None:
             print(f"  status of {bead} unavailable: {e}")
 
 
+# 2026-11-24: she reads the whole tracker (issue_ledger.list_beads/get_bead).
+# Identity fields stay out of her volume; the rest is what `bd show` gives.
+TRACKER = "tracker.jsonl"
+_TRACKER_DROP = ("owner", "created_by", "assignee", "_type", "lease_expires_at", "heartbeat_at")
+
+
+def tracker_rows(export_text: str) -> list:
+    rows = []
+    for line in export_text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        for k in _TRACKER_DROP:
+            r.pop(k, None)
+        if r.get("dependencies"):
+            r["dependencies"] = [{"on": d.get("depends_on_id"), "type": d.get("type")}
+                                 for d in r["dependencies"] if isinstance(d, dict)]
+        if r.get("comments"):
+            r["comments"] = [{"at": c.get("created_at"), "text": c.get("text", "")}
+                             for c in r["comments"] if isinstance(c, dict)]
+        rows.append(r)
+    return rows
+
+
+def export_tracker(container: str, dry: bool) -> None:
+    if dry:
+        print("  [dry-run] bd export -> tracker.jsonl")
+        return
+    rows = tracker_rows(bd("export"))
+    write_shared(container, TRACKER, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    print(f"tracker: {len(rows)} beads exported")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--container", default="gaia-mcp")
@@ -144,6 +182,10 @@ def main() -> int:
         offset += 1
 
     refresh_status(mapping, args.dry_run)
+    try:
+        export_tracker(args.container, args.dry_run)
+    except (RuntimeError, subprocess.TimeoutExpired) as e:
+        print(f"  tracker export failed: {e}", file=sys.stderr)
     if not args.dry_run:
         write_shared(args.container, "beads.json", json.dumps(
             {"issues": mapping, "ledger_offset": offset, "synced_at": time.time()}, indent=1))

@@ -42,6 +42,7 @@ _READ_ACTIONS = frozenset({
     "navigate", "status", "recall", "read", "lookups", "work", "list", "info", "get",
     "search", "fetch", "tools", "logs", "turns", "world", "health", "adapter_list",
     "adapter_info", "list_tree", "list_dir", "find", "show", "overview", "query",
+    "beads", "bead",
 })
 
 
@@ -94,6 +95,9 @@ def _read_only(tool: str, params: dict) -> bool:
         if (tool, action) in SENSITIVE_ACTIONS:
             return False
     except Exception:
+        return False
+    # issue(status) with an id sets that issue's status; without one it lists.
+    if tool == "issue" and action == "status" and (params or {}).get("id"):
         return False
     return action in _READ_ACTIONS
 

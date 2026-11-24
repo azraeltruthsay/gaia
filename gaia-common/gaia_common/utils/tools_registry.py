@@ -813,6 +813,22 @@ TOOLS = {
             },
         }
     },
+    "issue_beads": {
+        "description": "List beads in the project tracker (every bead, not only yours): active by default, "
+                       "status 'all' includes closed; query keeps beads whose title or description has its words.",
+        "params": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "open, in_progress, blocked, closed, or all."},
+                "query": {"type": "string"},
+                "limit": {"type": "integer"},
+            },
+        }
+    },
+    "issue_bead": {
+        "description": "Show one bead from the project tracker in full, by id (e.g. b87r or GAIA_Project-b87r).",
+        "params": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+    },
     # --- Promotion & Blueprint Tools (candidate only) ---
     "generate_blueprint": {
         "description": "Generate a candidate blueprint YAML for a service from source code analysis. Extracts endpoints, dependencies, failure modes, and runtime config. Use this when a service needs a blueprint for the first time.",

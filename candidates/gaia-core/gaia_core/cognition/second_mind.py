@@ -28,6 +28,11 @@ _MAX_REPLY_CHARS = 4000
 # A capital not opening a sentence, line or list item, or a number.
 _CLAIM_RE = re.compile(r"(?<![.!?]\s)(?<!^)(?<!\n)(?<![-*:]\s)\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]+)*|\d[\d:.,]*\d|\d")
 _PATH_RE = re.compile(r"(?<![\w.:/])/(?:[\w.-]+/)+[\w.-]*")
+# A bare file or folder name is a claim too: "PROJECT_TRAJECTORY.md, THEME.md,
+# and RESOURCES/" were invented, and only the path beside them was doubted
+# (2026-11-24). Extensions of files, not of web addresses.
+_FILE_RE = re.compile(r"(?<![\w./-])(?:[\w.-]+/)*[\w-]+\.(?:md|py|jsonl?|ya?ml|txt|toml|sh|cfg|ini|gguf|safetensors|"
+                      r"js|ts|html|css|csv|log|lock)\b|(?<![\w./-])[A-Z][A-Z0-9_]{2,}/(?![\w/])")
 _LABEL_RE = re.compile(r"^\s*(?:\[[^\]\n]{1,80}\]\s*|\*\[[^\n]*\]\*\s*)+")
 _MARKUP_RE = re.compile(r"[*_`]+|^#{1,6}\s+", re.MULTILINE)
 _FAKE_RESULT_RE = re.compile(r"</?tool_(?:result|response)>", re.IGNORECASE)
@@ -57,7 +62,11 @@ def unbacked(reply: str, known: str) -> List[str]:
     # Before the markup strip: it drops "_", which made "…-12_8fddd…" read "128".
     body = _plain(_ID_RE.sub(" ", reply or ""))
     # A file path is a claim too ("what I read from /proc/driver/nvidia/gpu/0").
-    out = [p for p in dict.fromkeys(x.rstrip("/.") for x in _PATH_RE.findall(reply or "")) if p not in (known or "")]
+    out = [p for p in dict.fromkeys(x.rstrip("/.") for x in _PATH_RE.findall(reply or ""))
+           if p not in (known or "")]
+    for f in dict.fromkeys(x.rstrip("/") for x in _FILE_RE.findall(_PATH_RE.sub(" ", reply or ""))):
+        if f not in (known or "") and f not in out:
+            out.append(f)
     for claim in _CLAIM_RE.findall(body):
         # Also as a substring: "9950" is backed by "9950X3D", "Gemma" by "Gemma4";
         # and run together, as a site's name is in its address: "History Hit"
@@ -103,8 +112,8 @@ def keeps_to_text(reply: str, text: str, question: str, opinion: bool = False) -
 
 
 def states_something(reply: str) -> bool:
-    """Whether a reply holds any name or number at all."""
-    return bool(_CLAIM_RE.findall(_plain(reply)))
+    """Whether a reply holds any name, number, path or file name at all."""
+    return bool(_CLAIM_RE.findall(_plain(reply)) or _PATH_RE.search(reply or "") or _FILE_RE.search(reply or ""))
 
 
 def check(question: str, reply: str, known: str, generate: Callable[[str], str]) -> Optional[dict]:
@@ -174,7 +183,7 @@ def fill_blank(claim: str, reply: str, known: str, generate: Callable[[str], str
     """{'backed': its fill names the claim, 'fill': what it said}. A path, or a
     sentence that is nothing but the blank, stays doubted."""
     sentence = blanked(reply, claim)
-    if claim.startswith("/") or len(re.sub(r"_+", "", sentence).split()) < 3:
+    if claim.startswith("/") or _FILE_RE.fullmatch(claim) or _FILE_RE.fullmatch(claim + "/") or len(re.sub(r"_+", "", sentence).split()) < 3:
         return {"backed": False, "fill": ""}
     context = f"What is known: {known[:1500]}\n\n" if (known or "").strip() else ""
     asked = f"Asked: {question[:300]}\n\n" if (question or "").strip() else ""

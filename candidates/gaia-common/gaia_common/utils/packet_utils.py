@@ -24,6 +24,7 @@ SAFE_SIDECAR_TOOLS = {
     "introspect_logs", "introspect_turns",
     # a0aw.1: appends to her own issue ledger only
     "issue_file", "issue_note", "issue_status", "issue_list",
+    "issue_beads", "issue_bead",  # read-only: the exported bead tracker
 }
 
 
