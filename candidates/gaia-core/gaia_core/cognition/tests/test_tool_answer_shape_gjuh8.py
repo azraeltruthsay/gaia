@@ -28,6 +28,8 @@ def test_is_tool_answer_recognises_only_the_tool_answer_shape():
 def test_a_tool_answered_turn_deliberates_without_the_adapter(monkeypatch):
     # The adapter recited the routed file's opening 6/6 (bare Core 0/6).
     from gaia_core.cognition import deliberation
+    # Production sets it to 1, which swaps the adapter for core_thinking_v1.
+    monkeypatch.delenv("DELIBERATION_NATIVE_THINKING", raising=False)
     seen = {}
 
     def fake_deliberate(*a, **kw):

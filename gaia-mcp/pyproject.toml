@@ -38,6 +38,8 @@ packages = ["gaia_mcp"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# gaia-common is mounted inside /app in the container; it is linted on its own.
+extend-exclude = ["gaia-common"]
 
 [tool.ruff.lint]
 ignore = [
@@ -55,6 +57,9 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The gaia-common mount inside /app has its own tests (and conftest), which
+# clashed with these when the doctor ran `pytest /app` (2026-11-24).
+norecursedirs = [".*", "*.egg", "build", "dist", "node_modules", "venv", "__pycache__", "gaia-common", "knowledge"]
 asyncio_mode = "auto"
 filterwarnings = ["ignore::DeprecationWarning", "ignore::PendingDeprecationWarning"]
 

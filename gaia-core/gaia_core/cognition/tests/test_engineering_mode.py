@@ -36,6 +36,8 @@ def test_numbers_must_agree():
 
 def test_adapter_off_by_default_and_card_read(monkeypatch, tmp_path):
     monkeypatch.delenv("ENGINEERING_ADAPTER", raising=False)
+    # Not the live registry: production's /shared has one switched on.
+    monkeypatch.setenv("SHARED_DIR", str(tmp_path))
     assert em.adapter() == ""
     card = tmp_path / "role_card.md"
     card.write_text("# Role card\n\n> You are Andy's engineering intern.\n> You cite what you read.\n\nWhy...")

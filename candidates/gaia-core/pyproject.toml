@@ -74,7 +74,10 @@ ignore = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["gaia_core"]
+testpaths = ["gaia_core", "tests"]
+# scratch/ holds ad-hoc scripts that run at import; collected, one broke every
+# `pytest /app` run, which is the doctor's gate (2026-11-24).
+norecursedirs = [".*", "*.egg", "build", "dist", "node_modules", "venv", "__pycache__", "scratch", "MagicMock", "*.bak"]
 asyncio_mode = "auto"
 filterwarnings = ["ignore::DeprecationWarning", "ignore::PendingDeprecationWarning"]
 

@@ -339,8 +339,10 @@ class TestNotebookLMAddTextSource:
     @patch.object(nbt, "_get_client")
     async def test_adds_and_waits(self, mock_gc):
         mock_client = AsyncMock()
-        src = MagicMock(); src.id = "s-1"
-        ready = MagicMock(); ready.is_ready = True
+        src = MagicMock()
+        src.id = "s-1"
+        ready = MagicMock()
+        ready.is_ready = True
         mock_client.sources.add_text = AsyncMock(return_value=src)
         mock_client.sources.wait_until_ready = AsyncMock(return_value=ready)
         mock_gc.return_value = mock_client
@@ -360,11 +362,13 @@ class TestNotebookLMClientSetup:
 
     @pytest.mark.asyncio
     async def test_enters_the_storage_context(self, monkeypatch):
-        client = MagicMock(); client.is_connected = True
+        client = MagicMock()
+        client.is_connected = True
         ctx = MagicMock()
         ctx.__aenter__ = AsyncMock(return_value=client)
         ctx.__aexit__ = AsyncMock(return_value=None)
-        cls = MagicMock(); cls.from_storage = MagicMock(return_value=ctx)
+        cls = MagicMock()
+        cls.from_storage = MagicMock(return_value=ctx)
         monkeypatch.setattr(nbt, "NotebookLMClient", cls, raising=False)
         monkeypatch.setattr(nbt, "_notebooklm_available", True)
         assert await nbt._get_client() is client

@@ -43,7 +43,8 @@ def test_cache_reused_until_file_changes(store):
     n = e.calls
     X.nearest("operational wing rooms", e)
     assert e.calls == n + 1          # only the question is encoded again
-    import time; time.sleep(0.01)
+    import time
+    time.sleep(0.01)
     X.add("What's in your technical wing?", "palace(action=navigate, wing=technical)", "turn")
     X.nearest("operational wing rooms", e)
     assert e.calls == n + 3          # rows re-encoded once, plus the question

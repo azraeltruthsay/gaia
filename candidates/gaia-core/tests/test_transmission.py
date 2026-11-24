@@ -54,8 +54,10 @@ def test_spread_out_corrections_dont_shift(world):
 
 
 def test_back_down_after_five_clean_turns_and_the_dwell(world):
-    tx.note_turn("s1"); tx.note_correction("s1", "x")
-    tx.note_turn("s1"); assert tx.note_correction("s1", "x") == "up"
+    tx.note_turn("s1")
+    tx.note_correction("s1", "x")
+    tx.note_turn("s1")
+    assert tx.note_correction("s1", "x") == "up"
     for _ in range(6):
         world["clock"]["t"] += 30
         assert tx.note_turn("s1") is None           # clean, but within 10 minutes
@@ -65,8 +67,10 @@ def test_back_down_after_five_clean_turns_and_the_dwell(world):
 
 
 def test_a_correction_in_gear_two_resets_the_count(world):
-    tx.note_turn("s1"); tx.note_correction("s1", "x")
-    tx.note_turn("s1"); tx.note_correction("s1", "x")
+    tx.note_turn("s1")
+    tx.note_correction("s1", "x")
+    tx.note_turn("s1")
+    tx.note_correction("s1", "x")
     world["clock"]["t"] += tx.MIN_DWELL_S
     for _ in range(4):
         tx.note_turn("s1")
@@ -76,7 +80,8 @@ def test_a_correction_in_gear_two_resets_the_count(world):
 
 def test_leaves_a_hand_chosen_gear_alone(world):
     world["resting"].write_text(json.dumps({"state": "focusing"}))
-    tx.note_turn("s1"); tx.note_correction("s1", "x")
+    tx.note_turn("s1")
+    tx.note_correction("s1", "x")
     tx.note_turn("s1")
     assert tx.note_correction("s1", "x") is None
     assert world["shifts"] == []
@@ -88,8 +93,10 @@ def test_disabled(world, monkeypatch):
 
 
 def test_a_hand_shift_down_clears_the_record(world):
-    tx.note_turn("s1"); tx.note_correction("s1", "x")
-    tx.note_turn("s1"); assert tx.note_correction("s1", "x") == "up"
+    tx.note_turn("s1")
+    tx.note_correction("s1", "x")
+    tx.note_turn("s1")
+    assert tx.note_correction("s1", "x") == "up"
     world["gear"]["now"] = "awake"          # Azrael shifted back by hand
     world["clock"]["t"] += 1
     tx.note_turn("s1")
@@ -97,7 +104,8 @@ def test_a_hand_shift_down_clears_the_record(world):
     world["clock"]["t"] += 1
     tx.note_turn("s1")
     assert tx.note_correction("s1", "x") is None   # old strikes don't count
-    tx.note_turn("s1"); assert tx.note_correction("s1", "x") == "up"
+    tx.note_turn("s1")
+    assert tx.note_correction("s1", "x") == "up"
 
 
 def test_holding_a_disputed_answer_is_no_strike(world):
