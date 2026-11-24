@@ -69,6 +69,13 @@ class LifecycleMachine:
     VRAM_TENANT_GUARD_TTL = int(os.environ.get("VRAM_TENANT_GUARD_TTL", "14400"))
     VRAM_TENANT_CONTAINER = os.environ.get("VRAM_TENANT_CONTAINER", "gaia-prime-candidate")
     TENANT_GUARD_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "vram_tenant_guard.json"
+    # b1ak: what a gear shift really adds to the card, measured. The static
+    # estimate (awake 12800) is Core's own figure, but a parked GAIA already
+    # holds ~0.7-0.9 GB that waking frees or reuses, and the preflight counted
+    # it twice: as an outside tenant and inside the 12800. Parked -> awake added
+    # 12200 MB measured (2026-11-24) and was refused at 3.4 GB "external".
+    GEAR_DELTAS_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "orchestrator" / "gear_deltas.json"
+    GEAR_DELTAS_KEEP = 5
 
     # 85mb: registry of GPU-capable non-tier containers. Doctrine: exactly
     # ONE of Core/Prime/Core-Candidate/Prime-Candidate may hold GPU VRAM at
@@ -91,6 +98,8 @@ class LifecycleMachine:
     TENANT_POLICY_PATH = Path(os.environ.get("SHARED_DIR", "/shared")) / "doctor" / "tenant_policy.json"
 
     def __init__(self, state_manager=None):
+        self._last_used_mb: Optional[int] = None
+        self._settle_task = None
         self._state_manager = state_manager
         self._consciousness_matrix = None  # Wired via set_consciousness_matrix()
         self._lock = asyncio.Lock()
@@ -167,7 +176,71 @@ class LifecycleMachine:
         # counting that as an outside tenant refused every wake from park
         # (2026-11-11). A gear shift unloads it along with the tier.
         gaia = sum(t.vram_mb for t in self._snapshot.tiers.values())
+        self._last_used_mb = int(mem.used_mb)
         return max(0, mem.used_mb - gaia), mem.total_mb
+
+    async def _used_vram_mb(self) -> Optional[int]:
+        """Whole-card used VRAM (MB), or None without telemetry."""
+        if self._gpu_manager is None:
+            return None
+        try:
+            mem = await self._gpu_manager.get_memory_info()
+        except Exception:
+            return None
+        return None if mem is None else int(mem.used_mb)
+
+    def _read_gear_deltas(self) -> dict:
+        try:
+            if self.GEAR_DELTAS_PATH.exists():
+                data = json.loads(self.GEAR_DELTAS_PATH.read_text())
+                return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            pass
+        return {}
+
+    def _record_gear_delta(self, current: "LifecycleState", target: "LifecycleState", delta_mb: int) -> None:
+        """Keep the last few measured card changes for this shift."""
+        key = f"{current.value}->{target.value}"
+        data = self._read_gear_deltas()
+        data[key] = (list(data.get(key, [])) + [int(delta_mb)])[-self.GEAR_DELTAS_KEEP:]
+        try:
+            self.GEAR_DELTAS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            self.GEAR_DELTAS_PATH.write_text(json.dumps(data, indent=2))
+        except OSError:
+            logger.warning("Failed to write gear deltas", exc_info=True)
+
+    async def _record_settled_delta(self, current: "LifecycleState", target: "LifecycleState",
+                                    used_before: int, shifted_at=None) -> None:
+        """Record the shift's change in card use once it has settled (memory
+        drains, and KV grows, for up to a minute: hii8). Skipped if she has
+        moved on by then: the reading would belong to another shift."""
+        try:
+            await asyncio.sleep(self.VRAM_SETTLE_MAX_S)
+            if (LifecycleState(self._snapshot.state) != target
+                    or self._snapshot.last_transition_at != shifted_at):
+                return
+            used_after = await self._used_vram_mb()
+            if used_after is not None:
+                self._record_gear_delta(current, target, used_after - used_before)
+                logger.info("VRAM: %s -> %s changed the card by %+d MB (settled)",
+                            current.value, target.value, used_after - used_before)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("VRAM: settled delta not recorded", exc_info=True)
+
+    def _learned_need(self, current: "LifecycleState", target: "LifecycleState") -> Optional[int]:
+        """What this shift has added to the card, at most (MB): from shifts
+        current->target, or the reverse shift's release. None with fewer than
+        two readings,
+        or when nothing measured says it adds anything (a refusal from the
+        static estimate is then the safer answer)."""
+        data = self._read_gear_deltas()
+        seen = [int(d) for d in data.get(f"{current.value}->{target.value}", []) if int(d) > 0]
+        seen += [-int(d) for d in data.get(f"{target.value}->{current.value}", []) if int(d) < 0]
+        # One reading taken while something else freed memory would understate
+        # it; the largest of at least two can't be that one alone.
+        return max(seen) if len(seen) >= 2 else None
 
     def _write_tenant_guard(self, reason: str, hold: bool = False,
                             ttl_seconds: Optional[int] = None,
@@ -309,7 +382,8 @@ class LifecycleMachine:
                                name, reason, e)
         return any_ok
 
-    async def _settle_after_shift(self, need: int, external: int, total: int):
+    async def _settle_after_shift(self, need: int, external: int, total: int,
+                                  target: Optional["LifecycleState"] = None):
         """hii8: 25 s after a park, a wake was refused because the exiting GPU
         worker still held 4 GB, counted as an outside tenant; a minute later
         the card was at baseline. Shortly after a transition, wait while that
@@ -333,7 +407,8 @@ class LifecycleMachine:
             if e is None:
                 break
             external, total = e, t
-            if need <= total - external - self.VRAM_SAFETY_MARGIN_MB:
+            if need <= total - external - self.VRAM_SAFETY_MARGIN_MB or (
+                    target is not None and self._fits_as_measured(target, total)):
                 logger.info("VRAM preflight: settled after %.0f s — %d MB external, gear fits",
                             time.monotonic() - start, external)
                 break
@@ -342,6 +417,23 @@ class LifecycleMachine:
             elif time.monotonic() - last_drop >= self.VRAM_SETTLE_STALL_S:
                 break
         return external, total
+
+    def _fits_as_measured(self, target: "LifecycleState", total: int) -> bool:
+        """b1ak: the card's free memory covers what this shift has measurably
+        added before. Only ever below the static estimate: it corrects the
+        double count of GAIA's own residue, never loosens past the estimate."""
+        current = LifecycleState(self._snapshot.state)
+        learned = self._learned_need(current, target)
+        need = GEAR_INFO.get(target, {}).get("vram_estimate_mb", 0)
+        used = self._last_used_mb
+        if learned is None or used is None or learned >= need:
+            return False
+        free = total - used - self.VRAM_SAFETY_MARGIN_MB
+        if learned <= free:
+            logger.info("VRAM preflight: %s -> %s has added at most %d MB (measured); %d MB free "
+                        "past the margin — fits", current.value, target.value, learned, free)
+            return True
+        return False
 
     async def _vram_preflight(self, target: "LifecycleState") -> Optional[str]:
         """None when the target gear fits (negotiating the known tenant away
@@ -356,9 +448,11 @@ class LifecycleMachine:
         budget = total - external - self.VRAM_SAFETY_MARGIN_MB
         if need <= budget:
             return None
+        if self._fits_as_measured(target, total):
+            return None
 
-        external, total = await self._settle_after_shift(need, external, total)
-        if need <= total - external - self.VRAM_SAFETY_MARGIN_MB:
+        external, total = await self._settle_after_shift(need, external, total, target)
+        if need <= total - external - self.VRAM_SAFETY_MARGIN_MB or self._fits_as_measured(target, total):
             return None
 
         # Negotiate: stop every running GPU-holding registry tenant behind
@@ -387,7 +481,8 @@ class LifecycleMachine:
                 for _ in range(12):
                     await asyncio.sleep(5)
                     external, total = await self._external_vram_mb()
-                    if external is not None and need <= total - external - self.VRAM_SAFETY_MARGIN_MB:
+                    if external is not None and (need <= total - external - self.VRAM_SAFETY_MARGIN_MB
+                                                 or self._fits_as_measured(target, total)):
                         logger.info("VRAM negotiation: freed — %d MB external remains, gear fits",
                                     external)
                         return None
@@ -870,6 +965,9 @@ class LifecycleMachine:
 
         start = time.time()
         actions_taken = []
+        # b1ak: measured after the preflight, so a tenant it stopped isn't
+        # counted as this shift's saving.
+        used_before = await self._used_vram_mb()
 
         # Enter TRANSITIONING
         self._snapshot.state = LifecycleState.TRANSITIONING
@@ -998,6 +1096,11 @@ class LifecycleMachine:
             self._snapshot.history.append(record)
             if len(self._snapshot.history) > MAX_HISTORY:
                 self._snapshot.history = self._snapshot.history[-MAX_HISTORY:]
+
+            # b1ak: what this shift really did to the card, once settled.
+            if used_before is not None:
+                self._settle_task = asyncio.create_task(self._record_settled_delta(
+                    current, resolved_target, used_before, self._snapshot.last_transition_at))
 
             # Update VRAM
             vram = sum(t.vram_mb for t in self._snapshot.tiers.values())
