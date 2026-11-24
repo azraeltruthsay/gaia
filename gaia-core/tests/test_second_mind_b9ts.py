@@ -377,3 +377,44 @@ def test_invented_file_and_folder_names_are_doubted():
     assert sm.unbacked("Split across GPU/CPU, by NASA/ESA, see example.com", "") == []
     assert sm.states_something("I'd write THEME.md")
     assert sm.fill_blank("THEME.md", "I'd write THEME.md there.", "", lambda p: "THEME.md") == {"backed": False, "fill": ""}
+
+
+@pytest.fixture
+def her_tree(tmp_path, monkeypatch):
+    (tmp_path / "contracts" / "services").mkdir(parents=True)
+    (tmp_path / "contracts" / "services" / "gaia-core.yaml").write_text("x")
+    (tmp_path / "RESOURCES").mkdir()
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HIDDEN.md").write_text("x")
+    monkeypatch.setattr(sm, "_TREE_ROOTS", (str(tmp_path),))
+    monkeypatch.setattr(sm, "_tree", {"at": 0.0, "names": {}})
+    return tmp_path
+
+
+def test_real_paths_and_file_names_are_not_doubted(her_tree):
+    # om8n, 2026-11-24: she named the repo and gaia-core.yaml, both real, and
+    # the other mind said she didn't have them.
+    real = str(her_tree / "contracts")
+    assert sm.exists_here(real + "/") and sm.exists_here("gaia-core.yaml")
+    assert sm.exists_here("services/gaia-core.yaml") and sm.exists_here("RESOURCES")
+    assert not sm.exists_here("other/gaia-core.yaml")
+    assert not sm.exists_here("THEME.md") and not sm.exists_here(str(her_tree / "PROJECTS"))
+    assert not sm.exists_here("HIDDEN.md")  # skipped trees aren't hers to name
+    assert not sm.exists_here("Gemma")  # only paths and file names
+
+    def never(prompt):
+        raise AssertionError("nothing to check")
+    assert sm.check("Where is the project?", f"It lives in {real}/ with gaia-core.yaml.", "", never) is None
+    result = sm.check("Where is the project?", "It's in gaia-core.yaml and THEME.md.", "", lambda p: "unknown")
+    assert result["unbacked"] == ["THEME.md"]
+
+
+def test_unchecked_is_not_said_to_be_absent():
+    result = {"verdict": "unbacked", "unbacked": ["/gaia/GAIA_Project"]}
+    plain = "I can't back up what I just said about /gaia/GAIA_Project, so please check that."
+    said = "I don't actually have a /gaia/GAIA_Project directory."
+    assert sm.followup("It lives in /gaia/GAIA_Project.", "", result, lambda p: said) == plain
+    for denial in ("There is no /gaia/GAIA_Project here.", "/gaia/GAIA_Project doesn't exist."):
+        assert sm.followup("x", "", result, lambda p, d=denial: d) == plain
+    ok = "I didn't check /gaia/GAIA_Project this turn."
+    assert sm.followup("x", "", result, lambda p: ok) == ok

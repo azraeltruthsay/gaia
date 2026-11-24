@@ -104,3 +104,16 @@ def test_summary_says_how_many_are_shown(tmp_path):
 ])
 def test_tracker_questions(text, asks):
     assert ledger.asks_about_tracker(text) is asks
+
+
+def test_listing_her_files_is_a_read():
+    # om8n live test: the retry refused file(tree) as "would change something".
+    from gaia_core.cognition.finding_grounding import _read_only
+    assert _read_only("file", {"action": "tree", "path": "/gaia/GAIA_Project"})
+    assert _read_only("file", {"action": "find", "query": "api"})
+    assert not _read_only("file", {"action": "write", "path": "/sandbox/x"})
+
+
+def test_file_tool_says_where_her_code_is():
+    from gaia_common.utils.domain_tools import DOMAIN_TOOLS
+    assert "/gaia/GAIA_Project" in DOMAIN_TOOLS["file"]["description"]

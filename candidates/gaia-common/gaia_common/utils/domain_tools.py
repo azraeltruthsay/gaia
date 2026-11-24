@@ -35,7 +35,11 @@ DOMAIN_TOOLS: Dict[str, dict] = {
 
     # ── File Operations ────────────────────────────────────────────────
     "file": {
-        "description": "File operations — read, write, list, search",
+        # Where things are: she guessed /home/gaia/projects/gaia-core (om8n live test).
+        "description": ("File operations — read, write, list, search. Your code is the repo at "
+                        "/gaia/GAIA_Project (gaia-core/, gaia-common/, gaia-mcp/, candidates/, contracts/ for "
+                        "service APIs, knowledge/, scripts/); knowledge files in /knowledge; scratch in /sandbox. "
+                        "find searches file names (query) under root, the repo by default"),
         "actions": {
             "read": {
                 "params": {"path": "string"},

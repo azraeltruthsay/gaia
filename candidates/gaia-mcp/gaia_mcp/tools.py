@@ -540,6 +540,8 @@ def _ai_write_impl(params: dict, gaia_helper: GAIARescueHelper) -> dict:
             return {"ok": False, "error": f"Path blocked by security policy: {_resolved}"}
         if not any(_resolved.startswith(ap) for ap in _allowed_prefixes):
             return {"ok": False, "error": f"Path outside allowed directories: {_resolved}"}
+        if _secret_shaped(Path(_resolved)):
+            return {"ok": False, "error": f"{Path(_resolved).name} holds secrets and can't be written"}
 
         # [Sovereign Shield] Pre-compile check
         _validate_python_content(str(p), content)
@@ -600,6 +602,8 @@ def _checked_write_path(path) -> Path:
     real = p.resolve()
     if not any(str(real).startswith(str(a) + "/") or str(real) == str(a) for a in allow_roots):
         raise ValueError("Path not allowed after symlink resolution")
+    if _secret_shaped(p) or _secret_shaped(real):
+        raise ValueError(f"{p.name} holds secrets and can't be written")
     return real
 
 
@@ -664,6 +668,35 @@ def _write_file_impl(params: dict) -> dict:
     return {"ok": True, "path": str(real), "bytes": len(content)}
 
 
+# Where she may list and search, the same trees read_file may read: her code
+# is in the repo, and she couldn't find it (om8n live test, 2026-11-24: "which
+# file describes gaia-core's API?" searched /sandbox and found nothing).
+_REPO = "/gaia/GAIA_Project"
+_LIST_ROOTS = ("/knowledge", "/gaia-common", "/sandbox", _REPO)
+# Bulk that isn't hers to search: tool installs, venvs, backups, test leftovers.
+_LIST_SKIP = {".git", ".pytest_cache", "__pycache__", ".cache", ".venv", "node_modules", "venv_notebooklm",
+              "google-cloud-sdk", "instance", "MagicMock", ".mypy_cache", ".ruff_cache"}
+
+
+# The repo root holds .env, .env.discord and .env.gemini; read_file allowed
+# the whole repo, so they were readable (found 2026-11-24).
+_SECRET_NAME_RE = re.compile(r"^\.env(?:\..*)?$|\.(?:pem|key|p12|pfx)$|^id_(?:rsa|ed25519|ecdsa)"
+                             r"|^(?:secrets?|credentials?|tokens?|.*_api_key|.*_secret)(?:\.(?:json|ya?ml|txt|env|toml|ini))?$",
+                             re.IGNORECASE)
+
+
+def _secret_shaped(path: Path) -> bool:
+    return any(_SECRET_NAME_RE.search(part) for part in path.parts[1:])
+
+
+def _listable(path: Path) -> bool:
+    return any(str(path) == r or str(path).startswith(r + "/") for r in (str(Path(x).resolve()) for x in _LIST_ROOTS))
+
+
+def _skipped(name: str) -> bool:
+    return name.startswith(".") or name in _LIST_SKIP or name.endswith(".bak")
+
+
 def _list_dir_impl(params: dict):
     """List a directory (shallow, non-recursive)."""
     path = params.get("path") or "/knowledge"
@@ -683,14 +716,12 @@ def _list_files_impl(params: dict):
     max_entries = max(1, min(max_entries, 5000))
 
     root_path = Path(root).resolve()
-    allow_roots = [Path("/knowledge").resolve(), Path("/gaia-common").resolve(), Path("/sandbox").resolve()]
-    if not any(str(root_path).startswith(str(a)) for a in allow_roots):
-        raise ValueError("Path not allowed")
+    if not _listable(root_path):
+        raise ValueError(f"Path not allowed: {root_path}. Allowed: {', '.join(_LIST_ROOTS)}")
     if not root_path.exists() or not root_path.is_dir():
         raise ValueError(f"{root_path} is not a directory")
 
     results: List[str] = []
-    exclude_dirs = {".git", ".pytest_cache", "__pycache__", ".cache", ".venv", "node_modules", "archive"}
     def walk(path: Path, depth: int):
         if depth > max_depth or len(results) >= max_entries:
             return
@@ -702,7 +733,7 @@ def _list_files_impl(params: dict):
             if len(results) >= max_entries:
                 return
             try:
-                if entry.name.startswith(".") or entry.name in exclude_dirs:
+                if _skipped(entry.name) or entry.name == "archive":
                     continue
                 if entry.is_file():
                     results.append(str(entry.resolve()))
@@ -1599,9 +1630,8 @@ def _list_tree_impl(params: dict):
     max_entries = max(10, min(max_entries, 1000))
 
     root_path = Path(root).resolve()
-    allow_roots = [Path("/knowledge").resolve(), Path("/gaia-common").resolve(), Path("/sandbox").resolve()]
-    if not any(str(root_path).startswith(str(a)) for a in allow_roots):
-        raise ValueError("Path not allowed")
+    if not _listable(root_path):
+        raise ValueError(f"Path not allowed: {root_path}. Allowed: {', '.join(_LIST_ROOTS)}")
     if not root_path.exists() or not root_path.is_dir():
         raise ValueError(f"{root_path} is not a directory")
 
@@ -1625,7 +1655,7 @@ def _list_tree_impl(params: dict):
             if count >= max_entries:
                 return
             # Skip noisy/hidden folders and bulky archives
-            if entry.name.startswith(".") or entry.name in ("__pycache__", ".git", ".pytest_cache", "node_modules", "archive"):
+            if _skipped(entry.name) or entry.name == "archive":
                 continue
             name = entry.name + ("/" if entry.is_dir() else "")
             if not add_line(depth, name):
@@ -1645,14 +1675,10 @@ def _read_file_impl(params: dict):
     if not path:
         raise ValueError("path is required")
     p = Path(path).resolve()
-    allow_roots = [
-        Path("/knowledge").resolve(), 
-        Path("/gaia-common").resolve(), 
-        Path("/sandbox").resolve(),
-        Path("/gaia/GAIA_Project").resolve()
-    ]
-    if not any(str(p).startswith(str(a)) for a in allow_roots):
-        raise ValueError("Path not allowed")
+    if not _listable(p):
+        raise ValueError(f"Path not allowed: {p}. Allowed: {', '.join(_LIST_ROOTS)}")
+    if _secret_shaped(p):
+        raise ValueError(f"{p.name} holds secrets and isn't readable")
     if not p.is_file():
         raise ValueError(f"{p} is not a file")
     data = p.read_bytes()
@@ -1773,29 +1799,19 @@ def _find_files_impl(params: dict):
     query = (params.get("query") or "").strip()
     if not query:
         raise ValueError("query is required")
-    root = Path(params.get("root") or "/sandbox").resolve() # Default to sandbox for file operations
+    # "path" too: that's what she passes (om8n live test). Her repo by default.
+    root = Path(params.get("root") or params.get("path") or _REPO).resolve()
     max_depth = int(params.get("max_depth", 5))
     max_results = int(params.get("max_results", 50))
     max_depth = max(1, min(max_depth, 8))
     max_results = max(1, min(max_results, 200))
 
-    FIND_FILES_ALLOW_ROOTS = [
-        Path("/knowledge").resolve(),
-        Path("/gaia-common").resolve(),
-        Path("/sandbox").resolve(),
-    ]
-
-    if not any(str(root).startswith(str(a)) for a in FIND_FILES_ALLOW_ROOTS):
-        allowed_str = ", ".join(str(a) for a in FIND_FILES_ALLOW_ROOTS)
-        raise ValueError(
-            f"Root not allowed: '{root}'. "
-            f"find_files is restricted to: {allowed_str}"
-        )
+    if not _listable(root):
+        raise ValueError(f"Root not allowed: '{root}'. find_files is restricted to: {', '.join(_LIST_ROOTS)}")
     if not root.exists() or not root.is_dir():
         raise ValueError(f"{root} is not a directory")
 
     results: List[str] = []
-    exclude_dirs = {".git", ".pytest_cache", "__pycache__", ".cache", ".venv", "node_modules"}
     def walk(path: Path, depth: int):
         if depth > max_depth or len(results) >= max_results:
             return
@@ -1807,7 +1823,7 @@ def _find_files_impl(params: dict):
             if len(results) >= max_results:
                 return
             try:
-                if entry.name.startswith(".") or entry.name in exclude_dirs:
+                if _skipped(entry.name):
                     continue
                 if entry.is_file() and query.lower() in entry.name.lower():
                     results.append(str(entry.resolve()))
@@ -1816,7 +1832,13 @@ def _find_files_impl(params: dict):
             except Exception:
                 continue
     walk(root, 0)
-    return {"ok": True, "query": query, "root": str(root), "max_depth": max_depth, "results": results, "truncated": len(results) >= max_results}
+    out = {"ok": True, "query": query, "root": str(root), "max_depth": max_depth, "results": results,
+           "truncated": len(results) >= max_results}
+    if not results:
+        # Say where it looked: "no matches" read as "I don't have those files".
+        out["note"] = (f"No file names containing '{query}' under {root} (to depth {max_depth}). "
+                       f"Other places to search: {', '.join(r for r in _LIST_ROOTS if r != str(root))}.")
+    return out
 
 
 def _find_relevant_documents(params: dict):
@@ -2521,6 +2543,8 @@ def _replace_impl(params: dict) -> dict:
     ]
     if not any(str(p).startswith(str(a) + "/") or str(p) == str(a) for a in allow_roots):
         raise ValueError("Path not allowed for replace")
+    if _secret_shaped(p):
+        raise ValueError(f"{p.name} holds secrets and can't be changed")
 
     if not p.is_file():
         raise ValueError(f"{path} is not a file")

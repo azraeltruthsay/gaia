@@ -77,6 +77,56 @@ def unbacked(reply: str, known: str) -> List[str]:
     return out
 
 
+# om8n: a path or file name she didn't look up this turn may still be real:
+# "/gaia/GAIA_Project/" and "gaia-core.yaml" were, and the other mind said "I
+# don't actually have a /gaia/GAIA_Project directory" (2026-11-24). What exists
+# where she lives isn't doubted. The trees she can see from here, names only.
+_TREE_ROOTS = tuple(r for r in os.environ.get(
+    "SECOND_MIND_TREES", "/gaia/GAIA_Project:/knowledge:/app").split(":") if r)
+_TREE_SKIP = {".git", ".venv", "venv", "venv_notebooklm", "node_modules", "__pycache__", ".mypy_cache",
+              ".pytest_cache", ".ruff_cache", "google-cloud-sdk", "instance", "session_vectors", "site-packages",
+              "MagicMock", "seeds"}  # MagicMock: test leftovers (filed); seeds: thought-seed backlog
+_TREE_MAX = 200_000
+_TREE_TTL_S = 600
+_tree = {"at": 0.0, "names": {}}
+_tree_lock = threading.Lock()
+
+
+def _tree_names() -> dict:
+    """{file or folder name: [its paths]} for the trees she can see, cached."""
+    with _tree_lock:
+        if time.time() - _tree["at"] < _TREE_TTL_S:
+            return _tree["names"]
+        names: dict = {}
+        count = 0
+        for root in _TREE_ROOTS:
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if d not in _TREE_SKIP and not d.endswith(".bak")]
+                for n in dirnames + filenames:
+                    names.setdefault(n, []).append(f"{dirpath}/{n}")
+                count += len(dirnames) + len(filenames)
+                if count > _TREE_MAX:
+                    break
+        _tree.update(at=time.time(), names=names)
+        return names
+
+
+def exists_here(claim: str) -> bool:
+    """A path or file name that is real where she lives: an absolute path that
+    exists, or a name (with any folders before it) found in her trees."""
+    c = (claim or "").strip().rstrip("/.")
+    if not c or not (c.startswith("/") or _FILE_RE.fullmatch(c) or _FILE_RE.fullmatch(c + "/")):
+        return False
+    try:
+        if c.startswith("/"):
+            return os.path.exists(c)
+        tail = "/" + c.lstrip("./")
+        return any(p.endswith(tail) for p in _tree_names().get(c.rsplit("/", 1)[-1], ()))
+    except Exception:
+        logger.debug("Second mind: existence check failed for %s", c, exc_info=True)
+        return False
+
+
 def _loops(reply: str) -> bool:
     """The same sentence three times or more: Core on the CPU can fall into this."""
     seen = Counter(s.strip().lower() for s in re.split(r"[.!?]+\s+", reply or "") if len(s.split()) >= 3)
@@ -123,7 +173,7 @@ def check(question: str, reply: str, known: str, generate: Callable[[str], str])
     if _FAKE_RESULT_RE.search(reply):
         return {"verdict": "fake_tool_result", "unbacked": []}
     base = f"{question}\n{known}"
-    claims = unbacked(reply, base)
+    claims = [c for c in unbacked(reply, base) if not exists_here(c)]
     if not claims:
         return None
     context = f"What is known: {known}\n" if known.strip() else ""
@@ -132,7 +182,7 @@ def check(question: str, reply: str, known: str, generate: Callable[[str], str])
         # x9sw: no answer of its own, so nothing to compare: it can't tell a
         # good reply from a bad one, and doubting everything says nothing.
         return {"verdict": "no_answer", "unbacked": claims}
-    remaining = unbacked(reply, f"{base}\n{own}")
+    remaining = [c for c in unbacked(reply, f"{base}\n{own}") if not exists_here(c)]
     if not remaining:
         return None
     filled = {}
@@ -220,6 +270,11 @@ def is_necessary(question: str, result: Optional[dict], ran_tool: bool, had_sour
     return "?" in (question or "") and len(result["unbacked"]) <= _MAX_CLAIMS_FOR_DOUBT
 
 
+_DENIES_RE = re.compile(r"\b(?:do(?:n't|n’t| not)|does(?:n't|n’t| not)|did(?:n't|n’t| not))\s+(?:actually\s+|really\s+)?"
+                        r"(?:have|exist|contain|hold)\b|\bno such\b|\bthere (?:is|are) no\b|\bnon-?existent\b"
+                        r"|\b(?:isn't|isn’t|is not|aren't|aren’t|are not) (?:real|there)\b", re.IGNORECASE)
+
+
 def _plain_followup(result: dict) -> str:
     if result["verdict"] == "fake_tool_result":
         return "That tool result wasn't real: no tool ran, so please don't rely on it."
@@ -235,10 +290,14 @@ def followup(reply: str, known: str, result: dict, generate: Callable[[str], str
     context = f"What is known: {known[:1500]}\n" if known.strip() else ""
     said = generate(
         f"{context}You are the part of GAIA that was listening. She just said: {reply[:600]}\n"
-        f"Nothing you have can back up: {doubts}.\n"
-        "Write one short sentence to the person, in the first person, saying which part you can't back up.")
+        f"Nothing looked up this turn backs up: {doubts}. That doesn't make it false.\n"
+        "Write one short sentence to the person, in the first person, saying which part wasn't checked.")
     first = re.split(r"(?<=[.!?])\s|\n", (said or "").strip(), maxsplit=1)[0].strip()
     named = any(_words(d) & _words(first) for d in result["unbacked"][:3])
+    if _DENIES_RE.search(first):
+        # Unchecked isn't absent: "I don't actually have a /gaia/GAIA_Project
+        # directory" was said of a real one (om8n).
+        return plain
     return first if named and 0 < len(first) <= _MAX_SENTENCE_CHARS and first[0] not in '<{["*' else plain
 
 

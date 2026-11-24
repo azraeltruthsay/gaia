@@ -42,7 +42,7 @@ _READ_ACTIONS = frozenset({
     "navigate", "status", "recall", "read", "lookups", "work", "list", "info", "get",
     "search", "fetch", "tools", "logs", "turns", "world", "health", "adapter_list",
     "adapter_info", "list_tree", "list_dir", "find", "show", "overview", "query",
-    "beads", "bead",
+    "beads", "bead", "tree",
 })
 
 
