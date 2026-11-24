@@ -105,6 +105,7 @@ class LifecycleMachine:
         self._tenant_user_hold = False
         # Per-container (ts, running) cache — dashboard polls every 5s.
         self._container_state_cache: dict = {}
+        self._aliased_logged: set = set()  # tiers whose alias was logged once
 
         # Tier engine endpoints (Docker network)
         self._tier_endpoints = {
@@ -1086,17 +1087,27 @@ class LifecycleMachine:
         ``_tier_endpoints`` determines the primary (first wins).
         """
         seen: Dict[tuple, str] = {}
-        for tier_name in self._tier_endpoints.keys():
+        by_endpoint: Dict[str, str] = {}
+        for tier_name, endpoint in self._tier_endpoints.items():
             status = self._snapshot.tiers.get(tier_name)
+            # Same address = same engine, whatever the two probes read. Keyed
+            # on (path, vram) alone, Core's VRAM moving a few MB between the
+            # two probes made nano a second GPU holder (95 false invariant
+            # violations 11-16..11-24, VRAM counted twice).
+            primary = by_endpoint.setdefault(endpoint.rstrip("/"), tier_name)
+            if primary == tier_name:
+                primary = None
             if status is None or not status.model_loaded or not status.model_path:
                 continue
-            key = (status.model_path, status.vram_mb)
-            if key in seen:
+            key = (status.model_path, status.device)
+            if primary is None and key in seen:
                 primary = seen[key]
-                logger.info(
+            if primary is not None:
+                (logger.info if tier_name not in self._aliased_logged else logger.debug)(
                     "LIFECYCLE: %s endpoint aliased to %s (same model=%s, vram=%dMB) — zeroing duplicate",
                     tier_name, primary, status.model_path, status.vram_mb,
                 )
+                self._aliased_logged.add(tier_name)
                 self._snapshot.tiers[tier_name] = TierLiveStatus(
                     device="unloaded",
                     model_loaded=False,
