@@ -17,7 +17,11 @@ logger = logging.getLogger("GAIA.Web.Translate")
 TRANSLATE_ENDPOINT = os.getenv("TRANSLATE_ENDPOINT", "http://gaia-translate:5000")
 _DETECT_TIMEOUT = 5.0
 _TRANSLATE_TIMEOUT = 15.0
-_MIN_CONFIDENCE = 0.65
+# Detection confidence, 0-1. LibreTranslate reports 0-100; compared raw
+# against 0.65 any non-English guess passed, so English DMs went out as
+# "French" at 57 ("beads" came back "beats", 2026-11-24). Measured: real
+# French/German/Spanish detect at 86-100, the false guesses at 57.
+_MIN_CONFIDENCE = 0.8
 
 # Unicode ranges for script-based language hinting when LibreTranslate detection fails
 _SCRIPT_HINTS = {
@@ -53,7 +57,8 @@ async def detect_language(text: str) -> tuple[str, float] | None:
         results = resp.json()
         if results and len(results) > 0:
             top = results[0]
-            return (top["language"], top["confidence"])
+            conf = float(top.get("confidence") or 0.0)
+            return (top["language"], conf / 100.0 if conf > 1.0 else conf)
     except Exception as exc:
         logger.warning("Language detection failed: %s", exc)
     return None
