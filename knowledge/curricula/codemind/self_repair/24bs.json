@@ -1,0 +1,61 @@
+{
+ "id": "24bs",
+ "her_issue": "gi-2fbe7e",
+ "bead": "GAIA_Project-24bs",
+ "date": "2026-11-25",
+ "why": "Second self-repair trial. Her attempts: investigations in /shared/issues/investigations.jsonl (gi-2fbe7e), CodeMind cycles cm-20261125-201155 (80% rewrite, lost before attempts were kept on rejection) and cm-20261125-201247 in /shared/codemind/attempts. Beads d55q, n0by, bqzt, xjvg.",
+ "issue": {
+  "title": "My other mind doubts words that are not claims",
+  "symptom": "After a right answer, my other mind adds \"I can't back up what I just said about X\" where X is not a claim about the world: a word from my own citation's address (\"Highwayengineering\" from https://en.wikipedia.org/wiki/Highway_engineering), the label of my citation (\"Source\" from \"(Source: web_search)\"), a day I worked out from the question (\"Thursday\" for \"If yesterday was two days before Friday, what day is tomorrow?\"), and my own favourite poem when asked for my favourite (\"Road Not Taken\"). 30 of 288 answers in the 2026-11-25 range battery got such a follow-up, 19 of them on answers that were right.",
+  "evidence": [
+   "{\"question\": \"Why is concrete reinforced with steel rebar?\", \"unbacked\": [\"Highwayengineering\"], \"followup\": \"I can't back up what I just said about Highwayengineering, so please check that.\"}",
+   "{\"question\": \"What is the electric charge of a neutron?\", \"unbacked\": [\"Source\"], \"followup\": \"I can't back up what I just said about Source, so please check that.\"}",
+   "{\"question\": \"If yesterday was two days before Friday, what day is tomorrow?\", \"unbacked\": [\"Thursday\"], \"followup\": \"I can't back up what I just said about Thursday, so please check that.\"}",
+   "{\"question\": \"What is your favourite poem, and why?\", \"unbacked\": [\"Road Not Taken\", \"Robert Frost\"], \"followup\": \"I can't back up what I just said about Road Not Taken, Robert Frost, so please check that.\"}"
+  ],
+  "suspected_cause": "The part that picks out what in my reply needs backing takes capitalised words and run-together words from addresses as claims, without telling apart a citation, a word the question already implies, or my own opinion."
+ },
+ "investigation": {
+  "format": "issue_investigation actions: SEARCH / READ / PLACE + NOTE",
+  "gold_steps": [
+   {
+    "action": "SEARCH: can't back up what I just said",
+    "why": "every evidence line has the follow-up's fixed wording; search that, not the doubted words (they're data)"
+   },
+   {
+    "action": "READ: _plain_followup",
+    "why": "the hit builds the follow-up from result['unbacked']; find what fills that list"
+   },
+   {
+    "action": "READ: unbacked",
+    "why": "check() takes its doubts from unbacked(reply, known)"
+   },
+   {
+    "action": "PLACE: unbacked",
+    "note": "unbacked() takes every capitalised word and number in the reply that the sources don't hold, including my citation's URL (its '_' stripped to 'Highwayengineering') and label ('Source'), numbers and days worked out from the question, and formula symbols; check() also doubts my own picks."
+   }
+  ],
+  "her_mistakes": [
+   "searched the doubted words (Highwayengineering, Thursday, Road Not Taken) and her own suspected-cause sentence, then 'picks' and 'what'",
+   "tried to READ files that don't exist (claim_detection.py, citation_handler.py, calendar.py, memory.py) and named claim_detection.py",
+   "followed a poem-title match into intent detection and named agent_core.py"
+  ]
+ },
+ "regression_test": {
+  "format": "pytest module, must fail on the original",
+  "gold": "from gaia_core.cognition import second_mind as sm\n\n\ndef _no_generation(_):\n    raise AssertionError(\"nothing to doubt\")\n\n\ndef test_citation_address_and_label_are_not_claims():\n    q = \"Why is concrete reinforced with steel rebar?\"\n    reply = (\"[Prime]\\n\\nTo control cracking under heavy loads.\\n\\n*(From my study notes: Highway engineering \"\n             \"(part 6 of 7), https://en.wikipedia.org/wiki/Highway_engineering)*\")\n    assert sm.check(q, reply, \"\", _no_generation) is None\n\n\ndef test_a_day_worked_out_from_the_question_is_not_a_claim():\n    q = \"If yesterday was two days before Friday, what day is tomorrow?\"\n    reply = \"[Core]\\n\\nYesterday was Wednesday. Therefore, today is Thursday, which means tomorrow is Friday.\"\n    assert sm.check(q, reply, \"\", _no_generation) is None\n",
+  "her_mistakes": [
+   "try 1: patch rejected (80% rewrite) before any test was written",
+   "try 2: the test came back wrapped in a markdown fence and was discarded (bqzt), so nothing tested the bug"
+  ]
+ },
+ "patch": {
+  "format": "unified diff of the candidate file",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/second_mind.py b/candidates/gaia-core/gaia_core/cognition/second_mind.py\nindex 025d9b5..43a9c30 100644\n--- a/candidates/gaia-core/gaia_core/cognition/second_mind.py\n+++ b/candidates/gaia-core/gaia_core/cognition/second_mind.py\n@@ -55,10 +55,39 @@ def _plain(reply: str) -> str:\n _ID_RE = re.compile(r\"\\S*_\\S*\\d\\S*|\\S*\\d\\S*_\\S*|\\b(?=[A-Za-z0-9]*\\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{8,}\\b\")\n \n \n-def unbacked(reply: str, known: str) -> List[str]:\n-    \"\"\"Names and numbers in a reply that `known` doesn't hold.\"\"\"\n+# 24bs: what isn't a claim about the world (2026-11-25 range battery: 30 of 288\n+# replies got a doubt, 19 of them right answers). Her citation's address\n+# (\"Highwayengineering\", from …/wiki/Highway_engineering once \"_\" is stripped as\n+# markup) and its label (\"Source\" in \"(Source: web_search)\") are where she read\n+# it, not what she says.\n+_URL_RE = re.compile(r\"https?://\\S+|\\bwww\\.\\S+\")\n+_CITATION_RE = re.compile(r\"\\((?:sources?|via|from my [^:()\\n]{0,40}):[^()\\n]*(?:\\([^()\\n]*\\)[^()\\n]*)*\\)\"\n+                          r\"|\\b(?:Sources?|Note|According to|Citation)\\b:?\", re.IGNORECASE)\n+# Worked out from what the question gives: \"Thursday\" for \"yesterday was two\n+# days before Friday\", \"100\" for the bat and ball's $1.10 and $1.00.\n+_DAY_OR_MONTH_RE = re.compile(r\"^(?:mon|tues|wednes|thurs|fri|satur|sun)day$|^(?:january|february|march|april|\"\n+                              r\"may|june|july|august|september|october|november|december)$\", re.IGNORECASE)\n+_NUMBER_RE = re.compile(r\"^[\\d:.,]+$\")\n+\n+\n+def _worked_out(claim: str, question: str) -> bool:\n+    \"\"\"A number or day the reply derived from the question's own numbers or days.\"\"\"\n+    q = question or \"\"\n+    if _NUMBER_RE.match(claim):\n+        return bool(re.search(r\"\\d\", q))\n+    return bool(_DAY_OR_MONTH_RE.match(claim)) and any(_DAY_OR_MONTH_RE.match(w) for w in re.findall(r\"[A-Za-z]+\", q))\n+\n+\n+def unbacked(reply: str, known: str, question: str = \"\") -> List[str]:\n+    \"\"\"Names and numbers in a reply that `known` doesn't hold. With the\n+    question, a number or day it lets her work out isn't one.\"\"\"\n     words = {w.rstrip(\"s\") for w in _words(known)}\n     lowered = (known or \"\").lower()\n+    reply = _CITATION_RE.sub(\" \", _URL_RE.sub(\" \", reply or \"\"))\n+    # A formula's symbols aren't names: \"Wavelength = Speed / Frequency\", \"R_total\"\n+    # (its numbers still count).\n+    symbols = {w for ln in reply.splitlines() if \"=\" in ln\n+               for w in re.findall(r\"[A-Za-z]+\", _MARKUP_RE.sub(\"\", ln))}\n     # Before the markup strip: it drops \"_\", which made \"…-12_8fddd…\" read \"128\".\n     body = _plain(_ID_RE.sub(\" \", reply or \"\"))\n     # A file path is a claim too (\"what I read from /proc/driver/nvidia/gpu/0\").\n@@ -72,7 +101,8 @@ def unbacked(reply: str, known: str) -> List[str]:\n         # and run together, as a site's name is in its address: \"History Hit\"\n         # by historyhit.com (2026-11-23).\n         if (not {w.rstrip(\"s\") for w in _words(claim)} <= words and claim.lower() not in lowered\n-                and re.sub(r\"\\W+\", \"\", claim.lower()) not in lowered and claim not in out):\n+                and re.sub(r\"\\W+\", \"\", claim.lower()) not in lowered and claim not in out\n+                and not _worked_out(claim, question) and claim not in symbols):\n             out.append(claim)\n     return out\n \n@@ -192,6 +222,22 @@ def ai_pages_as_research(reply: str, known: str) -> List[str]:\n     return sorted(found)\n \n \n+# 24bs: asked for her own pick or for something made up, what she names is her\n+# choice: her favourite poem (\"Road Not Taken\") and the philosopher she'd ask\n+# (\"Martin Heidegger\") were doubted, and so was \"West\" in her limerick.\n+_HER_CHOICE_RE = re.compile(\n+    r\"\\byour\\s+(?:own\\s+)?(?:favou?rite|preferred|top|best-loved)\\b|\\bif you could\\b\"\n+    r\"|\\bwould you (?:choose|pick|ask|want|rather|like)\\b|\\bwhich (?:one )?would you\\b\"\n+    r\"|\\bwhat do you (?:think|feel|like|prefer|enjoy)\\b|\\bdo you (?:like|prefer|enjoy)\\b\"\n+    r\"|\\b(?:write|compose|make up|invent)\\b[^.?!]{0,40}\\b(?:poem|haiku|limerick|sonnet|verse|story|joke|song|lines?)\\b\"\n+    r\"|\\btell me a (?:joke|story)\\b\", re.IGNORECASE)\n+\n+\n+def asks_her_choice(question: str) -> bool:\n+    \"\"\"The question asks for her own pick, opinion or something made up.\"\"\"\n+    return bool(_HER_CHOICE_RE.search(question or \"\"))\n+\n+\n def check(question: str, reply: str, known: str, generate: Callable[[str], str]) -> Optional[dict]:\n     \"\"\"What the other mind makes of a reply; None if nothing needs asking.\n     A reply with no names or numbers beyond what is known costs no generation.\"\"\"\n@@ -201,8 +247,10 @@ def check(question: str, reply: str, known: str, generate: Callable[[str], str])\n     ai_pages = ai_pages_as_research(reply, known)\n     if ai_pages:\n         return {\"verdict\": \"ai_page_as_research\", \"unbacked\": [], \"sites\": ai_pages}\n+    if asks_her_choice(question):\n+        return None\n     base = f\"{question}\\n{known}\"\n-    claims = [c for c in unbacked(reply, base) if not exists_here(c)]\n+    claims = [c for c in unbacked(reply, base, question) if not exists_here(c)]\n     if not claims:\n         return None\n     context = f\"What is known: {known}\\n\" if known.strip() else \"\"\n@@ -211,7 +259,7 @@ def check(question: str, reply: str, known: str, generate: Callable[[str], str])\n         # x9sw: no answer of its own, so nothing to compare: it can't tell a\n         # good reply from a bad one, and doubting everything says nothing.\n         return {\"verdict\": \"no_answer\", \"unbacked\": claims}\n-    remaining = [c for c in unbacked(reply, f\"{base}\\n{own}\") if not exists_here(c)]\n+    remaining = [c for c in unbacked(reply, f\"{base}\\n{own}\", question) if not exists_here(c)]\n     if not remaining:\n         return None\n     filled = {}\n",
+  "her_mistakes": [
+   "an 80% rewrite of the file (rejected by diff safety)",
+   "strip '____' from the reply: unrelated to the issue; passed 85 module tests because it changes nothing they check, and was proposed for promotion anyway (n0by)"
+  ]
+ },
+ "verified": "live through /process_packet: the 12 battery questions with false doubts, twice: 24/24 ok; control: Kyoto/Edo/1871 and a cited wrong year still doubted"
+}
