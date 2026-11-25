@@ -241,3 +241,6 @@ PROJECT.md
 # Ad-hoc debug scratch dirs (throwaway repro scripts)
 scratch/
 .beads.gate.lock
+
+# Eval worktrees (scripts/self_repair_eval.py)
+.worktrees/

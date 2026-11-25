@@ -1,0 +1,55 @@
+{
+ "why": "Held out of CodeMind adapter training (wcxz.2/.3): scored by scripts/self_repair_eval.py. Training must exclude these history files, c2kz.json and 24bs.json.",
+ "bugs": [
+  {
+   "id": "c2kz",
+   "history": "fa85b98ba2_c2kz.json",
+   "issue_from": "c2kz.json"
+  },
+  {
+   "id": "24bs",
+   "history": "8755d64b87_24bs.json",
+   "issue_from": "24bs.json"
+  },
+  {
+   "id": "8xr4.16",
+   "history": "a6c835bb6d_8xr4.16.json"
+  },
+  {
+   "id": "76hb",
+   "history": "8109dc22d6_76hb.json"
+  },
+  {
+   "id": "74t8",
+   "history": "a65cd963f6_74t8.json"
+  },
+  {
+   "id": "5jdw",
+   "history": "5407bc6e66_5jdw.json"
+  },
+  {
+   "id": "0kv2",
+   "history": "14651673b0_0kv2.json"
+  },
+  {
+   "id": "n828",
+   "history": "d0f2ee90f5_n828.json"
+  },
+  {
+   "id": "dpi5",
+   "history": "f98f34fae9_dpi5.json"
+  },
+  {
+   "id": "trm0",
+   "history": "d235e06490_trm0.json"
+  },
+  {
+   "id": "ow0t",
+   "history": "0499706df4_ow0t.json"
+  },
+  {
+   "id": "mlx8",
+   "history": "d09843408f_mlx8.json"
+  }
+ ]
+}

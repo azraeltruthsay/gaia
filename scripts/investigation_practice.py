@@ -179,6 +179,7 @@ def one(call, decoys, rng, L, I, C, view) -> Optional[dict]:
     if result.get("place") != func or not record.get("messages"):
         return None
     return {"messages": record["messages"],
+            "issue": {k: issue[k] for k in ("title", "symptom", "evidence")},
             "meta": {"file": rel, "function": func, "line": line, "lead": lead, "recovers": bool(actions[0] != f"SEARCH: {lead}"),
                      "decoys": len(decoys), "split": split_of(rel)}}
 
