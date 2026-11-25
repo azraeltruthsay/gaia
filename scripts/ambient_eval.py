@@ -6,7 +6,7 @@ not kept in git (people's own chat)."""
 import json, sys, time, tempfile, urllib.request, re, collections
 from pathlib import Path
 from gaia_core.cognition import ambient_interject as A
-cases = json.load(open("sys.argv[2] if len(sys.argv) > 2 else "/gaia/GAIA_Project/knowledge/evals/ambient_channel/written_cases.json""))
+cases = json.load(open(sys.argv[2] if len(sys.argv) > 2 else "/gaia/GAIA_Project/knowledge/evals/ambient_channel/written_cases.json"))
 def prime(messages):
     b = json.dumps({"messages": messages, "max_tokens": 5, "temperature": 0.1}).encode()
     o = json.loads(urllib.request.urlopen(urllib.request.Request("http://gaia-prime:7777/v1/chat/completions", b,
