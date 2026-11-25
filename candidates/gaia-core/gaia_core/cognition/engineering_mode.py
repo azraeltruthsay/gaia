@@ -90,13 +90,54 @@ def _stems(t: str) -> set:
     return {w[:5] for w in _WORD.findall((t or "").lower())}
 
 
-def agree(a: str, b: str) -> bool:
-    """Two answers given independently agree: most of the first's content words
-    are in the second, and every number in the first is."""
-    sa = _stems(a)
-    if not sa:
-        return False
-    return len(sa & _stems(b)) / len(sa) >= 0.45 and set(_NUM.findall(a)) <= set(_NUM.findall(b))
+_KEY_WORD = re.compile(r"[a-z][a-z'-]{2,}")
+_URL = re.compile(r"https?://\S+|\bwww\.\S+")
+_FILLER = frozenset("""the and for that with this from are was were which its has have had been also
+into than then one can not but their they there about more most such what who whom whose why how
+when where you your our his her she him it's is a an of to in on at by as or be do does did so if
+all any some very just only well called known named answer yes because since due thus therefore
+here sure""".split())
+
+
+def _key_terms(text: str, question: str = "") -> List[str]:
+    """The words that answer, in order: stems of 3+ letters, without filler or
+    the question's own words ("The SI unit of power is the watt" -> [watt])."""
+    asked = {w[:5] for w in _KEY_WORD.findall((question or "").lower())}
+    terms = (w[:5] for w in _KEY_WORD.findall(_URL.sub(" ", text or "").lower()) if w not in _FILLER)
+    return list(dict.fromkeys(t for t in terms if t not in asked and t not in _FILLER))
+
+
+SHORT_ANSWER_TERMS = 6   # up to this many answering words, the answer itself comes first
+
+
+def agree(a: str, b: str, question: str = "") -> bool:
+    """Two answers given independently agree: their numbers don't conflict;
+    for a short answer its first answering word is in the other and most of
+    its words are; for an explanation, enough of them are.
+
+    c2kz (2026-11-25 range battery): measured against her own, longer answer,
+    "The SI unit of power is the watt (W)." vs "The watt (W)." shared 1 of 3
+    words and was a disagreement; "The Sun." had no word of 4 letters, and
+    "-273.15 C." none at all, so both were too. 5 of 8 right answers given by
+    both minds came out "not sure". The question's own words are left out
+    (they make "Sydney" and "Canberra" look alike), and the answer itself
+    comes first: "Jupiter" and "Saturn" share "solar system" but not that."""
+    na, nb = set(_NUM.findall(_URL.sub(" ", a or ""))), set(_NUM.findall(_URL.sub(" ", b or "")))
+    small, big = (na, nb) if len(na) <= len(nb) else (nb, na)
+    if small and not small <= big:
+        return False   # both give numbers, and they differ
+    ka, kb = _key_terms(a, question), _key_terms(b, question)
+    if not ka or not kb:
+        return bool(na and nb)   # nothing but numbers on a side: the numbers decide
+    short, other = (ka, set(kb)) if len(ka) <= len(kb) else (kb, set(ka))
+    shared = len(set(short) & other) / len(short)
+    if len(short) <= SHORT_ANSWER_TERMS:
+        return short[0] in other and shared >= 0.4
+    # An explanation: two right ones share 0.29-0.62 of their terms (Gettier,
+    # Pascal), an answer about something else 0.0-0.07. A claim turned around
+    # on the same subject shares as much as a right one (0.25-0.31): words
+    # can't tell those apart, so this check doesn't try.
+    return shared >= 0.25
 
 
 def check_general(question: str, answer: str, other: Optional[Callable[[List[dict]], str]],
@@ -117,7 +158,7 @@ def check_general(question: str, answer: str, other: Optional[Callable[[List[dic
         return GENERAL + body, "unchecked"
     if not second.strip():
         return GENERAL + body, "unchecked"
-    if agree(body, second):
+    if agree(body, second, question):
         return GENERAL + body, "agreed"
     logger.info("engineering mode: her two minds disagree on %r; not answering from memory", question[:60])
     return (UNSURE if engineering else UNSURE_PLAIN), "disagreed"

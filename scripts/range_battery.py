@@ -69,7 +69,10 @@ def _post(url: str) -> dict:
 
 
 def gear_ready(gear: str) -> bool:
-    st = _get(f"{ORCH}/lifecycle/state")
+    try:
+        st = _get(f"{ORCH}/lifecycle/state")
+    except OSError:   # the orchestrator can be slow to answer mid-shift
+        return False
     tier = (st.get("tiers") or {}).get(GPU_TIER[gear]) or {}
     return st.get("state") == gear and tier.get("device") == "gpu" and not st.get("transitioning")
 
