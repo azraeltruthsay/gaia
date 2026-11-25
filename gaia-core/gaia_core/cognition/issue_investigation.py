@@ -57,6 +57,9 @@ NOT_FOUND: <why>"""
 
 _ACTION = re.compile(r"^\s*\**(SEARCH|READ|PLACE|NOTE|NOT_FOUND)\**\s*:\s*(.*)$", re.I | re.M)
 _THINK = re.compile(r"<think>.*?</think>", re.S)
+# a line that writes what she later sees: a log call, a print, an exception
+_WRITES = re.compile(r"\b(?:logger|logging|log|_log)\.(?:debug|info|warning|warn|error|exception|critical)\(|"
+                     r"\bprint\(|\braise\s+\w+|\bwarnings\.warn\(")
 
 
 def _dir(base: Optional[Path]) -> Path:
@@ -94,9 +97,10 @@ def playbook_text(name: str, skills_dir: Path) -> str:
 class CodeView:
     """Her two actions over the candidate packages, and what they showed her."""
 
-    def __init__(self, repo_root: Optional[Path] = None):
+    def __init__(self, repo_root: Optional[Path] = None, evidence: Optional[List[str]] = None):
         from gaia_common.utils import codemind_issues as C
         self.C = C
+        self.evidence = [str(e).lower() for e in evidence or []]
         self.repo = C._repo(repo_root)
         self.roots = [r for r in C._roots(self.repo) if r.is_dir()]
         self.seen: Set[Path] = set()
@@ -128,7 +132,45 @@ class CodeView:
     def _show(self, hits: List[str], how: str = "") -> str:
         more = len(hits) > SEARCH_HITS
         body = "\n".join(hits[:SEARCH_HITS])
-        return (how + body + (f"\n(first {SEARCH_HITS} matches; search for something narrower)" if more else ""))
+        return (how + body + (f"\n(first {SEARCH_HITS} matches; search for something narrower)" if more else "")
+                + self._evidence_hints(hits[:SEARCH_HITS]))
+
+    def _evidence_hints(self, hits: List[str]) -> str:
+        """Point at the hits that write a line quoted in her evidence (d55q):
+        her first search found the very log line ('two minds disagree',
+        engineering_mode.py:122), and she spent her other seven steps
+        searching for the question's words instead of reading it."""
+        if not self.evidence:
+            return ""
+        out = []
+        for hit in hits:
+            m = re.match(r"^([\w./-]+\.py):(\d+): (.*)$", hit)
+            if not m or not _WRITES.search(m.group(3)):
+                continue
+            frags = [f for lit in re.findall(r"[\"']([^\"']{12,})[\"']", m.group(3))
+                     for f in re.split(r"%[-\d.]*[rsdfi]|\{[^}]*\}", lit) if len(f.strip()) >= 12]
+            if not any(f.strip().lower() in e for f in frags for e in self.evidence):
+                continue
+            func = self._enclosing(m.group(1), int(m.group(2)))
+            where = f", in {func}()" if func else ""
+            out.append(f"{m.group(1)}:{m.group(2)} writes a line quoted in your evidence{where}. "
+                       f"To see the code that decides it: READ: {m.group(1)}:{m.group(2)}")
+            if len(out) >= 2:
+                break
+        return ("\n\n" + "\n".join(out)) if out else ""
+
+    def _enclosing(self, rel: str, line_no: int) -> str:
+        try:
+            lines = (self.repo / "candidates" / rel).read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            return ""
+        at = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
+        indent = len(at) - len(at.lstrip())
+        for ln in reversed(lines[:line_no - 1]):
+            m = re.match(r"^(\s*)(?:async\s+)?def\s+(\w+)", ln)
+            if m and len(m.group(1)) < indent:
+                return m.group(2)
+        return ""
 
     def search(self, text: str) -> str:
         text = text.strip().strip("`'\"")
@@ -285,7 +327,7 @@ def investigate(issue: dict, generate: Callable[[List[dict]], str], *, skills_di
     from gaia_common.utils import codemind_issues as C
     from gaia_common.utils import issue_ledger as L
 
-    view = CodeView(repo_root)
+    view = CodeView(repo_root, evidence=issue.get("evidence"))
     book = playbook_text(issue.get("playbook", ""), skills_dir)
     head = describe_issue(issue) + "\n\n" + (
         f"The playbook you matched it to ({issue['playbook']}):\n{book}" if book else

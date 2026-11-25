@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -397,6 +398,14 @@ Start with the first line of the file."""
         discarded, never applied).
         """
         patch_line = f"\nTHE FIX JUST APPLIED: {patch_summary}" if patch_summary else ""
+        # r5z1: the issue quoted the exact failing pair, and her test used two
+        # identical short strings instead, plus a case of her own asserting
+        # that "the Lighthouse" and "the Pharos" of Alexandria disagree — it
+        # failed on the original for that wrong reason, and then failed both
+        # fixes. The quoted text is the bug; list it so it can't be missed.
+        quoted = [q for q in dict.fromkeys(re.findall(r'"([^"\n]{15,600})"', issue_description or ""))][:6]
+        quoted_block = ("\n\nQUOTED IN THE BUG (the exact inputs and outputs that went wrong):\n"
+                        + "\n".join(f'- "{q}"' for q in quoted)) if quoted else ""
         return f"""You are CodeMind, GAIA's code self-improvement layer. Write ONE regression test \
 that reproduces the specific bug below — it must FAIL against the current (buggy) code shown, \
 and would PASS once the fix is applied.
@@ -405,13 +414,16 @@ RULES:
 - Output a COMPLETE, self-contained pytest module. No markdown fences, no explanation.
 - It MUST import {module} (or call into it directly) and define at least one `def test_...`.
 - Test the specific scenario in the bug description — do not write a generic smoke test.
+- If the bug quotes inputs or outputs, build the failing case from them word for word: that exact case is the bug.
+- Assert only what the bug description says should happen. Don't add cases of your own about what \
+should differ: a wrong expectation fails for the wrong reason and blocks a correct fix.
 - No mocks that bypass the buggy code path itself.
 - Keep it short: one or two test functions, no fixtures beyond what's needed.
 - If you can't write a test that actually exercises this bug, respond: NO_TEST: <reason>
 
 FILE: {file_path}
 MODULE: {module}
-BUG: {issue_description}{patch_line}
+BUG: {issue_description}{patch_line}{quoted_block}
 
 CURRENT CODE:
 ```python
