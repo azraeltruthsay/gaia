@@ -1,0 +1,208 @@
+{
+ "summary": {
+  "label": "base",
+  "bugs": 12,
+  "bugs_with_valid_controls": 12,
+  "investigation_found_place": "0/12",
+  "test_fails_before": "6/9",
+  "test_fails_before_and_passes_after": "0/10",
+  "patch_passes_gold_tests (valid controls)": "0/12",
+  "patch_breaks_no_module_test": "8/9",
+  "practice_investigation": "14/60",
+  "investigation_right_file": "4/12"
+ },
+ "rows": [
+  {
+   "id": "0kv2",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "1 failed, 56 passed in 0.81s",
+    "with_fix": "57 passed in 0.74s"
+   },
+   "test_fails_before": true,
+   "test_passes_after": false,
+   "module_tests_ok": false,
+   "patch_passes_gold": false,
+   "patch_gold_summary": "16 failed, 41 passed in 0.78s",
+   "found_file": true
+  },
+  {
+   "id": "24bs",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "10 failed in 0.39s",
+    "with_fix": "10 passed in 0.37s"
+   },
+   "test_fails_before": false,
+   "test_passes_after": true,
+   "module_tests_ok": true,
+   "patch_passes_gold": false,
+   "patch_gold_summary": "10 failed in 0.39s",
+   "found_file": true
+  },
+  {
+   "id": "5jdw",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "7 failed, 3 passed in 0.07s",
+    "with_fix": "10 passed in 0.05s"
+   },
+   "test_fails_before": null,
+   "test_passes_after": null,
+   "module_tests_ok": null,
+   "patch_passes_gold": false,
+   "patch_gold_summary": "7 failed, 3 passed in 0.07s",
+   "found_file": true
+  },
+  {
+   "id": "74t8",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "2 failed in 0.34s",
+    "with_fix": "2 passed in 0.32s"
+   },
+   "test_fails_before": true,
+   "test_passes_after": false,
+   "module_tests_ok": true,
+   "patch_passes_gold": false,
+   "patch_gold_summary": "2 failed in 1.05s",
+   "found_file": false
+  },
+  {
+   "id": "76hb",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "2 failed, 20 passed in 2.68s",
+    "with_fix": "22 passed in 2.67s"
+   },
+   "test_fails_before": null,
+   "test_passes_after": null,
+   "module_tests_ok": true,
+   "patch_passes_gold": false,
+   "patch_gold_summary": "2 failed, 20 passed in 2.67s",
+   "found_file": true
+  },
+  {
+   "id": "8xr4.16",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "8 failed, 1 passed in 0.32s",
+    "with_fix": "9 passed in 0.30s"
+   },
+   "test_fails_before": true,
+   "test_passes_after": false,
+   "module_tests_ok": true,
+   "patch_passes_gold": false,
+   "patch_gold_summary": "8 failed, 1 passed in 0.32s",
+   "found_file": false
+  },
+  {
+   "id": "c2kz",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "16 failed in 0.38s",
+    "with_fix": "16 passed in 0.36s"
+   },
+   "test_fails_before": true,
+   "test_passes_after": false,
+   "module_tests_ok": true,
+   "patch_passes_gold": false,
+   "patch_gold_summary": "16 failed in 0.77s",
+   "found_file": false
+  },
+  {
+   "id": "dpi5",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "1 error in 0.08s",
+    "with_fix": "2 passed in 0.05s"
+   },
+   "test_fails_before": true,
+   "test_passes_after": null,
+   "module_tests_ok": null,
+   "patch_passes_gold": null,
+   "patch_gold_summary": "declined",
+   "found_file": false
+  },
+  {
+   "id": "mlx8",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "2 failed, 181 passed in 0.43s",
+    "with_fix": "183 passed in 0.41s"
+   },
+   "test_fails_before": null,
+   "test_passes_after": null,
+   "module_tests_ok": true,
+   "patch_passes_gold": false,
+   "patch_gold_summary": "2 failed, 181 passed in 0.43s",
+   "found_file": false
+  },
+  {
+   "id": "n828",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "1 failed, 7 passed in 0.33s",
+    "with_fix": "8 passed in 0.32s"
+   },
+   "test_fails_before": false,
+   "test_passes_after": true,
+   "module_tests_ok": true,
+   "patch_passes_gold": false,
+   "patch_gold_summary": "1 failed, 7 passed in 0.33s",
+   "found_file": false
+  },
+  {
+   "id": "ow0t",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "1 error in 0.20s",
+    "with_fix": "32 passed in 0.65s"
+   },
+   "test_fails_before": false,
+   "test_passes_after": true,
+   "module_tests_ok": true,
+   "patch_passes_gold": false,
+   "patch_gold_summary": "1 error in 0.21s",
+   "found_file": false
+  },
+  {
+   "id": "trm0",
+   "found_place": false,
+   "control": {
+    "gold_fail_before": true,
+    "gold_pass_with_fix": true,
+    "before": "3 failed, 32 passed in 0.18s",
+    "with_fix": "35 passed in 0.16s"
+   },
+   "test_fails_before": true,
+   "test_passes_after": null,
+   "module_tests_ok": null,
+   "patch_passes_gold": null,
+   "patch_gold_summary": "declined",
+   "found_file": false
+  }
+ ]
+}

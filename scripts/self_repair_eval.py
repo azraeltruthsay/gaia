@@ -284,7 +284,9 @@ def score(label: str) -> None:
         bug = manifest[r["id"]]
         wt = Path(bug["worktree"])
         cm = r.get("codemind", {})
-        row = {"id": r["id"], "found_place": r["investigation"]["found"]}
+        named = r["investigation"].get("place") or ""
+        row = {"id": r["id"], "found_place": r["investigation"]["found"],
+               "found_file": bug["place"]["file"].rsplit("/", 1)[-1] in named}
         _reset(wt)
         # controls: the real fix's tests fail before it and pass with it
         sh("git", "-C", str(wt), "checkout", bug["commit"], "--", *bug["gold_tests"])
@@ -330,6 +332,7 @@ def score(label: str) -> None:
     summary = {
         "label": label, "bugs": len(rows), "bugs_with_valid_controls": len(valid),
         "investigation_found_place": frac([r["found_place"] for r in rows]),
+        "investigation_right_file": frac([r.get("found_file", False) for r in rows]),
         "test_fails_before": frac([r["test_fails_before"] for r in rows]),
         "test_fails_before_and_passes_after": frac([(r["test_fails_before"] and r["test_passes_after"])
                                                     if r["test_fails_before"] is not None else False for r in rows]),
