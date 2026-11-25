@@ -1,0 +1,48 @@
+{
+ "id": "6nw3",
+ "bead": "GAIA_Project-6nw3",
+ "commit": "ac53aadf9b",
+ "date": "2026-11-09",
+ "source": "history",
+ "issue": {
+  "title": "Time-check canary times out in gear 2: asks Core on CPU with a 15 s limit (29 of ~31 checks in 24h)",
+  "symptom": "gaia_common/utils/heartbeat_time_check.py run_time_check() asks NANO_ENDPOINT (gaia-core localhost:8092) 'what time is it' with urlopen timeout=15. Since gear 2 became the resting gear (2qus), Core runs CPU GGUF on :8092 and the answer takes longer than 15 s, so the canary logs 'Heartbeat: ERROR — timed out' every ~15 min (29 since 2026-11-08 20:42 UTC). GAIA is fine; the canary is wrong. Fix: per-gear timeout (or ask the GPU tier), and don't count CPU slowness as death in /shared/heartbeat/time_check.json consumers (doctor)."
+ },
+ "issue_names_place": true,
+ "place": {
+  "file": "gaia-common/gaia_common/utils/heartbeat_time_check.py",
+  "function": "run_time_check",
+  "lines": 61,
+  "also_changed": []
+ },
+ "investigation": {
+  "format": "issue_investigation actions: SEARCH / READ / PLACE + NOTE",
+  "gold_steps": [
+   {
+    "action": "SEARCH: what time is it",
+    "why": "a phrase or name from the issue, as it appears in code",
+    "result_line": "gaia-common/gaia_common/utils/heartbeat_time_check.py:124: {\"role\": \"user\", \"content\": \"What time is it?\"},"
+   },
+   {
+    "action": "READ: gaia-common/gaia_common/utils/heartbeat_time_check.py:124",
+    "why": "the hit is in run_time_check"
+   },
+   {
+    "action": "PLACE: run_time_check",
+    "note": "The engine answers one request at a time; asleep, docs_maintenance holds Core on the CPU ~17 s per request and the canary queued behind it timed out about one check in fifteen while she was fine. HEARTBEAT_TIMEOUT_SECONDS overrides."
+   }
+  ],
+  "reconstructed": true,
+  "lead": "what time is it"
+ },
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-common/tests/utils/test_heartbeat_timeout_6nw3.py\n\"\"\"6nw3: the time-check canary waits out a request already in flight.\"\"\"\n\nimport json\n\nfrom gaia_common.utils import heartbeat_time_check as H\n\n\ndef test_canary_uses_check_timeout(monkeypatch):\n    seen = {}\n\n    class Resp:\n        def __enter__(self):\n            return self\n\n        def __exit__(self, *a):\n            return False\n\n        def read(self):\n            return json.dumps({\"choices\": [{\"message\": {\"content\": \"x\"}}]}).encode()\n\n    def fake_urlopen(req, timeout):\n        seen[\"timeout\"] = timeout\n        return Resp()\n\n    monkeypatch.setattr(H, \"urlopen\", fake_urlopen)\n    H.run_time_check(\"http://core:8092\")\n    assert seen[\"timeout\"] == H.CHECK_TIMEOUT >= 45",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-common/gaia_common/utils/heartbeat_time_check.py b/candidates/gaia-common/gaia_common/utils/heartbeat_time_check.py\nindex ca1dc08..3067013 100644\n--- a/candidates/gaia-common/gaia_common/utils/heartbeat_time_check.py\n+++ b/candidates/gaia-common/gaia_common/utils/heartbeat_time_check.py\n@@ -39,6 +39,11 @@ DEFAULT_INTERVAL = int(os.environ.get(\"HEARTBEAT_INTERVAL_SECONDS\", \"300\"))\n MAX_DRIFT_MINUTES = int(os.environ.get(\"HEARTBEAT_MAX_DRIFT_MINUTES\", \"2\"))\n CORE_ENDPOINT = os.environ.get(\"CORE_ENDPOINT\", \"http://gaia-core:6415\")\n NANO_ENDPOINT = os.environ.get(\"NANO_ENDPOINT\", \"http://gaia-core:8092\")\n+# The engine answers one request at a time. Asleep, a sleep task can hold Core on\n+# the CPU for ~17 s per request (docs_maintenance), and the canary waits its turn\n+# behind it: at 15 s it timed out about one check in fifteen while she was fine\n+# (6nw3). Long enough to wait out one request in flight; a hung engine still fails.\n+CHECK_TIMEOUT = int(os.environ.get(\"HEARTBEAT_TIMEOUT_SECONDS\", \"60\"))\n STATE_PATH = Path(os.environ.get(\"SHARED_DIR\", \"/shared\")) / \"heartbeat\" / \"time_check.json\"\n \n \n@@ -132,7 +137,7 @@ def run_time_check(endpoint: str = NANO_ENDPOINT) -> Dict[str, Any]:\n             data=payload,\n             headers={\"Content-Type\": \"application/json\"},\n         )\n-        with urlopen(req, timeout=15) as resp:\n+        with urlopen(req, timeout=CHECK_TIMEOUT) as resp:\n             result = json.loads(resp.read().decode())\n \n         response_text = (\n"
+ },
+ "commit_subject": "Time-check canary waits out a request in flight: timeout 15 s -> 60 s (6nw3)"
+}

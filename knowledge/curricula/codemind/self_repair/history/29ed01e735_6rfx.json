@@ -1,0 +1,29 @@
+{
+ "id": "6rfx",
+ "bead": "GAIA_Project-6rfx",
+ "commit": "29ed01e735",
+ "date": "2026-10-28",
+ "source": "history",
+ "issue": {
+  "title": "Prime says it is built on 'Google's Gemma 4 E4B' (both deliberation modes) and confabulates its origins",
+  "symptom": "isep eval 2026-10-28: Prime answered identity questions with 'built on Google's Gemma 4 E4B by Azrael' in instruction mode as often as with the thinking adapter (4 answers each), plus 'Azrael is a researcher at the University of Pennsylvania', 'stargate-orchestrated multi-agent stack'. The prompt_builder prompt used in the eval carries no architecture facts, so the source is Prime's engine-side context (awareness injection / identity prefix segments are ON for Prime) or Prime-v1's weights. Prime is Qwen3-VL-8B-GAIA-Prime-v1-abliterated; prompt_builder's Prime arch_fact says so but didn't appear for these prompts. Trace where 'Gemma 4 E4B' enters Prime's context and why the Prime arch_fact isn't injected."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/utils/prompt_builder.py",
+  "function": "build_from_packet",
+  "lines": 2075,
+  "also_changed": []
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_prime_casual_arch_fact_6rfx.py\n\"\"\"6rfx: Prime keeps its architecture fact on casual turns.\n\n7n3 drops the arch fact on casual turns because Core's identity is weight-baked\nand the spec recital crowded out her felt state. Prime's weights instead carry a\nwrong base-model fact (Prime-v1 learned \"built on Google's Gemma 4 E4B\"): without\nthe prompt-borne fact Prime said Gemma 4 E4B on 'chat' turns, with it Qwen3-VL-8B.\n\"\"\"\nfrom gaia_common.protocols.cognition_packet import CognitionPacket, Content, Intent\nfrom gaia_core.utils import prompt_builder\n\n\ndef _system(target, intent=\"chat\", text=\"What are you, really?\"):\n    p = CognitionPacket(content=Content(original_prompt=text), intent=Intent(user_intent=intent))\n    p.header.model.name = target\n    return prompt_builder.build_from_packet(p)[0][\"content\"]\n\n\ndef test_prime_casual_turn_keeps_its_architecture_fact():\n    s = _system(\"prime\")\n    assert \"This is casual conversation\" in s\n    assert \"Qwen3-VL-8B\" in s\n\n\ndef test_core_casual_turn_still_drops_it():\n    s = _system(\"core\", text=\"hey, how are you?\")\n    assert \"Gemma 4 E4B\" not in s",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/utils/prompt_builder.py b/candidates/gaia-core/gaia_core/utils/prompt_builder.py\nindex c89f438..f2e2e3d 100644\n--- a/candidates/gaia-core/gaia_core/utils/prompt_builder.py\n+++ b/candidates/gaia-core/gaia_core/utils/prompt_builder.py\n@@ -248,6 +248,7 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,\n     # Detect target tier from packet.header.model.name (set by agent_core\n     # at model-selection time). Fall back to Core's arch_fact if unknown.\n     _arch_fact = \"\"  # always defined (used again on the casual-anchor swap below)\n+    _is_prime_target = False\n     try:\n         _target = (getattr(getattr(packet.header, \"model\", None), \"name\", \"\") or \"\").lower()\n         _is_prime_target = _target in (\"prime\", \"cpu_prime\")\n@@ -429,6 +430,13 @@ def build_from_packet(packet: CognitionPacket, task_instruction_key: str = None,\n             # the felt Inner-weather line surface; keeping it makes her recite the\n             # model spec. The Inner weather felt-fact + lean nudge carry the turn.\n             persona_anchor = _CASUAL_PERSONA_ANCHOR\n+            # 6rfx: that holds for Core, whose identity is weight-baked. Prime's\n+            # weights carry a WRONG base-model fact (Prime-v1 learned \"built on\n+            # Google's Gemma 4 E4B\"), so without the prompt-borne fact any casual\n+            # turn that touches identity gets it — verified: with it Prime says\n+            # Qwen3-VL-8B, without it Gemma 4 E4B. Keep it for Prime.\n+            if _is_prime_target:\n+                persona_anchor = persona_anchor + _arch_fact\n             _social_block = (\n                 \"\\n\\n— This is casual conversation —\\n\"\n                 \"Be warm, natural, and plain-spoken — genuine over clever. If \"\n"
+ },
+ "commit_subject": "fix(6rfx): Prime keeps its architecture fact on casual turns"
+}

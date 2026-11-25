@@ -1,0 +1,31 @@
+{
+ "id": "x9sw",
+ "bead": "GAIA_Project-x9sw",
+ "commit": "c68e41ee77",
+ "date": "2026-11-05",
+ "source": "history",
+ "issue": {
+  "title": "Observer 'Second mind' flags facts she got from her own context (clock) and posts garbled notes",
+  "symptom": "Discord 2026-11-05: correct time (9:46 AM PST, from the Here&Now block) got '*[Second mind]* I can't back up what I just said about 17:46'. 19:24: 'I can't back up the storage on your Android device' (garbled). Observer should count the prompt's world-state block as support, and skip posting when the flagged claim is generic advice."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/main.py",
+  "function": "_self_facts_for_observer",
+  "lines": 24,
+  "also_changed": [
+   "gaia-core/gaia_core/main.py:_run_loop_inner"
+  ]
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_second_mind_b9ts.py\n\"\"\"The other mind answers blind; the code looks for what nothing backs (b9ts).\"\"\"\nimport json\n\nimport pytest\n\nfrom gaia_core.cognition import second_mind as sm\n\n\ndef test_the_reply_under_check_does_not_back_itself():\n    # x9sw: agent_core adds her reply to the history before the check, and it\n    # backed every name it had (\"Portland, Oregon\" for a Richland clock).\n    from gaia_core import main\n    reply = \"[Prime]\\n\\nIt's 11:57 AM PST in Portland, Oregon.\"\n    history = [{\"role\": \"user\", \"content\": \"What time is it?\"},\n               {\"role\": \"assistant\", \"content\": \"It's 11:57 AM PST in Portland, Oregon.\"}]\n    known = main._self_facts_for_observer(history, reply)\n    assert \"Portland\" in sm.unbacked(reply, known)\n    # An earlier reply of hers still counts: she can lean on what she said before.\n    assert \"Portland\" not in sm.unbacked(reply, main._self_facts_for_observer(history))",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/main.py b/candidates/gaia-core/gaia_core/main.py\nindex 0c3dfe9..0add9a6 100644\n--- a/candidates/gaia-core/gaia_core/main.py\n+++ b/candidates/gaia-core/gaia_core/main.py\n@@ -143,7 +143,7 @@ def _sources_for_observer(packet_dict, tool_texts: list) -> str:\n     return \"\\n\".join(parts)[:6000]\n \n \n-def _self_facts_for_observer(history: list) -> str:\n+def _self_facts_for_observer(history: list, reply: str = \"\") -> str:\n     \"\"\"What is true of her and of this conversation: a reply can use these\n     without anyone having to look them up.\"\"\"\n     from datetime import datetime, timezone\n@@ -164,7 +164,12 @@ def _self_facts_for_observer(history: list) -> str:\n         logger.debug(\"observer self-facts failed (non-fatal)\", exc_info=True)\n     # What was just said is what a reply leans on: the latest of it is kept\n     # whole, and the facts get the rest of the cap.\n-    talk = \"\\n\".join(str(m.get(\"content\", \"\"))[:400] for m in (history or [])[-6:] if isinstance(m, dict))[-1500:]\n+    # The reply under check isn't evidence for itself. It's in the history by now\n+    # (agent_core adds it), and so it backed every name it had (x9sw).\n+    said = (reply or \"\").strip()\n+    earlier = [m for m in (history or []) if isinstance(m, dict)\n+               and not (said and m.get(\"role\") == \"assistant\" and str(m.get(\"content\", \"\")).strip() in (said, said.split(\"\\n\\n\", 1)[-1]))]\n+    talk = \"\\n\".join(str(m.get(\"content\", \"\"))[:400] for m in earlier[-6:])[-1500:]\n     facts = \"\\n\".join(p for p in parts if p)\n     return (talk + \"\\n\" + facts).strip()[:3000]\n \n@@ -2302,7 +2307,7 @@ async def process_packet(packet_data: Dict[str, Any]):\n                     _agent_core.take_turn_source(session_id)) if x)\n                 _after_turn[\"second_mind\"] = (\n                     _agent_core, user_input or \"\", full_response,\n-                    \"\\n\".join(x for x in (_self_facts_for_observer(history), _sources) if x),\n+                    \"\\n\".join(x for x in (_self_facts_for_observer(history, full_response), _sources) if x),\n                     session_id, bool(_tool_texts_for_observer), bool(_sources))\n \n             # 29yq: a native tool call detected mid-stream (ParseEventType.\n"
+ },
+ "commit_subject": "second mind: the reply under check no longer backs itself (x9sw)"
+}

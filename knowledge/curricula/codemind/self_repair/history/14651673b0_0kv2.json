@@ -1,0 +1,31 @@
+{
+ "id": "0kv2",
+ "bead": "GAIA_Project-0kv2",
+ "commit": "14651673b0",
+ "date": "2026-11-11",
+ "source": "history",
+ "issue": {
+  "title": "Second mind flags claims the reply never made ('what I just said about 128')",
+  "symptom": "Discord DM 2026-11-12: after 'It's in the Grotto now (palace_id: 2026-11-12_8fddd0dba2)' the second mind posted '*[Second mind]* I can't back up what I just said about 128, so please check that' (no 128 in the reply; likely from the palace id or a token count); after 'The Discord API rejected that channel name — the-grotto...' it posted 'I can't back up what I just said about Discord'. Its notices should name only claims present in the reply, and ids/numbers from tool results aren't claims."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/second_mind.py",
+  "function": "unbacked",
+  "lines": 11,
+  "also_changed": [
+   "gaia-core/gaia_core/main.py:_run_loop_inner"
+  ]
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_second_mind_b9ts.py\n\"\"\"The other mind answers blind; the code looks for what nothing backs (b9ts).\"\"\"\nimport json\n\nimport pytest\n\nfrom gaia_core.cognition import second_mind as sm\n\n\ndef test_ids_and_named_tools_are_not_claims_0kv2():\n    \"\"\"Discord DM 2026-11-12: 'I can't back up what I just said about 128' (no 128\n    in the reply) and '... about Discord' (it described the discord call's error).\"\"\"\n    from gaia_core.cognition.second_mind import unbacked\n    assert unbacked(\"It's in the Grotto now (palace_id: 2026-11-12_8fddd0dba2).\",\n                    \"Post in the Grotto\\npalace(store) (palace): stored\") == []\n    assert unbacked(\"The Discord API rejected that channel name.\",\n                    \"Post in the Grotto\\ndiscord(post) (discord): not a channel she can post to: 'the-grotto'\") == []\n    assert unbacked(\"The capital is Paris, with 2148271 people.\", \"What is the capital of France?\") == [\"Paris\", \"2148271\"]",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/second_mind.py b/candidates/gaia-core/gaia_core/cognition/second_mind.py\nindex eacaa58..0829576 100644\n--- a/candidates/gaia-core/gaia_core/cognition/second_mind.py\n+++ b/candidates/gaia-core/gaia_core/cognition/second_mind.py\n@@ -43,11 +43,18 @@ def _plain(reply: str) -> str:\n     return _MARKUP_RE.sub(\"\", _LABEL_RE.sub(\"\", reply or \"\", count=1))\n \n \n+# Ids aren't claims: \"palace_id: 2026-11-12_8fddd0dba2\", its \"_\" stripped as\n+# markup, read \"…-128fddd…\" and came back as \"I can't back up what I just\n+# said about 128\" (0kv2).\n+_ID_RE = re.compile(r\"\\S*_\\S*\\d\\S*|\\S*\\d\\S*_\\S*|\\b(?=[A-Za-z0-9]*\\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{8,}\\b\")\n+\n+\n def unbacked(reply: str, known: str) -> List[str]:\n     \"\"\"Names and numbers in a reply that `known` doesn't hold.\"\"\"\n     words = {w.rstrip(\"s\") for w in _words(known)}\n     lowered = (known or \"\").lower()\n-    body = _plain(reply)\n+    # Before the markup strip: it drops \"_\", which made \"…-12_8fddd…\" read \"128\".\n+    body = _plain(_ID_RE.sub(\" \", reply or \"\"))\n     out = []\n     for claim in _CLAIM_RE.findall(body):\n         # Also as a substring: \"9950\" is backed by \"9950X3D\", \"Gemma\" by \"Gemma4\".\ndiff --git a/candidates/gaia-core/gaia_core/main.py b/candidates/gaia-core/gaia_core/main.py\nindex b50159d..fb6d1bc 100644\n--- a/candidates/gaia-core/gaia_core/main.py\n+++ b/candidates/gaia-core/gaia_core/main.py\n@@ -2111,7 +2111,9 @@ async def process_packet(packet_data: Dict[str, Any]):\n                             import re as _re\n                             _tool_text = _re.sub(r\"</?tool_result>\", \"\", result_xml).strip()\n                         _tool_label = f\"{tc.tool_name}({tc.tool_action})\" if tc.tool_action else tc.tool_name\n-                        _tool_texts_for_observer.append(_tool_text)\n+                        # 0kv2: with its name, so \"the Discord API rejected\n+                        # that\" is backed by the discord call it describes.\n+                        _tool_texts_for_observer.append(f\"{_tool_label} ({tc.tool_name}): {_tool_text}\")\n                         # Continuation system prompt: the previous turn's\n                         # full system prompt is NOT carried into this second\n                         # generation. Without explicit guidance, the model\n"
+ },
+ "commit_subject": "Second mind: ids aren't claims; a tool's name backs what it did (0kv2)"
+}

@@ -1,0 +1,29 @@
+{
+ "id": "23st",
+ "bead": "GAIA_Project-23st",
+ "commit": "6a9299dd2a",
+ "date": "2026-11-11",
+ "source": "history",
+ "issue": {
+  "title": "Core's client allows 16384 tokens in gear 1, where the GPU engine holds 8192",
+  "symptom": "The model pool sets Core's max_model_len from CORE_CPU_CTX (16384, the CPU engine's) whatever the gear; on the GPU (gear 1) gaia_cpp runs GGUF_CTX_SIZE_GPU=8192. A prompt between 8192 and 16384 tokens isn't trimmed by the client and would overflow the GPU engine. Make the client's window follow the gear (8192 on GPU, 16384 on CPU), or have the engine report n_ctx in /health and read that."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/models/vllm_remote_model.py",
+  "function": "__init__",
+  "lines": 50,
+  "also_changed": []
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_generation_log_vllm.py\n\"\"\"Mission Control's live generation view went silent on 2026-11-04: turns no\nlonger passed through the two places that wrote the generation log. Every\ncall to Core or Prime goes through VLLMRemoteModel, which logs itself now.\"\"\"\nfrom gaia_core.models.vllm_remote_model import VLLMRemoteModel\n\n\ndef test_window_follows_the_gear_23st(monkeypatch):\n    \"\"\"On the GPU the engine holds 8192; the configured 16384 is the CPU's.\"\"\"\n    m = VLLMRemoteModel.__new__(VLLMRemoteModel)\n    m.endpoint, m._gpu_ctx_seen = \"http://localhost:8092\", (0.0, None)\n    m.max_model_len = 16384\n    monkeypatch.setenv(\"GGUF_CTX_SIZE_GPU\", \"8192\")\n\n    class R:\n        def __init__(self, gpu): self.gpu = gpu\n        def json(self): return {\"has_gpu\": self.gpu}\n\n    class S:\n        gpu = True\n        def get(self, url, timeout=2): return R(S.gpu)\n\n    m._session = S()\n    assert m.max_model_len == 8192\n    S.gpu = False\n    m._gpu_ctx_seen = (0.0, None)\n    assert m.max_model_len == 16384\n    m.endpoint = \"http://gaia-prime:7777\"                 # not Core's engine\n    assert m.max_model_len == 16384",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/models/vllm_remote_model.py b/candidates/gaia-core/gaia_core/models/vllm_remote_model.py\nindex 77922b6..9aa2ac5 100644\n--- a/candidates/gaia-core/gaia_core/models/vllm_remote_model.py\n+++ b/candidates/gaia-core/gaia_core/models/vllm_remote_model.py\n@@ -51,7 +51,8 @@ class VLLMRemoteModel:\n \n         self.timeout = int(model_config.get(\"timeout\", 300))\n \n-        # Context window size for auto-clamping max_tokens\n+        # Context window size for auto-clamping max_tokens (see the property)\n+        self._gpu_ctx_seen = (0.0, None)\n         self.max_model_len = int(\n             model_config.get(\"max_model_len\")\n             or model_config.get(\"context_length\")\n@@ -302,6 +303,30 @@ class VLLMRemoteModel:\n             \"provider\": \"vllm_remote\",\n         }\n \n+    # ── Context window (23st) ─────────────────────────────────────────────────\n+    # Core's engine holds 16384 tokens on the CPU and 8192 on the GPU (gear 1),\n+    # but the configured window was the CPU's whatever the gear: a prompt in\n+    # between wasn't trimmed and would overflow the GPU engine.\n+    @property\n+    def max_model_len(self) -> int:\n+        configured = self._max_model_len\n+        gpu_ctx = int(os.getenv(\"GGUF_CTX_SIZE_GPU\", \"0\") or 0)\n+        if not gpu_ctx or \":8092\" not in (self.endpoint or \"\"):\n+            return configured\n+        at, on_gpu = self._gpu_ctx_seen\n+        if time.time() - at > 30:\n+            try:\n+                r = self._session.get(f\"{self.endpoint}/health\", timeout=2)\n+                on_gpu = bool(r.json().get(\"has_gpu\"))\n+            except Exception:\n+                on_gpu = None\n+            self._gpu_ctx_seen = (time.time(), on_gpu)\n+        return min(configured, gpu_ctx) if on_gpu else configured\n+\n+    @max_model_len.setter\n+    def max_model_len(self, value: int) -> None:\n+        self._max_model_len = int(value)\n+\n     # ── Mission Control's live generation view ──────────────────────────────\n     # Every call to Core or Prime passes here, streamed or not. The view read\n     # /logs/generation_stream.jsonl, written only by the model pool's forward\n"
+ },
+ "commit_subject": "Core's client window follows the gear (23st)"
+}

@@ -1,0 +1,52 @@
+{
+ "id": "2bap",
+ "bead": "GAIA_Project-2bap",
+ "commit": "4ad798be39",
+ "date": "2026-11-12",
+ "source": "history",
+ "issue": {
+  "title": "Pronouns stated as a fact instead of just used",
+  "symptom": "Found 2026-11-12 in GAIA's Grotto: asked \"do you remember Nick?\", she replied \"I do -- Azrael's friend. His name's Nick and his pronouns are he/him.\" The \"pronouns are X/Y\" clause is unprompted bookkeeping leaking into conversation -- pronoun usage should just show through word choice, not be announced.\n\nRoot cause: gaia_common/utils/people.py's pronoun_words() phrases the in-prompt instruction as a FACT (\"X's pronouns are Y; use them when you speak of X\"), which the model treats as content worth relaying rather than a silent style note. Fixed by rephrasing as a direct writing instruction (\"When you write about X, use Y -- just use it, don't mention it\"), matching the house style already used right next to it in speaker_line (\"Speak to them as 'you', never in the third person\"). Azrael's framing: the pronoun should be obvious from usage alone, no need to ever say \"pronouns are X/Y\" unless directly asked.\n\nUpdated all affected call sites' tests (test_people_751u.py -- added direct pronoun_words coverage, none existed before; test_conversation_memory.py -- 5 existing assertions checking the old fact-shaped phrase). 1632 gaia-core + 1034 gaia-common tests pass, ruff clean, mypy clean."
+ },
+ "issue_names_place": true,
+ "place": {
+  "file": "gaia-common/gaia_common/utils/people.py",
+  "function": "pronoun_words",
+  "lines": 9,
+  "also_changed": []
+ },
+ "investigation": {
+  "format": "issue_investigation actions: SEARCH / READ / PLACE + NOTE",
+  "gold_steps": [
+   {
+    "action": "SEARCH: , never in the third person",
+    "why": "a phrase or name from the issue, as it appears in code",
+    "result_line": "gaia-common/gaia_common/utils/people.py:234: line += \". Speak to them as \\\"you\\\", never in the third person. \" + pronoun_words(person) + \".\""
+   },
+   {
+    "action": "READ: gaia-common/gaia_common/utils/people.py:234",
+    "why": "the hit is in speaker_line"
+   },
+   {
+    "action": "READ: pronoun_words",
+    "why": "speaker_line calls it"
+   },
+   {
+    "action": "PLACE: pronoun_words",
+    "note": "Asked \"do you remember Nick?\" she replied \"His name's Nick and his pronouns are he/him\" -- nobody asked. The in-prompt instruction told her \"X's pronouns are Y; use them when you speak of X\" -- fact-shaped text that reads as content worth relaying, not a silent style note."
+   }
+  ],
+  "reconstructed": true,
+  "lead": ", never in the third person"
+ },
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/gaia_core/cognition/tests/test_people_751u.py\n\"\"\"People (751u): she knows who she's speaking with.\"\"\"\n\nfrom types import SimpleNamespace\n\nimport pytest\n\nfrom gaia_common.utils.people import PeopleRegistry, claimed_name, pronoun_words, speaker_line\n\nAZRAEL_ID = \"596925786208993283\"\nDM = f\"discord_dm_{AZRAEL_ID}\"\nWEB = \"web_3132edcd\"\n\n\n@pytest.fixture\n\n\ndef test_pronoun_words_is_a_writing_instruction_not_a_fact(people):\n    # Found 2026-11-12, GAIA's Grotto: phrased as \"X's pronouns are Y; use\n    # them\", she echoed it back unprompted (\"his pronouns are he/him\"). It\n    # must never again read as something there is content to relay.\n    nick = people.create(\"Nick\", [{\"kind\": \"session\", \"id\": WEB}])\n    people.set_pronouns(nick[\"id\"], \"he/him\", source=\"said so\")\n    line = pronoun_words(people.get(nick[\"id\"]))\n    assert line == 'When you write about Nick, use \"he/him\" — just use it, don\\'t mention it'\n    assert \"pronouns are\" not in line  # the exact fact-shaped phrase that got echoed back\n\n    unknown = people.create(\"Priya\", [{\"kind\": \"session\", \"id\": \"web_9\"}])\n    line = pronoun_words(people.get(unknown[\"id\"]))\n    assert \"Priya\" in line and \"they\" in line and \"not something to bring up\" in line\n    assert \"Priya's pronouns\" not in line  # the fact-shaped phrase, not \"no pronouns are on record\"",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-common/gaia_common/utils/people.py b/candidates/gaia-common/gaia_common/utils/people.py\nindex 4eecbb9..cbd784c 100644\n--- a/candidates/gaia-common/gaia_common/utils/people.py\n+++ b/candidates/gaia-common/gaia_common/utils/people.py\n@@ -77,13 +77,19 @@ def stated_pronouns(text: str) -> Optional[str]:\n \n def pronoun_words(person: Dict) -> str:\n     \"\"\"How she is told to speak of someone: their stated pronouns, or no guess.\n-    By name: \"use their name or they\" left Azrael \"he\" 2 in 3 (i4vn).\"\"\"\n+    By name: \"use their name or they\" left Azrael \"he\" 2 in 3 (i4vn). Phrased\n+    as a writing instruction, not a fact about them (\"X's pronouns are Y\") —\n+    the fact-shaped version got echoed back unprompted (2026-11-12, GAIA's\n+    Grotto: \"his name's Nick and his pronouns are he/him\", when nobody had\n+    asked). A direct \"when you write, do Y\" instruction, like the one right\n+    next to this in speaker_line (\"Speak to them as \\\"you\\\", never in the\n+    third person\"), doesn't invite being relayed as content the same way.\"\"\"\n     name = _main_name(person) if (person or {}).get(\"names\") else \"them\"\n     pronouns = (person or {}).get(\"pronouns\")\n     if pronouns:\n-        return f\"{name}'s pronouns are {pronouns}; use them when you speak of {name}\"\n-    return (f\"{name} hasn't told you their pronouns, so when you speak of {name}, \"\n-            f\"say \\\"{name}\\\" or \\\"they\\\"\")\n+        return f\"When you write about {name}, use \\\"{pronouns}\\\" — just use it, don't mention it\"\n+    return (f\"When you write about {name}, say \\\"{name}\\\" or \\\"they\\\" — no pronouns are \"\n+            f\"on record, and that's for your own phrasing, not something to bring up\")\n \n \n class PeopleRegistry:\n"
+ },
+ "commit_subject": "Pronouns are used, not announced (2bap)"
+}

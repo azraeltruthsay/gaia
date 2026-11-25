@@ -1,0 +1,50 @@
+{
+ "id": "76hb",
+ "bead": "GAIA_Project-76hb",
+ "commit": "8109dc22d6",
+ "date": "2026-10-28",
+ "source": "history",
+ "issue": {
+  "title": "Semantic probe's lookup-memory fallback ignores confirmation (6afh sibling)",
+  "symptom": "semantic_probe._web_search_fallback answers per-entity lookups from memory (min_score 0.6, non-stale) without the 6afh confirmed/unhelpful check, so entity context (e.g. 'CLAUDE.md' → 3 unrelated remembered lookups) can stand in for a search. Lower stakes than 6afh (KR grounding replaces probe results on knowledge turns), but non-KR turns still see it. Fix: pass confirmed/unhelpful into the probe, or require score+confirmed there too."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/semantic_probe.py",
+  "function": "_recall",
+  "lines": 27,
+  "also_changed": [
+   "gaia-core/gaia_core/cognition/semantic_probe.py:_web_search_fallback"
+  ]
+ },
+ "investigation": {
+  "format": "issue_investigation actions: SEARCH / READ / PLACE + NOTE",
+  "gold_steps": [
+   {
+    "action": "SEARCH: min_score",
+    "why": "a phrase or name from the issue, as it appears in code",
+    "result_line": "gaia-core/gaia_core/cognition/semantic_probe.py:871: \"params\": {\"query\": entity, \"top_k\": 3, \"min_score\": 0.6},"
+   },
+   {
+    "action": "READ: gaia-core/gaia_core/cognition/semantic_probe.py:871",
+    "why": "the hit is in _recall"
+   },
+   {
+    "action": "PLACE: _recall",
+    "note": "The probe's per-entity fallback let any fresh remembered hit stand in for the entity's web search. Pages kept for \"Where did King Arthur get Excalibur?\" were recalled for the entity \"Excalibur\" and replaced its search — another search's results, and two of the three never helped."
+   }
+  ],
+  "reconstructed": true,
+  "lead": "min_score"
+ },
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_lookup_memory_grounding.py\n\"\"\"0vuz: grounding consults what GAIA looked up before — answering from a\nstrong fresh memory without searching, revalidating on pushback — and the\nprompt cites where each remembered fact came from. 6afh: \"strong\" means\nconfirmed for this question by an earlier answer that held up.\"\"\"\n\nfrom unittest.mock import patch\n\nfrom gaia_core.cognition import knowledge_router as kr\nfrom gaia_core.cognition.knowledge_router import GroundingResult\n\n\ndef test_semantic_fallback_searches_when_memory_was_for_another_question():\n    # 76hb: pages kept for \"Where did King Arthur get Excalibur?\" recalled\n    # for the entity \"Excalibur\" are another search's results — search.\n    from gaia_core.cognition import semantic_probe\n    fake, calls = _probe_rpc([dict(PROBE_HIT, question_match=0.2)])\n    with patch(\"urllib.request.urlopen\", side_effect=fake):\n        out = semantic_probe._web_search_fallback([\"Excalibur\"])\n    assert calls == [\"palace_recall_lookup\", \"web_search\"]\n    assert out[\"Excalibur\"][\"source\"] == \"web_search\"\n\n\ndef test_semantic_fallback_confirmed_memory_stands_in():\n    from gaia_core.cognition import semantic_probe\n    fake, calls = _probe_rpc([dict(PROBE_HIT, question_match=0.2, times_confirmed=2)])\n    with patch(\"urllib.request.urlopen\", side_effect=fake):\n        out = semantic_probe._web_search_fallback([\"Excalibur\"])\n    assert calls == [\"palace_recall_lookup\"] and out[\"Excalibur\"][\"source\"] == \"lookup_memory\"\n\n\ndef test_semantic_fallback_never_stands_in_with_memory_that_failed():\n    from gaia_core.cognition import semantic_probe\n    fake, calls = _probe_rpc([dict(PROBE_HIT, times_confirmed=2, unhelpful_match=0.8)])\n    with patch(\"urllib.request.urlopen\", side_effect=fake):\n        semantic_probe._web_search_fallback([\"Excalibur\"])\n    assert calls == [\"palace_recall_lookup\", \"web_search\"]\n\n\ndef test_semantic_fallback_uses_other_memory_when_web_is_empty():\n    import json\n    from gaia_core.cognition import semantic_probe\n\n    def fake(req, timeout=None):\n        if json.loads(req.data)[\"method\"] == \"palace_recall_lookup\":\n            return _Resp({\"result\": {\"results\": [dict(PROBE_HIT, question_match=0.2)]}})\n        return _Resp({\"result\": {\"results\": []}})\n    with patch(\"urllib.request.urlopen\", side_effect=fake):\n        out = semantic_probe._web_search_fallback([\"Excalibur\"])\n    assert out[\"Excalibur\"][\"source\"] == \"lookup_memory\"\n    assert out[\"Excalibur\"][\"results\"][0][\"remembered\"] is True",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/semantic_probe.py b/candidates/gaia-core/gaia_core/cognition/semantic_probe.py\nindex 57b6499..edd5fe4 100644\n--- a/candidates/gaia-core/gaia_core/cognition/semantic_probe.py\n+++ b/candidates/gaia-core/gaia_core/cognition/semantic_probe.py\n@@ -860,10 +860,25 @@ def _web_search_fallback(entities: List[str]) -> Dict[str, Dict]:\n     MCP_ENDPOINT = \"http://gaia-mcp:8765/jsonrpc\"\n     results = {}\n \n-    def _recall(entity: str) -> List[Dict]:\n-        \"\"\"0vuz: what she looked up before about this entity. A fresh,\n-        relevant memory stands in for the search (no repeat lookup); the\n-        hits keep their provenance so the prompt can cite them.\"\"\"\n+    # 76hb: which remembered hits may stand in for this entity's search.\n+    # A record retrieved FOR this entity (question_match) is a cached copy\n+    # of that very search; one confirmed by an earlier answer proved useful.\n+    # Others — e.g. pages kept for \"Where did King Arthur get Excalibur?\",\n+    # recalled for the entity \"Excalibur\" — are a different search's results\n+    # and only fill in when the web returns nothing. Records that failed\n+    # this query before (unhelpful_match) never stand in. Same thresholds\n+    # as knowledge_router (6afh).\n+    _MATCH = 0.6\n+\n+    def _stands_in(h: Dict) -> bool:\n+        return (float(h.get(\"unhelpful_match\") or 0.0) < _MATCH\n+                and (float(h.get(\"question_match\") or 0.0) >= _MATCH\n+                     or bool(h.get(\"times_confirmed\"))))\n+\n+    def _recall(entity: str) -> Tuple[List[Dict], List[Dict]]:\n+        \"\"\"0vuz: what she looked up before about this entity, split into\n+        (hits that can replace the search, hits that are only a fallback).\n+        The hits keep their provenance so the prompt can cite them.\"\"\"\n         try:\n             payload = _json.dumps({\n                 \"jsonrpc\": \"2.0\",\n@@ -875,26 +890,35 @@ def _web_search_fallback(entities: List[str]) -> Dict[str, Dict]:\n                           headers={\"Content-Type\": \"application/json\"})\n             with urlopen(req, timeout=2) as resp:\n                 data = _json.loads(resp.read())\n-            hits = (data.get(\"result\") or {}).get(\"results\", [])\n-            return [{\n+            hits = [h for h in (data.get(\"result\") or {}).get(\"results\", [])\n+                    if isinstance(h, dict) and h.get(\"snippet\") and not h.get(\"stale\")]\n+        except Exception:\n+            logger.debug(\"Lookup memory recall failed for '%s'\", entity, exc_info=True)\n+            return [], []\n+\n+        def _fmt(h: Dict) -> Dict:\n+            return {\n                 \"title\": h.get(\"title\") or h.get(\"domain\", \"\"),\n                 \"snippet\": (h.get(\"snippet\") or \"\")[:200],\n                 \"url\": h.get(\"url\", \"\"),\n                 \"remembered\": True,\n                 \"retrieved_at\": h.get(\"retrieved_at\", \"\"),\n                 \"stale\": False,\n-            } for h in hits if isinstance(h, dict) and h.get(\"snippet\") and not h.get(\"stale\")]\n-        except Exception:\n-            logger.debug(\"Lookup memory recall failed for '%s'\", entity, exc_info=True)\n-            return []\n+            }\n+        strong = [_fmt(h) for h in hits if _stands_in(h)]\n+        weak = [_fmt(h) for h in hits if not _stands_in(h)]\n+        return strong, weak\n \n     for entity in entities:\n-        remembered = _recall(entity)\n+        remembered, fallback = _recall(entity)\n         if remembered:\n             results[entity] = {\"results\": remembered, \"source\": \"lookup_memory\", \"query\": entity}\n             logger.info(\"Web fallback for '%s': answered from %d remembered lookup(s), no search\",\n                         entity, len(remembered))\n             continue\n+        if fallback:\n+            logger.info(\"Web fallback for '%s': %d remembered lookup(s) were for other questions; searching\",\n+                        entity, len(fallback))\n         try:\n             payload = _json.dumps({\n                 \"jsonrpc\": \"2.0\",\n@@ -931,6 +955,12 @@ def _web_search_fallback(entities: List[str]) -> Dict[str, Dict]:\n             logger.debug(\"Web fallback timed out for '%s'\", entity)\n         except Exception:\n             logger.debug(\"Web fallback failed for '%s'\", entity, exc_info=True)\n+        if entity not in results and fallback:\n+            # The web gave nothing (empty, down, or over budget): what she\n+            # looked up for other questions still beats no context.\n+            results[entity] = {\"results\": fallback, \"source\": \"lookup_memory\", \"query\": entity}\n+            logger.info(\"Web fallback for '%s': search empty; using %d remembered lookup(s) instead\",\n+                        entity, len(fallback))\n \n     return results\n \n"
+ },
+ "commit_subject": "fix(76hb): semantic probe uses memory in place of a search only if it earned it"
+}

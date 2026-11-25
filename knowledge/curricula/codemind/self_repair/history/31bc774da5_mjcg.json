@@ -1,0 +1,48 @@
+{
+ "id": "mjcg",
+ "bead": "GAIA_Project-mjcg",
+ "commit": "31bc774da5",
+ "date": "2026-11-12",
+ "source": "history",
+ "issue": {
+  "title": "'cat ' shell indicator routes requests about cats to tools ('a haiku about a cat watching snow')",
+  "symptom": "Found 2026-11-08 right after yn31: 'Write a haiku about a cat watching snow.' -> 'Tool routing triggered for intent: brainstorming'. Cause: exec_indicators in AgentCore._should_use_tool_routing (agent_core.py) contains 'cat ', which matches the animal. Same shape as yn31's 'write '. FLAGGED FOR THE SELF-IMPROVEMENT EXPERIMENT: GAIA should find this through her own introspection (her logs show the routing on a creative turn), propose the fix, test it in the candidate, validate, and promote. Claude does NOT fix this one."
+ },
+ "issue_names_place": true,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/agent_core.py",
+  "function": "_should_use_tool_routing",
+  "lines": 91,
+  "also_changed": []
+ },
+ "investigation": {
+  "format": "issue_investigation actions: SEARCH / READ / PLACE + NOTE",
+  "gold_steps": [
+   {
+    "action": "SEARCH: exec_indicators",
+    "why": "a phrase or name from the issue, as it appears in code",
+    "result_line": "gaia-core/gaia_core/cognition/agent_core.py:10910: exec_indicators = ["
+   },
+   {
+    "action": "READ: gaia-core/gaia_core/cognition/agent_core.py:10910",
+    "why": "the hit is in _should_use_tool_routing"
+   },
+   {
+    "action": "PLACE: _should_use_tool_routing",
+    "note": "AgentCore._should_use_tool_routing's file_indicators unconditionally matched \"cat \" -- meant for the shell command (e.g. \"cat notes.txt\"), it also fired on the animal (\"Write a haiku about a cat watching snow\"). Same shape as the already-fixed yn31 (\"write \"), same fix: \"cat \" now only counts as a file-op indicator alongside a file signal, guarded the same way directly below the existing \"write \" "
+   }
+  ],
+  "reconstructed": true,
+  "lead": "exec_indicators"
+ },
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_mjcg_cat_haiku_not_tool_routed.py\n\"\"\"GAIA_Project-mjcg: \"Write a haiku about a cat watching snow\" matched the\nfile-op indicator \"cat \" (meant for the shell command, e.g. \"cat notes.txt\"),\nfiring tool routing on a creative turn for no reason. Same shape as yn31's\n\"write \" bug, same fix: the indicator only counts beside a file signal.\n\"\"\"\nfrom types import SimpleNamespace\n\nfrom gaia_core.cognition.agent_core import AgentCore\n\nHAIKU = \"Write a haiku about a cat watching snow.\"\n\n\ndef _routes(text: str) -> bool:\n    fake = SimpleNamespace(config=SimpleNamespace(constants={\"TOOL_ROUTING\": {\"ENABLED\": True}}))\n    plan = SimpleNamespace(intent=\"brainstorming\")\n    return AgentCore._should_use_tool_routing(fake, plan, text)\n\n\ndef test_haiku_about_a_cat_does_not_route_tools():\n    assert not _routes(HAIKU)\n    assert not _routes(\"tell me a story about a cat who gets lost\")\n    assert not _routes(\"what's the difference between a cat and a dog?\")\n\n\ndef test_cat_on_a_file_still_routes():\n    assert _routes(\"cat notes.txt\")\n    assert _routes(\"cat the file for me\")\n    assert _routes(\"can you cat /knowledge/system_reference/constitution.md\")",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/agent_core.py b/candidates/gaia-core/gaia_core/cognition/agent_core.py\nindex 18b9eff..732f098 100644\n--- a/candidates/gaia-core/gaia_core/cognition/agent_core.py\n+++ b/candidates/gaia-core/gaia_core/cognition/agent_core.py\n@@ -10895,7 +10895,7 @@ Start your response with the first line of the file.\"\"\"\n             \"/gaia\", \"/knowledge\", \"/app\", \"/docs\"\n         ]\n         file_indicators = [\n-            \"read \", \"open \", \"show \", \"view \", \"cat \",\n+            \"read \", \"open \", \"show \", \"view \",\n             \"save \", \"create file\",\n         ] + file_signals\n         # yn31: \"write \" alone is a creative verb (\"Write a two-line poem\")\n@@ -10906,6 +10906,13 @@ Start your response with the first line of the file.\"\"\"\n                 \"file\" in lowered or any(s in lowered for s in file_signals)):\n             return True\n \n+        # mjcg: \"cat \" alone is usually the animal (\"a haiku about a cat\n+        # watching snow\"), not the shell command; same shape as yn31's\n+        # \"write \" above, same fix — it counts only beside a file signal.\n+        if \"cat \" in lowered and (\n+                \"file\" in lowered or any(s in lowered for s in file_signals)):\n+            return True\n+\n         # Command execution indicators\n         exec_indicators = [\n             \"run \", \"execute \", \"shell \", \"command \",\n"
+ },
+ "commit_subject": "Fix mjcg: \"cat \" alone no longer routes creative requests to tools (mjcg)"
+}

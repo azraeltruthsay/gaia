@@ -1,0 +1,48 @@
+{
+ "id": "74t8",
+ "bead": "GAIA_Project-74t8",
+ "commit": "a65cd963f6",
+ "date": "2026-11-02",
+ "source": "history",
+ "issue": {
+  "title": "DELETE /api/sessions blocks the event loop; bulk delete got gaia-core restarted",
+  "symptom": "2026-11-02: deleting probe sessions one at a time from inside gaia-core; each DELETE runs summarize_and_archive, an LLM call inside an async handler. After 10 deletes in ~2 min /health failed 4 times, doctor declared gaia-core DOWN, compose recreate failed (known $HOME groq key mount), fallback restart recovered her. Fix: run the archive off the event loop, or skip summaries for empty/probe sessions. 60 probe-affect-* sessions remain in /shared/sessions.json."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/main.py",
+  "function": "delete_session",
+  "lines": 37,
+  "also_changed": []
+ },
+ "investigation": {
+  "format": "issue_investigation actions: SEARCH / READ / PLACE + NOTE",
+  "gold_steps": [
+   {
+    "action": "SEARCH: summarize_and_archive",
+    "why": "a phrase or name from the issue, as it appears in code",
+    "result_line": "gaia-core/gaia_core/main.py:1035: sm.summarize_and_archive(session_id)"
+   },
+   {
+    "action": "READ: gaia-core/gaia_core/main.py:1035",
+    "why": "the hit is in delete_session"
+   },
+   {
+    "action": "PLACE: delete_session",
+    "note": "The archive's LLM calls ran on the event loop, starving /health; ten deletes in a row got gaia-core restarted by the doctor. They now run in a worker thread. archive=false skips the summary for throwaway sessions: 101 probe sessions deleted in 1.3 s, service healthy throughout."
+   }
+  ],
+  "reconstructed": true,
+  "lead": "summarize_and_archive"
+ },
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_delete_session_74t8.py\n\"\"\"DELETE /api/sessions ran the archive's LLM calls on the event loop, so bulk\ndeletes starved /health until the doctor restarted gaia-core (74t8).\"\"\"\n\nimport asyncio\nimport threading\nfrom types import SimpleNamespace\n\nfrom gaia_core import main\n\n\ndef _delete(monkeypatch, **kwargs):\n    sm = _Sessions()\n    monkeypatch.setattr(main, \"_ai_manager\", SimpleNamespace(session_manager=sm))\n    result = asyncio.run(main.delete_session(\"s\", **kwargs))\n    assert result[\"status\"] == \"deleted\" and sm.reset\n    return sm\n\n\ndef test_archive_runs_off_the_event_loop(monkeypatch):\n    sm = _delete(monkeypatch)\n    assert sm.archive_thread is not None\n    assert sm.archive_thread is not threading.main_thread()\n\n\ndef test_archive_false_skips_the_summary(monkeypatch):\n    assert _delete(monkeypatch, archive=False).archive_thread is None",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/main.py b/candidates/gaia-core/gaia_core/main.py\nindex 94d792d..0f2bdad 100644\n--- a/candidates/gaia-core/gaia_core/main.py\n+++ b/candidates/gaia-core/gaia_core/main.py\n@@ -1018,8 +1018,9 @@ async def update_session_meta(request: Request, session_id: str):\n \n \n @app.delete(\"/api/sessions/{session_id}\")\n-async def delete_session(session_id: str):\n-    \"\"\"Archive and remove a session.\"\"\"\n+async def delete_session(session_id: str, archive: bool = True):\n+    \"\"\"Archive and remove a session. archive=false skips the summary, for\n+    throwaway sessions (test probes) that shouldn't enter long-term memory.\"\"\"\n     if _ai_manager is None:\n         return JSONResponse(status_code=503, content={\"error\": \"Cognitive system not initialized\"})\n \n@@ -1030,9 +1031,11 @@ async def delete_session(session_id: str):\n     session = sm.sessions[session_id]\n \n     # Archive before deletion if there is history\n-    if session.history:\n+    if archive and session.history:\n         try:\n-            sm.summarize_and_archive(session_id)\n+            # 74t8: this runs LLM calls. On the event loop it starved /health;\n+            # ten deletes in a row got gaia-core restarted by the doctor.\n+            await asyncio.to_thread(sm.summarize_and_archive, session_id)\n         except Exception as e:\n             logger.warning(\"Pre-delete archive failed for %s: %s\", session_id, e)\n \n"
+ },
+ "commit_subject": "fix(74t8): deleting a session no longer blocks gaia-core"
+}

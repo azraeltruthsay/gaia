@@ -1,0 +1,29 @@
+{
+ "id": "kixf",
+ "bead": "GAIA_Project-kixf",
+ "commit": "55dcd08d4f",
+ "date": "2026-10-29",
+ "source": "history",
+ "issue": {
+  "title": "read_file at REFLEX depth returns a canned 'Read: … Preview:' instead of answering",
+  "symptom": "Live 2026-10-30: 'Read the file /knowledge/blueprints/COGNITIVE_ARCHITECTURE.md and tell me its first heading' went to the nano REFLEX path in ~2 of 5 fresh sessions (NeuralRouter intent=read_file target=nano source=reflex; EmbedIntentClassifier best=read_file score 0.445 < 0.45 threshold on one). Reply is '[nano] Read: <path> Preview: <first lines>' — the heading is visible but the question ('tell me its first heading') is never answered. The deliberation path answers 3/3 since gjuh.8. Same turn also runs a nano planning call whose model config has max_model_len 2048, so its system prompt is cut to 200 chars ('Truncated system message from 486 to 200 chars'); nano proxies to Core's engine, which has a larger context. Look at: when a read_file request carries a question beyond 'read X', route it through the answering path; and nano's max_model_len."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/tool_selector.py",
+  "function": "_deterministic_tool_match",
+  "lines": 211,
+  "also_changed": []
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/gaia_core/cognition/tests/test_file_read_routing_kixf.py\n\"\"\"kixf: a request naming a file to read is routed deterministically. Only\n\"read /path\" matched; \"Read the file /path and tell me …\" went to the LLM\nselector and review, which declined it twice, and the turn fell back to a raw\npreview that never answered the question.\"\"\"\n\nimport pytest\n\nfrom gaia_core.cognition.tool_selector import _deterministic_tool_match\n\nP = \"/knowledge/blueprints/COGNITIVE_ARCHITECTURE.md\"\n\n\n@pytest.mark.parametrize(\"text\", [\n    f\"Read the file {P} and tell me its first heading\",\n    f\"Can you read {P} and tell me how many regions it lists?\",\n    f\"Please open {P}.\",\n    f\"Look at the contents of {P} — what's it about?\",\n    f\"read {P}\",\n])\n\n\n@pytest.mark.parametrize(\"text\", [\n    f\"Read the file {P} and tell me its first heading\",\n    f\"Can you read {P} and tell me how many regions it lists?\",\n    f\"Please open {P}.\",\n    f\"Look at the contents of {P} — what's it about?\",\n    f\"read {P}\",\n])\ndef test_file_read_requests_match_deterministically(text):\n    m = _deterministic_tool_match(text.lower(), text)\n    assert m is not None and m.tool_name == \"file\"\n    assert m.params == {\"action\": \"read\", \"path\": P}  # case kept, no trailing period\n    assert m.selection_confidence >= 0.9  # skips the LLM review\n\n\n@pytest.mark.parametrize(\"text\", [\n    \"I read about /r/python on reddit and liked it\",\n    \"What do you think about reading?\",\n    \"Tell me about /knowledge in general\",\n])\ndef test_non_requests_do_not_read(text):\n    m = _deterministic_tool_match(text.lower(), text)\n    assert m is None or m.tool_name != \"file\"",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/tool_selector.py b/candidates/gaia-core/gaia_core/cognition/tool_selector.py\nindex 8a00402..3091ad9 100644\n--- a/candidates/gaia-core/gaia_core/cognition/tool_selector.py\n+++ b/candidates/gaia-core/gaia_core/cognition/tool_selector.py\n@@ -346,12 +346,21 @@ def _deterministic_tool_match(lowered: str, user_input: str = \"\") -> Optional[Se\n             selection_confidence=0.95,\n         )\n \n-    # File read — \"read /path/to/file\"\n-    path_match = re.search(r'\\bread\\s+(/[\\w/._-]+)', lowered)\n+    # File read — \"read /path/to/file\", \"read the file /path …\", \"open /path\".\n+    # kixf: only a path right after \"read\" matched; \"Read the file /path and\n+    # tell me …\" went to the LLM selector, which twice declined it (a made-up\n+    # knowledge(review); Prime's review at 0.42), and the turn fell back to a\n+    # raw preview that never answered. Filler words between verb and path are\n+    # allowed; a sentence's closing period is not part of the path. Matched on\n+    # the original text: paths are case-sensitive (COGNITIVE_ARCHITECTURE.md).\n+    path_match = re.search(\n+        r'\\b(?:read|open|summari[sz]e|look\\s+(?:at|over|through))\\s+'\n+        r'(?:(?:the|this|that|my|me|file|doc|document|contents\\s+of)\\s+){0,3}(/[\\w/._-]+)',\n+        user_input or lowered, re.IGNORECASE)\n     if path_match:\n         return SelectedTool(\n             tool_name=\"file\",\n-            params={\"action\": \"read\", \"path\": path_match.group(1)},\n+            params={\"action\": \"read\", \"path\": path_match.group(1).rstrip(\".\")},\n             selection_reasoning=\"Deterministic match: explicit file read request\",\n             selection_confidence=0.95,\n         )\n"
+ },
+ "commit_subject": "fix(kixf): a named file to read routes deterministically, path case kept"
+}

@@ -1,0 +1,31 @@
+{
+ "id": "92g3",
+ "bead": "GAIA_Project-92g3",
+ "commit": "277415bf25",
+ "date": "2026-11-11",
+ "source": "history",
+ "issue": {
+  "title": "Personal/relational messages trigger KnowledgeRouter web search",
+  "symptom": "2026-11-11 replay: 'Does that apply to me as well? I'm Azrael... would you share your ideas and plans with me?' classified comprehension, KnowledgeRouter searched mempalace+web (2.5s) for a message about the speaker and her. Reply was fine but the turn was labelled 'searched the web'. Relational questions to her shouldn't ground on the web."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/agent_core.py",
+  "function": "run_turn",
+  "lines": 4451,
+  "also_changed": [
+   "gaia-core/gaia_core/cognition/semantic_probe.py:_find_ungrounded_entities"
+  ]
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_failed_recall_honesty.py\n\"\"\"A failed memory lookup and what she says after it (2026-11-11, Discord).\"\"\"\nfrom gaia_core.cognition.reply_scrub import claims_memory, honest_about_failure, palace_recall_params\nfrom gaia_core.cognition.semantic_probe import extract_candidate_phrases\n\n\ndef test_messages_about_them_and_her_are_not_looked_up_on_the_web():\n    from gaia_core.cognition.agent_core import is_relational\n    for t in [\"Does that apply to me as well though? I'm Azrael, and I've been the sole human architect. \"\n              \"Would you share your ideas and plans with me?\",\n              \"Do you have anything you'd like to change about yourself?\",\n              \"I am your creator, you know.\", \"Oh Andy isn't building you, I am. He's just my friend\"]:\n        assert is_relational(t), t\n    for t in [\"How many sides does a heptagon have?\", \"Who was the most well known Roman emperor?\",\n              \"What's the weather in Paris with the storm?\"]:\n        assert not is_relational(t), t",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/agent_core.py b/candidates/gaia-core/gaia_core/cognition/agent_core.py\nindex 39713d5..f6e166f 100644\n--- a/candidates/gaia-core/gaia_core/cognition/agent_core.py\n+++ b/candidates/gaia-core/gaia_core/cognition/agent_core.py\n@@ -446,6 +446,22 @@ class ComplexityAssessment:\n     confidence: float\n \n \n+\n+_RELATIONAL_RE = re.compile(\n+    r\"\\b(?:(?:apply|applies|mean|matter)\\s+to\\s+me|with\\s+me\\b|(?:share|tell\\s+me)\\s+(?:your|about\\s+your)\\s+\"\n+    r\"(?:ideas|plans|hopes|wishes|feelings|thoughts)|about\\s+yourself|(?:like|want)\\s+to\\s+change\\s+about\\s+yourself\"\n+    r\"|do\\s+you\\s+(?:trust|like|miss|love)\\s+me|what\\s+am\\s+I\\s+to\\s+you\"\n+    r\"|I'?m\\s+[A-Z][a-z]+,\\s+(?:and\\s+)?(?:I|your)\\b|I\\s+am\\s+your\\s+(?:creator|architect|friend)\"\n+    r\"|\\b(?:isn'?t|wasn'?t)\\b[^.?!]{0,40}\\byou\\b[^.?!]{0,10},\\s*I\\s+(?:am|was)\\b)\",\n+    re.IGNORECASE)\n+\n+\n+def is_relational(text: str) -> bool:\n+    \"\"\"A message about the speaker and her rather than about the world: the\n+    web has nothing to say to it (92g3).\"\"\"\n+    return bool(_RELATIONAL_RE.search(text or \"\"))\n+\n+\n class AgentCore:\n     \"\"\"\n     Encapsulates the core \"Reason-Act-Reflect\" loop for GAIA.\n@@ -3552,6 +3568,12 @@ class AgentCore:\n                         \"KnowledgeRouter: skipped — user solicits opinion; \"\n                         \"factual retrieval doesn't help a philosophical chat\"\n                     )\n+            # Relational gate (92g3): about the two of them, not the world —\n+            # \"Does that apply to me? I'm Azrael... would you share your plans\n+            # with me?\" was read as comprehension and searched the web (2.5 s).\n+            if not _kr_skip and is_relational(user_input or \"\"):\n+                _kr_skip = True\n+                logger.info(\"KnowledgeRouter: skipped — about them and her, not the world\")\n             # Personal/chitchat gate: \"how are you?\", greetings, smalltalk don't\n             # benefit from knowledge grounding — and grounding them retrieves PAST\n             # ops-flavored answers from the journal (\"I'm awake and running, parked\ndiff --git a/candidates/gaia-core/gaia_core/cognition/semantic_probe.py b/candidates/gaia-core/gaia_core/cognition/semantic_probe.py\nindex a9abb54..56d83d8 100644\n--- a/candidates/gaia-core/gaia_core/cognition/semantic_probe.py\n+++ b/candidates/gaia-core/gaia_core/cognition/semantic_probe.py\n@@ -831,6 +831,11 @@ def _find_ungrounded_entities(\n             continue\n         if phrase.lower() in _GAIA_STOP_WORDS:\n             continue\n+        # People she knows are hers to describe, not the web's: \"Azrael\"\n+        # brought back pages about the angel, \"Anton Snark\" a stranger\n+        # (92g3, 2026-11-11). The prompt describes them from the registry.\n+        if _known_person(phrase):\n+            continue\n         # Only include entity-like phrases:\n         # - Capitalized (proper noun)\n         # - Multi-word\n@@ -849,6 +854,17 @@ def _find_ungrounded_entities(\n     return ungrounded[:3]  # Cap at 3 to limit latency\n \n \n+def _known_person(phrase: str) -> bool:\n+    \"\"\"Whether a phrase is the name of someone in her people registry.\"\"\"\n+    try:\n+        from gaia_common.utils.people import PeopleRegistry\n+        registry = PeopleRegistry()\n+        words = phrase.split()\n+        return any(registry.find_by_name(n) for n in {phrase, words[-1] if words else \"\"} if n)\n+    except Exception:\n+        return False\n+\n+\n def _web_search_fallback(entities: List[str]) -> Dict[str, Dict]:\n     \"\"\"Lightweight web search for ungrounded entities.\n \n"
+ },
+ "commit_subject": "Messages about her and the person aren't looked up on the web"
+}

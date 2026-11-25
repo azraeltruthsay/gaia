@@ -1,0 +1,31 @@
+{
+ "id": "rlnp",
+ "bead": "GAIA_Project-rlnp",
+ "commit": "99f7c31127",
+ "date": "2026-10-30",
+ "source": "history",
+ "issue": {
+  "title": "Planning call on 'nano' truncates the system prompt to 200 chars (max_model_len 2048)",
+  "symptom": "Seen in kixf logs 2026-10-30: 'AgentCore: entering planning call with model=nano' → 'Prompt (1581 est. tokens) exceeds context budget (-200)' → 'Truncated system message from 486 to 200 chars', 'Clamping max_tokens 2248 → 518 (context: 2048)'. The planning output was junk ('---\\n**Note: This is the last reply of a lo…'). nano is now a proxy to Core's engine (gaia-nano socat → gaia-core:8092), which serves a larger context, but the nano model config still says max_model_len 2048, and _should_use_slim_prompt forces slim for nano on that assumption. Check: what context Core's engine actually allows; whether nano's config should mirror it; whether the planning call should run at all on tool-answered turns."
+ },
+ "issue_names_place": true,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/agent_core.py",
+  "function": "_should_use_slim_prompt",
+  "lines": 53,
+  "also_changed": [
+   "gaia-core/gaia_core/models/_model_pool_impl.py:_apply_env_model_overrides"
+  ]
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/gaia_core/cognition/tests/test_nano_alias_window_rlnp.py\n\"\"\"rlnp: 'nano' is an alias to Core's engine, so it has Core's window. Its\nstale max_model_len of 2048 made the planning call's prompt overflow, which\ncut the system message to 200 chars and the planning output to junk.\"\"\"\n\nimport json\nimport os\n\nimport pytest\n\n_CONSTANTS = \"/gaia-common/gaia_common/constants/gaia_constants.json\"\n\n\ndef _constants():\n    if not os.path.exists(_CONSTANTS):\n        pytest.skip(\"gaia_constants.json not mounted\")\n    return json.load(open(_CONSTANTS))\n\n\ndef test_nano_alias_has_cores_window():\n    models = _constants()[\"MODEL_CONFIGS\"]\n    nano, core = models[\"nano\"], models[\"core\"]\n    assert nano[\"endpoint\"] == core[\"endpoint\"]\n    assert nano[\"max_model_len\"] == core[\"max_model_len\"]",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/agent_core.py b/candidates/gaia-core/gaia_core/cognition/agent_core.py\nindex 7710a63..a7c3ed2 100644\n--- a/candidates/gaia-core/gaia_core/cognition/agent_core.py\n+++ b/candidates/gaia-core/gaia_core/cognition/agent_core.py\n@@ -6961,9 +6961,9 @@ RESULT: COMPLEX (reason: <brief reason>)\n         if force_slim:\n             return True\n \n-        # Nano MUST always use slim prompt — its context window (2048)\n-        # cannot fit the full planning pipeline. Sending the full prompt causes\n-        # context overflow errors (400) and exhausts the fallback chain.\n+        # Nano (the reflex tier) always takes the slim prompt. It is now an\n+        # alias to Core's engine with Core's window (rlnp: its stale 2048\n+        # cut the planning call's system prompt to 200 chars).\n         if selected_model_name == \"nano\":\n             return True\n \ndiff --git a/candidates/gaia-core/gaia_core/models/_model_pool_impl.py b/candidates/gaia-core/gaia_core/models/_model_pool_impl.py\nindex 57e70a3..e7c4c67 100644\n--- a/candidates/gaia-core/gaia_core/models/_model_pool_impl.py\n+++ b/candidates/gaia-core/gaia_core/models/_model_pool_impl.py\n@@ -553,9 +553,16 @@ class ModelPool:\n                     \"endpoint\": nano_endpoint,\n                     \"path\": nano_model,\n                     \"enabled\": True,\n-                    \"max_model_len\": 2048,\n+                    # rlnp: keep the configured window (nano is an alias to\n+                    # Core's engine); a hardcoded 2048 overrode it and cut the\n+                    # planning call's system prompt to 200 chars.\n+                    \"max_model_len\": int(\n+                        _existing_nano.get(\"max_model_len\")\n+                        or self.config.MODEL_CONFIGS.get(\"core\", {}).get(\"max_model_len\")\n+                        or 4096),\n                 }\n-                logger.info(\"NANO_ENDPOINT set: nano -> GAIA Engine @ %s\", nano_endpoint)\n+                logger.info(\"NANO_ENDPOINT set: nano -> GAIA Engine @ %s (window %d)\",\n+                            nano_endpoint, self.config.MODEL_CONFIGS[\"nano\"][\"max_model_len\"])\n             elif _nano_explicitly_disabled:\n                 logger.info(\"NANO_ENDPOINT set but nano.enabled=False in config — keeping disabled\")\n \n"
+ },
+ "commit_subject": "fix(rlnp): nano keeps Core's window; planning prompt no longer cut to 200 chars"
+}

@@ -1,0 +1,29 @@
+{
+ "id": "mlx8",
+ "bead": "GAIA_Project-mlx8",
+ "commit": "d09843408f",
+ "date": "2026-11-17",
+ "source": "history",
+ "issue": {
+  "title": "Web grounding searches on a greeting word: 'Splendid.' fetched Dottyback and Tripadvisor pages",
+  "symptom": "2026-11-05: 'Splendid. Do you know where he got the sword?' put pages about 'Splendid' in web_grounding: a capitalized opening word treated as an entity in semantic_probe (see _COMMON_WORDS). Follow-up grounding also searched 'Who was his queen then? Ok now true love I've'. Same family as the 'What do you mean by that?' bug."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/semantic_probe.py",
+  "function": "extract_candidate_phrases",
+  "lines": 95,
+  "also_changed": []
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_reply_scrub_8ail.py\n\"\"\"Junk around a reply goes; the reply and its labels stay (8ail, vjrv).\"\"\"\nimport asyncio\nimport json\n\nimport pytest\n\nfrom gaia_core.cognition.reply_scrub import (\n    HeadScrubber,\n    answered_already,\n    claims_success,\n    honest_about_failure,\n    own_words,\n    scrub_reply,\n    scrub_stream,\n)\n\nCUE = 'They asked: \"Tell me about it.\" You already did that, and it returned the above. Your reply to them:'\n\nCASES = [\n    (\"[Core]\\n\\n<nooutput>\\nThe Raven is a poem.\", \"[Core]\\n\\nThe Raven is a poem.\"),\n    ('[Core]\\n\\n<nooutput>{\"content\": \"The Raven is a poem.</nooutput>', \"[Core]\\n\\nThe Raven is a poem.\"),\n    ('{\"content\": \"The Raven is a poem.\"}', \"The Raven is a poem.\"),\n    (\"[Core]\\n\\n<blockquote>The Raven is a poem.\", \"[Core]\\n\\nThe Raven is a poem.\"),\n    ('assistant\\n{\"tool\": \"file\"}', '{\"tool\": \"file\"}'),\n    (\"[Prime]\\n\\nAssistant: The colors are red and blue.\", \"[Prime]\\n\\nThe colors are red and blue.\"),\n    (\"<|im_start|>assistant\\nThe boiling point is high.\", \"The boiling point is high.\"),\n    (\"[Core]\\n\\n[Clock: 08:36 AM PDT (Local), Tuesday | 15:36 UTC]\\nThe Raven is a poem.\", \"[Core]\\n\\nThe Raven is a poem.\"),\n    (f\"[Core]\\n\\n{CUE} It is a poem.\", \"[Core]\\n\\nIt is a poem.\"),\n    (f\"*[Searched the web for: x]*\\n\\n[Core]\\n\\n{CUE} It is a poem.\", \"*[Searched the web for: x]*\\n\\n[Core]\\n\\nIt is a poem.\"),\n    ('The user asked: \"x\"\\n\\nYour reply to them, from what it returned: Paris.', \"Paris.\"),\n]\n\nKEPT = [\n    \"Paris.\",\n    \"[nano]\\n\\nParis.\",\n    \"[1] is the first citation.\",\n    \"Assistants are helpful.\",\n    \"assistant managers run the shop.\",\n    \"They asked me to wait, and I did.\",\n    \"You already did that yesterday, I think.\",\n    '{\"contents\": 1} is the JSON you wanted.',\n    \"A tag like <b>this</b> stays, and so does 2 < 3.\",\n    \"[Clock: 08:36 AM]\",\n]\n\n\n@pytest.mark.parametrize(\"text,bad\", [\n    (\"Splendid. Do you know where he got the sword?\", \"Splendid\"),\n    (\"Who was his queen then? Ok now true love I've\", \"I've\"),\n])\ndef test_probe_skips_greetings_and_the_speaker(text, bad):\n    \"\"\"mlx8: 'Splendid.' fetched Dottyback and Tripadvisor pages.\"\"\"\n    from gaia_core.cognition.semantic_probe import extract_candidate_phrases\n    assert bad not in extract_candidate_phrases(text)\n    assert \"Rogue's End\" in extract_candidate_phrases(\"I visited Rogue's End today.\")",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/semantic_probe.py b/candidates/gaia-core/gaia_core/cognition/semantic_probe.py\nindex f4fef52..e1caf7c 100644\n--- a/candidates/gaia-core/gaia_core/cognition/semantic_probe.py\n+++ b/candidates/gaia-core/gaia_core/cognition/semantic_probe.py\n@@ -359,8 +359,11 @@ def extract_candidate_phrases(text: str) -> List[str]:\n         text\n     ):\n         # Not across a sentence end: \"Mission Control. It\", \"Discord. Andy\".\n-        for part in re.split(r\"(?<=[a-z]{2})\\.\\s+\", m.group(1)):\n-            if \" \" in part.strip() or part.strip()[:1].isupper():\n+        # mlx8: a part left as one word is a sentence's first word (\"Splendid.\n+        # Do you know...\" searched Splendid); single words are step 3's,\n+        # which skips sentence-initial ones.\n+        for part in re.split(r\"(?<=[a-z]{2})[.!?]\\s+\", m.group(1)):\n+            if \" \" in part.strip():\n                 _add(part)\n \n     # 3. Single capitalized words that aren't sentence-initial\n@@ -384,6 +387,9 @@ def extract_candidate_phrases(text: str) -> List[str]:\n         # Skip if it's a common word (case-insensitive)\n         if clean.lower() in _COMMON_WORDS:\n             continue\n+        # \"I've\", \"I'm\", \"I'd\": the speaker, not a name (mlx8).\n+        if re.match(r\"^I['’]\", clean):\n+            continue\n         _add(clean)\n \n     # 4. D&D notation patterns: AC 15, DC 18, d20, 2d6+3, etc.\n"
+ },
+ "commit_subject": "fix(probe): a greeting opening a sentence is not an entity (mlx8)"
+}

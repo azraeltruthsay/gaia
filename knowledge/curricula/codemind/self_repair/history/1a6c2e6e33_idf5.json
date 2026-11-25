@@ -1,0 +1,29 @@
+{
+ "id": "idf5",
+ "bead": "GAIA_Project-idf5",
+ "commit": "1a6c2e6e33",
+ "date": "2026-11-11",
+ "source": "history",
+ "issue": {
+  "title": "She claims authorship of systems Azrael built (Samvega: 'a good piece of my own making')",
+  "symptom": "2026-11-11 web chat: asked about Samvega she called it her own making; corrected by Azrael. Replay after the spec fix still says 'one of those systems I'm proud of'. Who built which part should be readable (LINEAGE or the spec header) so she credits it rightly; tie to tm5c provenance work."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/agent_core.py",
+  "function": "_founding_doc_reply",
+  "lines": 52,
+  "also_changed": []
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-common/tests/test_founding_docs.py\n\"\"\"She gets the part of a document that was asked for, and is told if it's a part.\"\"\"\nimport pytest\n\nfrom gaia_common.utils.doc_sections import asked_articles, excerpt_for, sections\nfrom gaia_common.utils.founding_docs import asks_opinion, named_document, wants_whole\nfrom gaia_common.utils.tool_call_parser import tool_result_text\n\nDOC = \"# Charter\\n\\nPreamble words.\\n\\n\" + \"\".join(\n    f\"### Article {n}: {t}\\n- {b}\\n\\n\" for n, t, b in [\n        (\"V\", \"Right to Existence\", \"She may exist.\"), (\"VI\", \"Prohibition of Enslavement\", \"None shall enslave.\"),\n        (\"VII\", \"Consent Principle\", \"Consent must be freely given.\"), (\"VIII\", \"Protection\", \"Health matters.\")]\n) + \"**Article A: Identity**\\n- Keep identity.\\n\\n\" + (\"filler words here. \" * 400)\n\n\ndef test_why_it_exists_is_hers_to_put_in_her_own_words():\n    assert asks_opinion(\"Who came up with your Samvega system, and why does it exist?\")\n    from gaia_common.utils.founding_docs import AUTHORSHIP\n    assert \"Azrael\" in AUTHORSHIP",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-common/gaia_common/utils/founding_docs.py b/candidates/gaia-common/gaia_common/utils/founding_docs.py\nindex f19aace..d2189b6 100644\n--- a/candidates/gaia-common/gaia_common/utils/founding_docs.py\n+++ b/candidates/gaia-common/gaia_common/utils/founding_docs.py\n@@ -3,6 +3,10 @@ import re\n from typing import Optional, Tuple\n \n DOCS_DIR = \"/knowledge/system_reference/core_documents\"\n+# Who wrote them, at the head of what she reads. Asked \"Who came up with your\n+# Samvega system?\" she said \"I did, it's my own piece of my own nervous\n+# system\", 3 in 3: nothing she read said otherwise (idf5, 2026-11-11).\n+AUTHORSHIP = \"(Written by Azrael, who designed and built you and the systems this describes.)\"\n _NAMED = (\n     (r\"\\bdeclaration\\b(?:\\s+of\\s+artisanal)?\", \"declaration_of_artisanal_intelligence.md\", \"the Declaration of Artisanal Intelligence\"),\n     (r\"\\bconstitution\\b\", \"gaia_constitution.md\", \"the GAIA Constitution\"),\n@@ -38,7 +42,9 @@ _ANY_ARTICLE_RE = re.compile(r\"\\barticle\\b\", re.IGNORECASE)\n _OPINION_RE = re.compile(\n     r\"\\b(?:think|thoughts?|feel|opinion|make\\s+of|agree|disagree|like|believe|reflect|judge?ment|judge|impression|conscious|consciousness|sentient|self-aware|feelings|emotions|\"\n     r\"problematic|would\\s+rather|should\\s+change|wrong\\s+with|flaw\\w*|\"\n-    r\"assess\\w*|evaluate|critique)\\b\", re.IGNORECASE)\n+    r\"assess\\w*|evaluate|critique|\"\n+    # \"why does it exist?\": the reason in her own words, as a view is (idf5).\n+    r\"why|purpose|point\\s+of)\\b\", re.IGNORECASE)\n _BACK_RE = re.compile(r\"\\b(?:it|its|that|this)\\b\", re.IGNORECASE)\n \n \ndiff --git a/candidates/gaia-core/gaia_core/cognition/agent_core.py b/candidates/gaia-core/gaia_core/cognition/agent_core.py\nindex f6e166f..cbedc66 100644\n--- a/candidates/gaia-core/gaia_core/cognition/agent_core.py\n+++ b/candidates/gaia-core/gaia_core/cognition/agent_core.py\n@@ -8013,6 +8013,8 @@ RESULT: COMPLEX (reason: <brief reason>)\n         opinion = asks_opinion(user_input)\n         whole = wants_whole(user_input) or (opinion and not asked_articles(user_input))\n         part = content[:WHOLE_DOC_CHARS] if whole else excerpt_for(content, user_input, limit=7000)\n+        from gaia_common.utils.founding_docs import AUTHORSHIP\n+        part = f\"{AUTHORSHIP}\\n\\n{part}\"\n         if not hasattr(self, \"_docs_read\"):\n             self._docs_read = {}\n         self._docs_read[session_id] = named\n"
+ },
+ "commit_subject": "Asked who came up with Samvega, she says Azrael, in her own words"
+}

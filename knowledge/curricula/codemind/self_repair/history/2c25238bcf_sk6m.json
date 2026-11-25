@@ -1,0 +1,29 @@
+{
+ "id": "sk6m",
+ "bead": "GAIA_Project-sk6m",
+ "commit": "2c25238bcf",
+ "date": "2026-11-17",
+ "source": "history",
+ "issue": {
+  "title": "palace(status) tool call fails: 'int' object is not iterable",
+  "symptom": "2026-11-17 web_vdaj_test6, turn 'where were we before that?': Core called palace(action=status, {}); gaia-core logged 'Tool call execution failed: 'int' object is not iterable' and she replied 'That didn't work on my end'. Find where the palace status result is iterated (main.py inline tool path, tool_result_text?)."
+ },
+ "issue_names_place": true,
+ "place": {
+  "file": "gaia-common/gaia_common/utils/tool_call_parser.py",
+  "function": "tool_result_text",
+  "lines": 54,
+  "also_changed": []
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-common/tests/test_tool_call_parser_415r.py\n\"\"\"Tests for gaia_common.utils.tool_call_parser.ToolCallParser.\n\nNo test file existed for this module before GAIA_Project-415r, so this\ncovers both the new <tool_calling: domain.action> variant (the actual bug\nfix) and baseline regression coverage for the pre-existing <tool_call> JSON\nand meta-verb formats, which had zero automated coverage.\n\nContext (415r): live 2026-08-15, Prime emitted\n'<tool_calling: knowledge.search> {\"query\": \"King Arthur\"} </tool_calling>'\n— a 4th tag format (domain.action embedded IN the open tag, bare params\nJSON body) that ToolCallParser didn't recognize at all, so it leaked to the\nuser as raw text instead of executing. Same failure class as GAIA_Project-pfdw.\n\"\"\"\n\nfrom gaia_common.utils.tool_call_parser import (\n    ToolCallParser,\n    ParseEventType,\n)\n\n\ndef test_palace_status_counts_are_not_works():\n    \"\"\"sk6m: palace(status) has \"works\": 13 (a count); the turn died with\n    \"'int' object is not iterable\".\"\"\"\n    from gaia_common.utils.tool_call_parser import tool_result_text\n    text = tool_result_text({\"ok\": True, \"total_memories\": 115, \"works\": 13,\n                             \"lookups\": {\"active\": 2078}}, question=\"where were we?\")\n    assert \"115\" in text",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-common/gaia_common/utils/tool_call_parser.py b/candidates/gaia-common/gaia_common/utils/tool_call_parser.py\nindex 4fb67dc..cfbc253 100644\n--- a/candidates/gaia-common/gaia_common/utils/tool_call_parser.py\n+++ b/candidates/gaia-common/gaia_common/utils/tool_call_parser.py\n@@ -572,7 +572,10 @@ def tool_result_text(result: Any, limit: int = 4000, question: str = \"\") -> str:\n             return text.strip() or \"(empty result)\"\n         else:\n             rows = result.get(\"lookups\") or result.get(\"results\")\n-            works = [w for w in result.get(\"works\") or [] if isinstance(w, dict) and w.get(\"text\")]\n+            # sk6m: palace(status) answers \"works\": 13, a count, not a list.\n+            _works = result.get(\"works\")\n+            works = [w for w in _works if isinstance(w, dict) and w.get(\"text\")] \\\n+                if isinstance(_works, list) else []\n             if works:\n                 # A work she knows outranks scraps about it: with lookups\n                 # alone she made up how The Raven ends (8ail, 2026-11-03).\n"
+ },
+ "commit_subject": "fix(tools): palace(status) no longer kills the turn (sk6m)"
+}

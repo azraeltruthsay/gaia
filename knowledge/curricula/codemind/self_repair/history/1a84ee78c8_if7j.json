@@ -1,0 +1,48 @@
+{
+ "id": "if7j",
+ "bead": "GAIA_Project-if7j",
+ "commit": "1a84ee78c8",
+ "date": "2026-11-15",
+ "source": "history",
+ "issue": {
+  "title": "Plain chat turn goes through tool routing (intent=chat, selector says no tool, ~1.7 s)",
+  "symptom": "2026-11-15 19:26, session web_journal_review_1115e: intent=chat, yet 'Tool routing triggered for intent: chat' and a tool-selection call ran (Core, ~1.7 s) before 'no tool needed'. _should_use_tool_routing now reads asking_text (5qv4); something in the preamble ('show you', 'journal', a question list?) still trips an indicator. Find which and gate it."
+ },
+ "issue_names_place": true,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/agent_core.py",
+  "function": "_should_use_tool_routing",
+  "lines": 99,
+  "also_changed": []
+ },
+ "investigation": {
+  "format": "issue_investigation actions: SEARCH / READ / PLACE + NOTE",
+  "gold_steps": [
+   {
+    "action": "SEARCH: asking_text",
+    "why": "a phrase or name from the issue, as it appears in code",
+    "result_line": "gaia-core/gaia_core/cognition/agent_core.py:10908: lowered = asking_text(user_input or \"\").lower()"
+   },
+   {
+    "action": "READ: gaia-core/gaia_core/cognition/agent_core.py:10908",
+    "why": "the hit is in _should_use_tool_routing"
+   },
+   {
+    "action": "PLACE: _should_use_tool_routing",
+    "note": "'He asked me to show you this week's journal' matched the file-op indicator 'show ' and a chat turn paid a ~1.7 s tool-selection call before 'no tool needed'. Same shape and fix as yn31 ('write ') and mjcg ('cat '): the verb counts only beside a path/extension or file, log, folder, directory. Verified live: intent=chat turn with 'show you' no longer triggers tool routing."
+   }
+  ],
+  "reconstructed": true,
+  "lead": "asking_text"
+ },
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_if7j_show_you_not_tool_routed.py\n\"\"\"GAIA_Project-if7j: a chat turn (\"He asked me to show you this week's dev\njournal and ask what you think of it\") matched the file-op indicator \"show \"\nand paid a tool-selection call before 'no tool needed'. Same shape as yn31's\n\"write \" and mjcg's \"cat \": \"show \" / \"view \" count only beside a file signal.\n\"\"\"\nfrom types import SimpleNamespace\n\nfrom gaia_core.cognition.agent_core import AgentCore\n\nASK = (\"Hi GAIA. This is Claude, the engineer who works on your code with Azrael. \"\n       \"He asked me to show you this week's dev journal and ask what you think of it.\")\n\n\ndef _routes(text: str) -> bool:\n    fake = SimpleNamespace(config=SimpleNamespace(constants={\"TOOL_ROUTING\": {\"ENABLED\": True}}))\n    plan = SimpleNamespace(intent=\"chat\")\n    return AgentCore._should_use_tool_routing(fake, plan, text)\n\n\ndef test_show_you_in_conversation_does_not_route_tools():\n    assert not _routes(ASK)\n    assert not _routes(\"can you show me how you'd phrase that more kindly?\")\n    assert not _routes(\"in my view the second ending is stronger\")\n\n\ndef test_show_or_view_a_file_still_routes():\n    assert _routes(\"show me notes.txt\")\n    assert _routes(\"show me the latest logs\")\n    assert _routes(\"view the file in /knowledge/system_reference\")\n    assert _routes(\"show me what's in that folder\")",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/agent_core.py b/candidates/gaia-core/gaia_core/cognition/agent_core.py\nindex 26d3ab2..814eb51 100644\n--- a/candidates/gaia-core/gaia_core/cognition/agent_core.py\n+++ b/candidates/gaia-core/gaia_core/cognition/agent_core.py\n@@ -10913,9 +10913,18 @@ Start your response with the first line of the file.\"\"\"\n             \"/gaia\", \"/knowledge\", \"/app\", \"/docs\"\n         ]\n         file_indicators = [\n-            \"read \", \"open \", \"show \", \"view \",\n+            \"read \", \"open \",\n             \"save \", \"create file\",\n         ] + file_signals\n+        # if7j: \"show \" / \"view \" alone are conversation (\"asked me to show\n+        # you this week's journal\", \"show me how\", \"my view is\"); 2026-11-15\n+        # a chat turn paid a ~1.7 s tool-selection call for \"show you\". Like\n+        # yn31's \"write \" and mjcg's \"cat \", they count only beside something\n+        # a tool can show.\n+        if any(v in lowered for v in (\"show \", \"view \")) and (\n+                any(s in lowered for s in file_signals)\n+                or any(w in lowered for w in (\"file\", \"log\", \"folder\", \"director\"))):\n+            return True\n         # yn31: \"write \" alone is a creative verb (\"Write a two-line poem\")\n         # far more often than a file op; it routed a poem to palace(work),\n         # whose not-found result then stood in for the poem. It counts only\n"
+ },
+ "commit_subject": "agent_core: 'show '/'view ' route tools only beside a file signal (if7j)"
+}

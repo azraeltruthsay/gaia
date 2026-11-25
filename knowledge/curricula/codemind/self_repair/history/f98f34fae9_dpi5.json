@@ -1,0 +1,31 @@
+{
+ "id": "dpi5",
+ "bead": "GAIA_Project-dpi5",
+ "commit": "f98f34fae9",
+ "date": "2026-11-11",
+ "source": "history",
+ "issue": {
+  "title": "Palace copy of Ozymandias carries a Wikipedia footnote marker",
+  "symptom": "Recited Ozymandias (from the memory palace) includes 'Stand in the desart.[d]' — a footnote marker from the source page. Strip [a]/[1]-style markers when storing recitation texts, and clean the existing palace entry."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-common/gaia_common/utils/work_memory.py",
+  "function": "recall",
+  "lines": 18,
+  "also_changed": [
+   "gaia-common/gaia_common/utils/work_memory.py:remember"
+  ]
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-common/tests/test_work_memory_dpi5.py\n\"\"\"dpi5: Ozymandias recited from the palace as 'Stand in the desart.[d]'.\"\"\"\nfrom gaia_common.utils.work_memory import WorkMemory, strip_footnotes\n\n\ndef test_footnote_markers_go():\n    assert strip_footnotes(\"Stand in the desart.[d] Near them,\") == \"Stand in the desart. Near them,\"\n    assert strip_footnotes(\"king of kings[12] and[citation needed]\") == \"king of kings and\"\n    assert strip_footnotes(\"a list [a] stays, and [Chorus] stays\") == \"a list [a] stays, and [Chorus] stays\"\n\n\ndef test_kept_and_recalled_clean(tmp_path):\n    wm = WorkMemory(tmp_path)\n    wm.remember(\"Ozymandias\", \"Two vast and trunkless legs of stone\\nStand in the desart.[d]\", [{\"url\": \"https://x\"}])\n    assert \"[d]\" not in wm.recall(\"Ozymandias\")[\"text\"]",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-common/gaia_common/utils/work_memory.py b/candidates/gaia-common/gaia_common/utils/work_memory.py\nindex df237de..75f940c 100644\n--- a/candidates/gaia-common/gaia_common/utils/work_memory.py\n+++ b/candidates/gaia-common/gaia_common/utils/work_memory.py\n@@ -71,6 +71,17 @@ a an the of and in on to from for by poem poems speech text full whole entire co\n \"\"\".split())\n \n \n+# Wikipedia-style footnote markers stuck to the text: Ozymandias recited from\n+# the palace as \"Stand in the desart.[d]\" (dpi5). Attached to a word or\n+# punctuation only, so a bracket that belongs to the work is kept.\n+_FOOTNOTE_RE = re.compile(r\"(?<=[^\\s\\[])\\[(?:[a-z]{1,2}|\\d{1,3}|note \\d{1,3}|nb \\d{1,3}|citation needed|clarification needed)\\]\",\n+                          re.IGNORECASE)\n+\n+\n+def strip_footnotes(text: str) -> str:\n+    return _FOOTNOTE_RE.sub(\"\", text or \"\")\n+\n+\n def _now() -> str:\n     return datetime.now(timezone.utc).isoformat(timespec=\"seconds\")\n \n@@ -327,7 +338,7 @@ class WorkMemory:\n     def remember(self, name: str, text: str, sources: List[dict]) -> Optional[str]:\n         \"\"\"Keep a verified text. Learning it again adds its sources and names;\n         the words already kept stay unless the new copy holds more.\"\"\"\n-        text = (text or \"\").strip()\n+        text = strip_footnotes(text or \"\").strip()\n         if not name_terms(name) or not text:\n             return None\n         rid = hashlib.sha256(\" \".join(sorted(title_terms(name) or name_terms(name))).encode()).hexdigest()[:16]\n@@ -368,9 +379,10 @@ class WorkMemory:\n             if wanted <= known and wanted & titles:\n                 if best is None or len(known) < len(best[0]):\n                     best = (known, rec)\n-        if best:\n-            return best[1]\n-        return self._recall_misspelled(wanted)\n+        rec = best[1] if best else self._recall_misspelled(wanted)\n+        if rec and rec.get(\"text\"):\n+            rec = {**rec, \"text\": strip_footnotes(rec[\"text\"])}   # entries kept before dpi5\n+        return rec\n \n     def _recall_misspelled(self, wanted: set) -> Optional[dict]:\n         \"\"\"One long word a letter or two off: \"Jabberwockey\" is Jabberwocky. Without\n"
+ },
+ "commit_subject": "Recited works without footnote markers (dpi5)"
+}

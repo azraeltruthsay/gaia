@@ -1,0 +1,55 @@
+{
+ "id": "8xr4.14",
+ "bead": "GAIA_Project-8xr4.14",
+ "commit": "06588051c8",
+ "date": "2026-10-26",
+ "source": "history",
+ "issue": {
+  "title": "Orchestrator restores stale 'focusing' on cold start with Prime unloaded -> turns misroute to Prime, fall back to Groq",
+  "symptom": "WSL first boot 2026-10-26: gaia-core logged 'Orchestrator lifecycle state on boot: focusing' (persisted from last Arch session) while tiers were core=cpu, prime=unloaded. First chat turn routed to Prime, failed, silently fell back to groq_fallback (qwen/qwen3.8-27b) and was shown tagged [Prime]. POST /consciousness/awake fixed it. Expected: on boot, reconcile persisted state against actual tier placement (or start PARKED) rather than trusting the saved gear; and a Groq fallback should not be labeled [Prime]."
+ },
+ "issue_names_place": false,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/agent_core.py",
+  "function": "_build_response_header",
+  "lines": 18,
+  "also_changed": [
+   "gaia-core/gaia_core/models/_model_pool_impl.py:forward_to_model",
+   "gaia-core/gaia_core/models/_model_pool_impl.py:__init__"
+  ]
+ },
+ "investigation": {
+  "format": "issue_investigation actions: SEARCH / READ / PLACE + NOTE",
+  "gold_steps": [
+   {
+    "action": "SEARCH: groq_fallback",
+    "why": "a phrase or name from the issue, as it appears in code",
+    "result_line": "gaia-core/gaia_core/cognition/agent_core.py:4506: \"prime\", \"groq_fallback\""
+   },
+   {
+    "action": "READ: gaia-core/gaia_core/cognition/agent_core.py:4506",
+    "why": "the hit is in run_turn"
+   },
+   {
+    "action": "READ: _build_response_header",
+    "why": "run_turn calls it"
+   },
+   {
+    "action": "PLACE: _build_response_header",
+    "note": "Orchestrator: the lifecycle gear is reloaded from disk on boot, but tiers follow the consciousness preset ('parked'), and nothing reconciled the two. WSL booted with Arch's persisted 'focusing' while Prime was unloaded, so gaia-core routed turns to Prime and fell back to Groq. The matrix poll now runs a one-shot check after its first settle: if the persisted gear's REQUIRED tiers contradict actual"
+   }
+  ],
+  "reconstructed": true,
+  "lead": "groq_fallback"
+ },
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-orchestrator/tests/test_boot_lifecycle_label.py\n\"\"\"8xr4.14: a persisted lifecycle gear must not survive a boot whose actual\ntier placement contradicts it (Arch persisted 'focusing'; WSL booted the\n'parked' preset; gaia-core routed to an unloaded Prime -> Groq fallback).\"\"\"\n\nfrom unittest.mock import AsyncMock, MagicMock\n\nimport pytest\n\nfrom gaia_common.lifecycle.states import LifecycleState\nfrom gaia_orchestrator.consciousness_matrix import ConsciousnessLevel, ConsciousnessMatrix\n\nC, S, U = ConsciousnessLevel.CONSCIOUS, ConsciousnessLevel.SUBCONSCIOUS, ConsciousnessLevel.UNCONSCIOUS\n\n\ndef _matrix(persisted, core, prime, healthy=True):\n    lm = MagicMock()\n    lm._snapshot.state = persisted\n    lm.set_state_external = AsyncMock()\n    m = ConsciousnessMatrix(lifecycle_machine=lm)\n    for tier, level in ((\"core\", core), (\"prime\", prime)):\n        m._tiers[tier].target = level\n        m._tiers[tier].actual = level\n        m._tiers[tier].healthy = healthy\n    return m, lm\n\n\n@pytest.mark.asyncio\nasync def test_stale_focusing_relabeled_to_parked():\n    m, lm = _matrix(\"focusing\", core=S, prime=U)\n    await m._verify_boot_lifecycle_label()\n    lm.set_state_external.assert_awaited_once()\n    assert lm.set_state_external.await_args.kwargs[\"target\"] == LifecycleState.PARKED\n\n\n@pytest.mark.asyncio\nasync def test_stale_focusing_with_core_gpu_relabeled_to_awake():\n    m, lm = _matrix(\"focusing\", core=C, prime=S)\n    await m._verify_boot_lifecycle_label()\n    assert lm.set_state_external.await_args.kwargs[\"target\"] == LifecycleState.AWAKE\n\n\n@pytest.mark.asyncio\nasync def test_persisted_gear_matching_placement_is_kept():\n    # orchestrator restart while AWAKE: Core still on GPU\n    m, lm = _matrix(\"awake\", core=C, prime=S)\n    await m._verify_boot_lifecycle_label()\n    lm.set_state_external.assert_not_awaited()\n    assert m._boot_label_verified\n\n\n@pytest.mark.asyncio\nasync def test_waits_for_settle_then_runs_once():\n    m, lm = _matrix(\"focusing\", core=S, prime=U, healthy=False)\n    await m._verify_boot_lifecycle_label()\n    lm.set_state_external.assert_not_awaited()\n    assert not m._boot_label_verified\n    for t in (\"core\", \"prime\"):\n        m._tiers[t].healthy = True\n    await m._verify_boot_lifecycle_label()\n    await m._verify_boot_lifecycle_label()\n    lm.set_state_external.assert_awaited_once()\n\n\n@pytest.mark.asyncio\nasync def test_meditation_never_relabeled():\n    m, lm = _matrix(\"meditation\", core=U, prime=U)\n    await m._verify_boot_lifecycle_label()\n    lm.set_state_external.assert_not_awaited()",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/agent_core.py b/candidates/gaia-core/gaia_core/cognition/agent_core.py\nindex f4bd1fe..14db42d 100644\n--- a/candidates/gaia-core/gaia_core/cognition/agent_core.py\n+++ b/candidates/gaia-core/gaia_core/cognition/agent_core.py\n@@ -6033,8 +6033,16 @@ class AgentCore:\n         Build a concise status header prepended to user-facing responses.\n         Shows the 'mind' (model) that generated the response.\n         \"\"\"\n-        # If an escalation occurred, use the model that actually responded\n-        actual_model = getattr(self, '_last_responding_model', None) or model_name\n+        # If an escalation occurred, use the model that actually responded;\n+        # an inference fallback (e.g. Groq) outranks both (8xr4.14).\n+        fallback = None\n+        try:\n+            fallback = self.model_pool.consume_last_fallback()\n+        except Exception:\n+            pass\n+        if not isinstance(fallback, str):\n+            fallback = None\n+        actual_model = fallback or getattr(self, '_last_responding_model', None) or model_name\n         self._last_responding_model = None  # reset after use\n         mind_name = self._MIND_ALIASES.get(actual_model or \"unknown\", actual_model or \"unknown\")\n         tag = self.MIND_TAG_FORMAT.format(mind=mind_name)\ndiff --git a/candidates/gaia-core/gaia_core/models/_model_pool_impl.py b/candidates/gaia-core/gaia_core/models/_model_pool_impl.py\nindex 7c53054..57e70a3 100644\n--- a/candidates/gaia-core/gaia_core/models/_model_pool_impl.py\n+++ b/candidates/gaia-core/gaia_core/models/_model_pool_impl.py\n@@ -309,6 +309,10 @@ class ModelPool:\n         self.config = config or get_config()\n         self.models: Dict[str, Any] = {}\n         self.model_status: Dict[str, Any] = {}  # new: track each model's current role\n+        # 8xr4.14: per-thread record of which fallback actually answered the\n+        # last forward_to_model call, so response headers don't credit the\n+        # tier that failed (a Groq reply was shown as \"[Prime]\").\n+        self._fallback_local = threading.local()\n         self.persona_manager = PersonaManager(self.config.PERSONAS_DIR)  # Initialize PersonaManager\n         self.active_persona_obj = None  # Store the active PersonaAdapter object\n         self.resource_monitor = ResourceMonitor.get_instance() # New line\n@@ -1222,6 +1226,7 @@ class ModelPool:\n         if not name or name not in self.models:\n             raise ValueError(f\"Model '{role}' not found in pool.\")\n         model = self.models[name]\n+        self._fallback_local.name = None\n         self.set_status(name, \"busy\")\n         try:\n             if adapter_name and hasattr(model, \"create_chat_completion_with_adapter\"):\n@@ -1263,6 +1268,7 @@ class ModelPool:\n                     else:\n                         continue\n                     logger.info(\"Inference fallback to '%s' succeeded\", fallback_name)\n+                    self._fallback_local.name = fallback_name\n                     return self._tee_to_generation_log(result, fallback_name, role)\n                 except Exception as fb_exc:\n                     logger.warning(\"Fallback '%s' also failed: %s\", fallback_name, fb_exc)\n@@ -1277,6 +1283,13 @@ class ModelPool:\n             if release:\n                 self.release_model(name)\n \n+    def consume_last_fallback(self) -> Optional[str]:\n+        \"\"\"Return (and clear) the fallback model that answered this thread's\n+        last forward_to_model call, or None if the primary answered.\"\"\"\n+        name = getattr(self._fallback_local, \"name\", None)\n+        self._fallback_local.name = None\n+        return name\n+\n     def register_adapter_with_prime(self, adapter_name: str, adapter_path: str) -> bool:\n         \"\"\"Register a LoRA adapter with the remote vLLM server (gaia-prime).\n \n"
+ },
+ "commit_subject": "fix(8xr4.14): relabel a stale persisted gear at boot; credit the real fallback in headers"
+}

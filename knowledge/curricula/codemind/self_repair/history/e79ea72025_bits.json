@@ -1,0 +1,29 @@
+{
+ "id": "bits",
+ "bead": "GAIA_Project-bits",
+ "commit": "e79ea72025",
+ "date": "2026-11-01",
+ "source": "history",
+ "issue": {
+  "title": "[bug] sleep_task_scheduler.py capability_gap awareness-note branch writes to wrong knowledge/ path",
+  "symptom": "Discovered live during 9ar0 (2026-09-16): the existing capability_gap -> awareness-note branch in sleep_task_scheduler.py (_run_codemind_cycle, ~line 1465) uses a RELATIVE path: awareness_path = file_path or \"knowledge/awareness/operational/architecture_facts.md\". Verified live in gaia-core-candidate: the running process's cwd is /app, and /app/knowledge is a stray, near-empty local directory (only a 'seeds' subdir) — NOT the real mounted knowledge tree, which is bind-mounted at the ABSOLUTE path /knowledge (docker-compose: ../gaia-instance/knowledge:/knowledge). main.py:2244 already does this correctly for the same file (Path(os.environ.get('KNOWLEDGE_DIR', '/knowledge')) / 'awareness' / 'operational' / 'architecture_facts.md'), and self.config.KNOWLEDGE_DIR is already used elsewhere in this same file (e.g. _REVIEW_QUEUE_PATH). This means every capability_gap awareness-note CodeMind has ever proposed to write has likely been silently written into /app/knowledge/awareness/operational/ inside the container's own ephemeral filesystem (auto-created via os.makedirs) rather than the real, persistent, mounted knowledge base — orphaned on container recreate, invisible to anyone browsing the real knowledge/ tree. Fix: change awareness_path's relative default to Path(self.config.KNOWLEDGE_DIR) / 'awareness' / 'operational' / 'architecture_facts.md', matching the convention 9ar0's new _draft_capability_skill uses. Also worth auditing whether any /app/knowledge/awareness/operational/architecture_facts.md content actually accumulated in production containers (would be silently lost on next recreate) before fixing, in case it's worth manually migrating into the real file first."
+ },
+ "issue_names_place": true,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/sleep_task_scheduler.py",
+  "function": "_run_codemind_cycle",
+  "lines": 351,
+  "also_changed": []
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/gaia_core/cognition/tests/test_knowledge_path_bits.py\n\"\"\"bits: capability-gap awareness notes go to the mounted knowledge tree.\nDetections carry \"knowledge/awareness/…\" paths relative to a cwd of /app, so\nnotes were appended to a stray /app/knowledge/ inside the container.\"\"\"\n\nfrom types import SimpleNamespace\n\nfrom gaia_core.cognition.sleep_task_scheduler import SleepTaskScheduler\n\n\ndef _resolve(path, kdir=\"/knowledge\"):\n    fake = SimpleNamespace(config=SimpleNamespace(KNOWLEDGE_DIR=kdir))\n    return SleepTaskScheduler._knowledge_path(fake, path)\n\n\ndef test_relative_knowledge_paths_land_under_knowledge_dir():\n    assert _resolve(\"knowledge/awareness/operational/architecture_facts.md\") == \\\n        \"/knowledge/awareness/operational/architecture_facts.md\"\n    assert _resolve(\"awareness/x.md\", \"/srv/k\") == \"/srv/k/awareness/x.md\"\n\n\ndef test_absolute_paths_are_kept():\n    assert _resolve(\"/knowledge/awareness/a.md\", \"/elsewhere\") == \"/knowledge/awareness/a.md\"",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py b/candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py\nindex a357d2a..ad4e4a3 100644\n--- a/candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py\n+++ b/candidates/gaia-core/gaia_core/cognition/sleep_task_scheduler.py\n@@ -1277,6 +1277,20 @@ class SleepTaskScheduler:\n     def _CORPUS_DIR(self) -> str:\n         return str(Path(self.config.KNOWLEDGE_DIR) / \"curricula\" / \"code-architect\")\n \n+    def _knowledge_path(self, path: str) -> str:\n+        \"\"\"A knowledge-tree path as an absolute one under KNOWLEDGE_DIR.\n+\n+        bits: detections carry \"knowledge/awareness/…\" relative paths, and the\n+        process cwd is /app — so capability-gap notes were appended to a stray\n+        /app/knowledge/ inside the container, lost on recreate, instead of the\n+        mounted /knowledge tree.\"\"\"\n+        p = Path(path)\n+        if p.is_absolute():\n+            return str(p)\n+        if p.parts and p.parts[0] == \"knowledge\":\n+            p = Path(*p.parts[1:])\n+        return str(Path(self.config.KNOWLEDGE_DIR) / p)\n+\n     @property\n     def _PRIME_MD(self) -> str:\n         return str(Path(self.config.SHARED_DIR) / \"self_model\" / \"prime.md\")\n@@ -1573,7 +1587,8 @@ class SleepTaskScheduler:\n                             self._mark_seed_reviewed(detection, \"skill_draft_failed\")\n                         continue\n                     try:\n-                        awareness_path = file_path or \"knowledge/awareness/operational/architecture_facts.md\"\n+                        awareness_path = self._knowledge_path(\n+                            file_path or \"knowledge/awareness/operational/architecture_facts.md\")\n                         current_awareness = \"\"\n                         if os.path.isfile(awareness_path):\n                             with open(awareness_path, \"r\", encoding=\"utf-8\") as f:\n"
+ },
+ "commit_subject": "fix(bits): capability-gap awareness notes go to the mounted /knowledge"
+}

@@ -1,0 +1,29 @@
+{
+ "id": "b9mp",
+ "bead": "GAIA_Project-b9mp",
+ "commit": "d5de4f99cb",
+ "date": "2026-11-18",
+ "source": "history",
+ "issue": {
+  "title": "Prime thinking adapter: live THINKER prompts draw tool markup into deep-focus answers",
+  "symptom": "Deep focus (a person asks GAIA to focus/think hard → Prime thinks natively with prime_thinking_v1) works end to end as of 2026-10-29: 2 of 2 live probes thought (1.9k/4.8k chars), first answer correct (marbles=9, 36 s turn). But on live THINKER prompts (dev persona, tool schema, history, grounding; ~1.4-5k tokens vs the teacher's ~0.3-1k) the adapter sometimes (a) wraps its answer in a fabricated <tool_result>{\"response\": ...} block, (b) earlier opened with THOUGHT_SEED + <tool_calling> instead of thinking. Same class as w6in (adapter distilled on prompts that differ from the live deliberation prompt). Fix direction: teacher round on prompts captured from the live deliberation path (dump messages from deliberate()), and/or a voice-path guard that strips a self-written <tool_result> wrapper. Engine-side loop/prefill/health fixes already landed (gaia-engine, same day)."
+ },
+ "issue_names_place": true,
+ "place": {
+  "file": "gaia-core/gaia_core/cognition/deliberation.py",
+  "function": "deliberate",
+  "lines": 182,
+  "also_changed": []
+ },
+ "investigation": null,
+ "regression_test": {
+  "format": "pytest functions added by the fix",
+  "gold": "# candidates/gaia-core/tests/test_deliberation_fake_tool_result.py\n\"\"\"b9mp: a <tool_result> in the model's own deliberation answer is made up\n(only the system writes one). It is dropped, and an answer that was nothing\nelse falls back like an empty one.\"\"\"\nfrom gaia_core.cognition.deliberation import deliberate\n\n\ndef _run(content):\n    msgs = [{\"role\": \"system\", \"content\": \"You are GAIA.\"},\n            {\"role\": \"user\", \"content\": \"How much is the ball?\"}]\n    return deliberate(\"How much is the ball?\", msgs, _Pool(content), model_role=\"prime\",\n                      persist=False, offer_tools=False, native_thinking=True)\n\n\ndef test_fake_result_only_falls_back():\n    r = _run(\"<tool_result>...</tool_result>\")\n    assert r.final_response == \"\"\n    assert r.fallback_used\n\n\ndef test_fake_result_dropped_from_real_answer():\n    r = _run(\"<tool_result>price: 0.05</tool_result>\\nThe ball costs $0.05.\")\n    assert \"tool_result\" not in r.final_response\n    assert \"$0.05\" in r.final_response\n    assert not r.fallback_used\n\n\ndef test_unclosed_fake_result_dropped():\n    r = _run(\"<tool_result>{\\\"answer\\\": 5}\")\n    assert r.final_response == \"\"\n    assert r.fallback_used\n\n\ndef test_plain_answer_untouched():\n    r = _run(\"The ball costs $0.05.\")\n    assert r.final_response == \"The ball costs $0.05.\"\n    assert not r.fallback_used",
+  "test_verified": false
+ },
+ "patch": {
+  "format": "unified diff of the candidate source files",
+  "gold_diff": "diff --git a/candidates/gaia-core/gaia_core/cognition/deliberation.py b/candidates/gaia-core/gaia_core/cognition/deliberation.py\nindex b4cf773..4e8f9ff 100644\n--- a/candidates/gaia-core/gaia_core/cognition/deliberation.py\n+++ b/candidates/gaia-core/gaia_core/cognition/deliberation.py\n@@ -729,6 +729,14 @@ def deliberate(\n         if native_thinking:\n             logger.info(\"Deliberation: native thinking requested but no thought channel returned\")\n         thinking, final_response, fallback_used = _split_think_and_response(raw)\n+    # b9mp: only the system writes a <tool_result>. One in the model's own\n+    # answer is made up (the tools block shows the tag); drop it, and an\n+    # answer that was nothing else falls back like an empty one.\n+    if _FAKE_RESULT_RE.search(final_response or \"\"):\n+        final_response = _FAKE_RESULT_RE.sub(\"\", final_response).strip()\n+        logger.info(\"Deliberation: dropped a made-up tool result (%d chars left)\", len(final_response))\n+        if not final_response:\n+            fallback_used = True\n     final_response = _strip_leading_input_echo(final_response, user_input)\n     final_response, _echo_dropped = _strip_scaffold_echo(\n         final_response, _scaffold_text(messages[0].get(\"content\", \"\"), _instructions), user_input)\n@@ -798,6 +806,9 @@ def _flag(value) -> bool:\n     return str(value).strip().lower() in (\"1\", \"true\", \"yes\", \"on\")\n \n \n+_FAKE_RESULT_RE = re.compile(r\"<tool_(?:result|response)>.*?(?:</tool_(?:result|response)>|$)\", re.I | re.S)\n+\n+\n def _native_thinking_on(cfg: Dict[str, Any], prime: bool, deep_focus: bool = False) -> bool:\n     # Prime's thinking is deep focus, not a default: ~20 s a turn on GPU\n     # against ~3 s without. A person asking for focus turns it on for that\n"
+ },
+ "commit_subject": "b9mp: Prime deep focus on prime_thinking_v3; drop made-up tool results"
+}
