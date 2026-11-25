@@ -1987,6 +1987,12 @@ class SleepTaskScheduler:
                             file_path, extra=[str(extra_test_path)] if extra_test_path else None)
                         change.validation_result = {**(change.validation_result or {}), "tests": {
                             k: tested.get(k) for k in ("ok", "service", "paths", "summary")}}
+                        _kept = self._codemind_keep_attempt(
+                            cycle.cycle_id, (detection.get("metadata") or {}).get("issue_id")
+                            or os.path.basename(file_path), attempt, file_path, original_content,
+                            proposed_content, tested, extra_test_path)
+                        if _kept:
+                            change.validation_result["attempt_dir"] = _kept
                         if not tested.get("ok"):
                             with open(file_path, "w", encoding="utf-8") as f:
                                 f.write(original_content)
@@ -2467,6 +2473,37 @@ class SleepTaskScheduler:
             return int(os.getenv("SLEEP_CPU_INFERENCE_TIMEOUT", "480"))
         except ValueError:
             return 480
+
+    @staticmethod
+    def _codemind_keep_attempt(cycle_id: str, hint: str, attempt: int, file_path: str,
+                               original: str, proposed: str, tested: dict,
+                               test_path: Optional[Path]) -> str:
+        """Keep what one attempt tried, whatever the tests said: the diff, the
+        regression test it wrote and the full test report. The file is
+        restored and an orphan test deleted when a fix fails, and the
+        changelog kept only a summary ('1 failed, 9 passed'), so a failed
+        attempt couldn't be read or learned from (c2kz trial, 2026-11-25).
+        Returns the directory, or '' if it couldn't be written."""
+        import difflib
+        try:
+            base = Path(os.environ.get("CODEMIND_ATTEMPTS_DIR", "/shared/codemind/attempts"))
+            safe = re.sub(r"[^\w.-]+", "_", f"{hint}_{attempt + 1}")[:80]
+            out = base / cycle_id / safe
+            out.mkdir(parents=True, exist_ok=True)
+            rel = file_path.split("/candidates/", 1)[-1]
+            (out / "patch.diff").write_text("".join(difflib.unified_diff(
+                original.splitlines(True), proposed.splitlines(True),
+                fromfile=f"a/{rel}", tofile=f"b/{rel}")), encoding="utf-8")
+            if test_path and Path(test_path).is_file():
+                (out / Path(test_path).name).write_text(Path(test_path).read_text(encoding="utf-8"),
+                                                        encoding="utf-8")
+            (out / "tests.txt").write_text(
+                f"{tested.get('summary', '')}\n{tested.get('paths', '')}\n\n{tested.get('output', '')}",
+                encoding="utf-8")
+            return str(out)
+        except Exception:
+            logger.debug("CodeMind: attempt not kept", exc_info=True)
+            return ""
 
     def _codemind_propose(self, prompt: str) -> str | None:
         """Generate a fix proposal using the code-architect adapter.
