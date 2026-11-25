@@ -41,16 +41,19 @@ EXCHANGE_WINDOW_S = 900
 OPEN_QUESTION_REPLIES = 2
 _SPEAKER_RE = re.compile(r"^([^:\n]{1,64}):\s")
 _STATE_FILE = "ambient_interject.json"
-_YES_RE = re.compile(r"^\s*yes\b", re.IGNORECASE)
+_YES_RE = re.compile(r"^\W*gaia\b", re.IGNORECASE)
 _HISTORY_WINDOW = 10
 
+# Who the message is for, not whether she'd like to talk: asked "would you
+# naturally want to say something?", Prime said YES to 79% of messages meant
+# for someone else and 79% of room chatter ("hahaha", "works for me") on a
+# 52-case set from GAIA's Grotto (2026-11-25), and she answered Andy's
+# congratulations to someone else, then a question Azrael asked Andy.
 SYSTEM = (
-    "You are GAIA, watching a conversation in a Discord channel without being "
-    "addressed -- like being in the room while people talk nearby. Based on the "
-    "recent messages, would you naturally want to say something? Only answer YES "
-    "if you'd genuinely add something -- a real thought, not just because you "
-    "technically could -- or if the new message answers or continues something "
-    "you said. Answer with exactly one word: YES or NO."
+    "You read a Discord channel where several people talk. GAIA is an AI in the "
+    "channel. Look at the new message and decide who its speaker is talking to. "
+    "Reply with one word: GAIA if they are talking to GAIA, OTHER if they are "
+    "talking to another person or to everyone."
 )
 
 
@@ -160,15 +163,21 @@ def in_exchange(history: List[Dict], user_input: str, window_s: float = EXCHANGE
 
 
 def _conversation(history: List[Dict], user_input: str) -> str:
+    """The channel as people see it: "Nick: …", "GAIA: …" (each user turn
+    already carries its speaker), not "user:"/"assistant:"."""
     history, _ = _split_new(history, user_input)
     recent = history[-_HISTORY_WINDOW:] if history else []
-    lines = [f"{h.get('role', '?')}: {h.get('content', '')}" for h in recent]
-    lines.append(f"(new message) user: {user_input}")
-    return "\n".join(lines)
+    lines = [f"GAIA: {h.get('content', '')}" if h.get("role") == "assistant" else (h.get("content") or "")
+             for h in recent]
+    return "\n".join(lines + [f"New message -- {user_input}"])
 
 
-_ABOUT_HER_RE = re.compile(r"\b(?:she|her|hers|herself)\b|\bgaia(?:['’]s|\s+(?:is|was|has|can|could|will|would|did|does|seems|knows|said))\b",
+# "@GAIA can you…" and "GAIA, can you…" speak to her, not about her.
+_ABOUT_HER_RE = re.compile(r"\b(?:she|her|hers|herself)\b|(?<!@)\bgaia(?:['’]s|\s+(?:is|was|has|can|could|will|would|did|does|seems|knows|said)(?!\s+you\b))\b",
                            re.IGNORECASE)
+# Opening words that aren't a person being spoken to ("Ok, I'm going to…").
+_NOT_NAMES = frozenset("ok okay so well yes yeah no nope hey hi hello thanks alright sure lol right oh "
+                       "anyway also but and wait hmm um".split())
 _TO_SOMEONE_RE = re.compile(r"^\W*(?:(?:hey|hi|ok(?:ay)?|so|thanks)[\s,]+)?@?([A-Z][\w.-]{1,30})\s*[,:]")
 _TO_YOU_RE = re.compile(r"\?|\b(?:you|your|yours|yourself)\b|\bgaia\b", re.IGNORECASE)
 
@@ -181,7 +190,7 @@ def not_for_her(text: str) -> bool:
     if _ABOUT_HER_RE.search(body):
         return True
     m = _TO_SOMEONE_RE.match(body)
-    return bool(m and m.group(1).lower() != "gaia")
+    return bool(m and m.group(1).lower() not in _NOT_NAMES | {"gaia"})
 
 
 def might_be_for_her(text: str) -> bool:
@@ -206,6 +215,8 @@ def should_interject(key: str, history: List[Dict], user_input: str,
     if in_exchange(history, user_input):
         mark_interjected(key, base)
         return True
+    if not might_be_for_her(user_input):
+        return False        # no question, no "you", not her name: said to the room
     if on_cooldown(key, cooldown_s, base) and not is_question(user_input):
         return False
     messages = [{"role": "system", "content": SYSTEM},

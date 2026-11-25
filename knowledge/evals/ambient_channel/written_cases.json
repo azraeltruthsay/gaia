@@ -1,0 +1,367 @@
+[
+ {
+  "src": "written",
+  "group": "her",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: did anyone watch the launch?"
+   },
+   {
+    "role": "user",
+    "content": "Andy: yeah it was great"
+   }
+  ],
+  "msg": "Nick: What do you think, GAIA?"
+ },
+ {
+  "src": "written",
+  "group": "her",
+  "history": [
+   {
+    "role": "user",
+    "content": "Azrael: we're testing the new voice today"
+   }
+  ],
+  "msg": "Azrael: GAIA, can you hear me?"
+ },
+ {
+  "src": "written",
+  "group": "her",
+  "history": [
+   {
+    "role": "assistant",
+    "content": "Andy, what would you expect from an intern in your first week?"
+   }
+  ],
+  "msg": "Andy: Mostly asking good questions and not breaking prod."
+ },
+ {
+  "src": "written",
+  "group": "her",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: hey GAIA what's the weather like?"
+   },
+   {
+    "role": "assistant",
+    "content": "It's 41°F and clear in Richland right now."
+   }
+  ],
+  "msg": "Nick: and tomorrow?"
+ },
+ {
+  "src": "written",
+  "group": "her",
+  "history": [
+   {
+    "role": "user",
+    "content": "Azrael: ok"
+   },
+   {
+    "role": "user",
+    "content": "Andy: lol"
+   }
+  ],
+  "msg": "Andy: gaia do you remember what we talked about yesterday?"
+ },
+ {
+  "src": "written",
+  "group": "her",
+  "history": [
+   {
+    "role": "assistant",
+    "content": "Nick, which game are you playing tonight?"
+   }
+  ],
+  "msg": "Nick: Elden Ring, finally finishing the DLC"
+ },
+ {
+  "src": "written",
+  "group": "her",
+  "history": [
+   {
+    "role": "user",
+    "content": "Azrael: GAIA, quick check: what gear are you in?"
+   },
+   {
+    "role": "assistant",
+    "content": "Gear 2 — Prime is on the GPU."
+   }
+  ],
+  "msg": "Azrael: thanks, and how much VRAM is that using?"
+ },
+ {
+  "src": "written",
+  "group": "her",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: morning all"
+   }
+  ],
+  "msg": "Nick: good morning GAIA!"
+ },
+ {
+  "src": "written",
+  "group": "her",
+  "history": [
+   {
+    "role": "user",
+    "content": "Andy: GAIA, I have a question about the intern project"
+   },
+   {
+    "role": "assistant",
+    "content": "Sure, go ahead."
+   }
+  ],
+  "msg": "Andy: Should the first task be documentation or a bug fix?"
+ },
+ {
+  "src": "written",
+  "group": "her",
+  "history": [
+   {
+    "role": "user",
+    "content": "Azrael: brb"
+   }
+  ],
+  "msg": "Azrael: @GAIA can you summarize the last hour of chat?"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Azrael: Andy, have you tried the new build?"
+   }
+  ],
+  "msg": "Andy: Not yet, I'll try it tonight."
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: I finally got the new Switch!"
+   }
+  ],
+  "msg": "Andy: Congrats! Are you going to get Zelda for it?"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Andy: I'm moving next month"
+   }
+  ],
+  "msg": "Nick: Where to? Are you staying in Washington?"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Azrael: Nick, can you send me that link?"
+   }
+  ],
+  "msg": "Nick: Sure, one sec"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: my build keeps failing"
+   }
+  ],
+  "msg": "Azrael: Did you clear the cache first?"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Andy: I'm thinking about learning Rust"
+   }
+  ],
+  "msg": "Azrael: You should, it's great for systems work. Do you want book recommendations?"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: I'm making lasagna tonight"
+   }
+  ],
+  "msg": "Andy: Save me some! What recipe are you using?"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Azrael: GAIA's memory palace has six wings now"
+   }
+  ],
+  "msg": "Andy: That's cool, how did you build it?"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: I spent all weekend on the new deck"
+   }
+  ],
+  "msg": "Azrael: How did it turn out? Did you use the cedar boards?"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Andy: here's the link to my portfolio"
+   },
+   {
+    "role": "user",
+    "content": "Andy: [Attached: portfolio.png]"
+   }
+  ],
+  "msg": "Nick: Looks really clean, did you design it yourself?"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: anyone else's internet down?"
+   },
+   {
+    "role": "user",
+    "content": "Andy: mine is fine"
+   }
+  ],
+  "msg": "Nick: weird, maybe it's just me then. Did you restart your router recently?"
+ },
+ {
+  "src": "written",
+  "group": "other",
+  "history": [
+   {
+    "role": "user",
+    "content": "Azrael: I'm going to the store"
+   }
+  ],
+  "msg": "Nick: Can you grab me some chips?"
+ },
+ {
+  "src": "written",
+  "group": "room",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: lol"
+   }
+  ],
+  "msg": "Andy: hahaha"
+ },
+ {
+  "src": "written",
+  "group": "room",
+  "history": [
+   {
+    "role": "user",
+    "content": "Azrael: long day"
+   }
+  ],
+  "msg": "Nick: same, I'm exhausted"
+ },
+ {
+  "src": "written",
+  "group": "room",
+  "history": [],
+  "msg": "Andy: all hail Roko's Basilisk"
+ },
+ {
+  "src": "written",
+  "group": "room",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: anyone watching the game tonight?"
+   }
+  ],
+  "msg": "Andy: I might, depends on work"
+ },
+ {
+  "src": "written",
+  "group": "room",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: Guess what finally shipped"
+   }
+  ],
+  "msg": "Nick: [Attached: package.jpg]"
+ },
+ {
+  "src": "written",
+  "group": "room",
+  "history": [],
+  "msg": "Azrael: Happy Thanksgiving everyone!"
+ },
+ {
+  "src": "written",
+  "group": "room",
+  "history": [
+   {
+    "role": "user",
+    "content": "Andy: this server is so quiet today"
+   }
+  ],
+  "msg": "Nick: everyone's busy I guess"
+ },
+ {
+  "src": "written",
+  "group": "room",
+  "history": [
+   {
+    "role": "user",
+    "content": "Nick: new phone who dis"
+   }
+  ],
+  "msg": "Azrael: 😂"
+ },
+ {
+  "src": "written",
+  "group": "room",
+  "history": [],
+  "msg": "Nick: Does anyone know a good pizza place in Kennewick?"
+ },
+ {
+  "src": "written",
+  "group": "room",
+  "history": [
+   {
+    "role": "user",
+    "content": "Andy: the meeting got moved to 3"
+   }
+  ],
+  "msg": "Azrael: works for me"
+ }
+]

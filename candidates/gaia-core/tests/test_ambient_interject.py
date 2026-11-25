@@ -20,7 +20,7 @@ def test_no_answer_stays_silent_and_does_not_mark_cooldown(tmp_path):
 
 
 def test_yes_falls_through_and_marks_the_cooldown(tmp_path):
-    generate = lambda messages: "Yes, actually I know this one."
+    generate = lambda messages: "GAIA"
     assert should_interject("s1", [], "what's the capital of France?", generate, base=tmp_path) is True
     assert on_cooldown("s1", base=tmp_path)
 
@@ -38,7 +38,7 @@ def test_a_question_still_gets_a_judgment_call_on_cooldown(tmp_path):
     # window and got silently dropped before a judgment call ever ran.
     mark_interjected("s1", base=tmp_path)
     called = []
-    generate = lambda messages: called.append(1) or "YES"
+    generate = lambda messages: called.append(1) or "GAIA"
     assert should_interject("s1", [], "what do you think?", generate, cooldown_s=600, base=tmp_path) is True
     assert called  # the model WAS asked, unlike a non-question on cooldown
 
@@ -46,7 +46,7 @@ def test_a_question_still_gets_a_judgment_call_on_cooldown(tmp_path):
 def test_a_question_on_cooldown_can_still_get_a_no(tmp_path):
     mark_interjected("s1", base=tmp_path)
     called = []
-    generate = lambda messages: called.append(1) or "NO"
+    generate = lambda messages: called.append(1) or "OTHER"
     assert should_interject("s1", [], "anyone know what time it is?", generate, cooldown_s=600, base=tmp_path) is False
     assert called  # asked, but she still passed -- the cooldown didn't decide this on its own
 
@@ -58,21 +58,22 @@ def test_recent_history_and_the_new_message_both_reach_the_model(tmp_path):
         return "NO"
     history = [{"role": "user", "content": "anyone know a good ramen place"},
               {"role": "assistant", "content": "I don't have a favorite, I don't eat"}]
-    should_interject("s1", history, "guess I'll just order pizza", generate, base=tmp_path)
+    should_interject("s1", history, "Nick: anyone want to split a pizza?", generate, base=tmp_path)
     assert "ramen place" in seen["convo"]
-    assert "order pizza" in seen["convo"]
+    assert "GAIA: I don't have a favorite" in seen["convo"]   # named as people see it, not "assistant:"
+    assert "split a pizza" in seen["convo"]
 
 
-def test_only_a_leading_yes_counts():
+def test_only_a_leading_gaia_counts():
     generate_cases = {
-        "YES": True, "yes!": True, "Yes, I have a thought.": True,
-        "NO": False, "no thanks": False,
-        "I wouldn't say yes to that": False,  # "yes" not leading
+        "GAIA": True, "gaia.": True, "GAIA - they asked her": True,
+        "OTHER": False, "other people": False,
+        "Not GAIA": False,  # "GAIA" not leading
         "": False,
     }
     for answer, expected in generate_cases.items():
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             from pathlib import Path
-            got = should_interject("s", [], "x", lambda m: answer, base=Path(d))
+            got = should_interject("s", [], "what about you?", lambda m: answer, base=Path(d))
             assert got is expected, answer
