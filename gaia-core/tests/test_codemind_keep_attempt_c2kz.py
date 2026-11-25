@@ -23,3 +23,12 @@ def test_attempt_kept(tmp_path, monkeypatch):
 def test_unwritable_place_is_not_an_error(monkeypatch):
     monkeypatch.setenv("CODEMIND_ATTEMPTS_DIR", "/proc/no/such/place")
     assert SleepTaskScheduler._codemind_keep_attempt("c", "h", 0, "/x/m.py", "", "", {}, None) == ""
+
+
+def test_a_rejected_attempt_is_kept_without_tests(tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEMIND_ATTEMPTS_DIR", str(tmp_path / "a"))
+    out = SleepTaskScheduler._codemind_keep_attempt(
+        "cm-2", "gi-2fbe7e", 0, "/x/candidates/gaia-core/m.py", "a\n", "b\n",
+        {"summary": "not applied: change ratio 80.4% exceeds max 50%"}, None)
+    assert "not applied" in (tmp_path / "a" / "cm-2" / "gi-2fbe7e_1" / "tests.txt").read_text()
+    assert out

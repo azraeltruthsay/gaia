@@ -1927,6 +1927,13 @@ class SleepTaskScheduler:
                         validation_result=val_result.to_dict(),
                     )
 
+                    _hint = (detection.get("metadata") or {}).get("issue_id") or os.path.basename(file_path)
+                    if not val_result.passed or not safety.get("safe", True):
+                        # kept too: rejected before it was applied (24bs: an 80% rewrite)
+                        self._codemind_keep_attempt(
+                            cycle.cycle_id, _hint, attempt, file_path, original_content, proposed_content,
+                            {"summary": f"not applied: {val_result.errors if not val_result.passed else safety.get('reason')}"},
+                            None)
                     if not val_result.passed:
                         change.error = f"Validation failed: {val_result.errors}"
                         logger.warning("CodeMind: validation failed for %s: %s", file_path, val_result.errors)
