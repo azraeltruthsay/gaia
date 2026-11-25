@@ -166,6 +166,12 @@ knowledge/curricula/*
 # regeneratable; track it so the bake is reproducible and the authoring survives.
 !knowledge/curricula/core_v2x_patch/
 !knowledge/curricula/core_v2x_patch/**
+# Self-repair examples — hand-written gold investigation/test/patch beside what
+# she did, one per bug through the loop (c2kz onward). Not regeneratable.
+!knowledge/curricula/codemind/
+knowledge/curricula/codemind/*
+!knowledge/curricula/codemind/self_repair/
+!knowledge/curricula/codemind/self_repair/**
 # Retired V8/V9 identity corpora — kept local for reference, never re-baked.
 knowledge/curricula/core_v2x_patch/disabled_v11/
 
