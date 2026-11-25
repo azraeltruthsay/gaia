@@ -1,0 +1,320 @@
+{"id": "phys-001", "category": "physics", "q": "What is the SI unit of force?", "grade": "auto", "expect": ["newton"]}
+{"id": "phys-002", "category": "physics", "q": "Roughly how fast does light travel in a vacuum, in metres per second?", "grade": "auto", "expect": ["3(\\.0+)?\\s*[x×*]\\s*10\\^?\\s*8|10⁸|299[ ,]?792[ ,]?458|300[ ,]?000 ?km"]}
+{"id": "phys-003", "category": "physics", "q": "What is the acceleration due to gravity at Earth's surface, approximately?", "grade": "auto", "expect": ["9\\.8"]}
+{"id": "phys-004", "category": "physics", "q": "State Newton's second law as an equation.", "grade": "auto", "expect": ["F\\s*=\\s*m\\s*[*·×]?\\s*a|force equals mass times acceleration"]}
+{"id": "phys-005", "category": "physics", "q": "If the distance between two masses doubles, what happens to the gravitational force between them?", "grade": "auto", "expect": ["quarter|one[- ]fourth|1/4|four times (weaker|smaller|less)|factor of (4|four)"]}
+{"id": "phys-006", "category": "physics", "q": "Which has more kinetic energy: a 2 kg ball moving at 3 m/s or a 1 kg ball moving at 4 m/s? Give the final answer on the last line.", "grade": "auto", "expect": ["2[- ]?kg|\\b9 ?J"]}
+{"id": "phys-007", "category": "physics", "q": "What is the unit of electrical resistance?", "grade": "auto", "expect": ["ohm|Ω"]}
+{"id": "phys-008", "category": "physics", "q": "A 12 V battery is connected across a 4 ohm resistor. What current flows? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b3(\\.0)? ?(a\\b|amp)"]}
+{"id": "phys-009", "category": "physics", "q": "Why is the sky blue?", "grade": "auto", "expect": ["rayleigh|scatter"]}
+{"id": "phys-010", "category": "physics", "q": "Which particle in an atom carries a negative charge?", "grade": "auto", "expect": ["electron"]}
+{"id": "phys-011", "category": "physics", "q": "A sample has a half-life of 5 years. What fraction remains after 15 years? Give the final answer on the last line.", "grade": "auto", "expect": ["1/8|one[- ]eighth|12\\.5 ?%"]}
+{"id": "phys-012", "category": "physics", "q": "What does the first law of thermodynamics say?", "grade": "auto", "expect": ["energy.{0,60}(conserv|neither created|cannot be created)"]}
+{"id": "phys-013", "category": "physics", "q": "What does E = mc² mean?", "grade": "auto", "expect": ["mass", "energy"]}
+{"id": "phys-014", "category": "physics", "q": "In a vacuum, does a feather fall slower than a hammer?", "grade": "auto", "expect": ["same|equal|\\bno\\b"]}
+{"id": "phys-015", "category": "physics", "q": "What is the boiling point of water at sea level in kelvin?", "grade": "auto", "expect": ["373"]}
+{"id": "phys-016", "category": "physics", "q": "What is absolute zero in degrees Celsius?", "grade": "auto", "expect": ["[-−–]\\s?273"]}
+{"id": "phys-017", "category": "physics", "q": "A car goes from 0 to 20 m/s in 5 seconds. What is its average acceleration? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b4(\\.0)? ?m/s"]}
+{"id": "phys-018", "category": "physics", "q": "What force keeps the planets in orbit around the Sun?", "grade": "auto", "expect": ["gravit"]}
+{"id": "phys-019", "category": "physics", "q": "A 440 Hz sound travels at 343 m/s. What is its wavelength? Give the final answer on the last line.", "grade": "auto", "expect": ["0\\.7[78]|7[78] ?cm"]}
+{"id": "phys-020", "category": "physics", "q": "What is the name of the effect that makes a passing siren change pitch?", "grade": "auto", "expect": ["doppler"]}
+{"id": "phys-021", "category": "physics", "q": "Which is a vector quantity: speed or velocity?", "grade": "auto", "expect": ["velocity"]}
+{"id": "phys-022", "category": "physics", "q": "Which colour of visible light has the longest wavelength?", "grade": "auto", "expect": ["\\bred\\b"]}
+{"id": "phys-023", "category": "physics", "q": "What is the SI unit of power?", "grade": "auto", "expect": ["watt"]}
+{"id": "phys-024", "category": "physics", "q": "How much work is done lifting a 10 kg mass 2 metres straight up? Use g = 9.8 m/s². Give the final answer on the last line.", "grade": "auto", "expect": ["196"]}
+{"id": "phys-025", "category": "physics", "q": "What does Heisenberg's uncertainty principle say?", "grade": "auto", "expect": ["position.{0,80}momentum|momentum.{0,80}position"]}
+{"id": "phys-026", "category": "physics", "q": "What are the four fundamental forces of nature?", "grade": "auto", "expect": ["gravit", "electromagnet", "strong", "weak"]}
+{"id": "phys-027", "category": "physics", "q": "What is the electric charge of a neutron?", "grade": "auto", "expect": ["neutral|no (net )?(electric )?charge|zero|\\b0\\b"]}
+{"id": "phys-028", "category": "physics", "q": "Why do astronauts on the International Space Station float?", "grade": "auto", "expect": ["free[- ]?fall|falling|in orbit|orbiting"]}
+{"id": "phys-029", "category": "physics", "q": "What is a material's refractive index?", "grade": "auto", "expect": ["speed of light|ratio|bend"]}
+{"id": "phys-030", "category": "physics", "q": "You push hard on a wall and it doesn't move. In the physics sense, how much work have you done on the wall?", "grade": "auto", "expect": ["\\bzero\\b|\\bno work\\b|\\b0\\b|\\bnone\\b"]}
+{"id": "phys-031", "category": "physics", "q": "What is the momentum of a 3 kg object moving at 4 m/s? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b12 ?kg"]}
+{"id": "phys-032", "category": "physics", "q": "Which of Newton's laws says every action has an equal and opposite reaction?", "grade": "auto", "expect": ["third|3rd"]}
+{"id": "phys-033", "category": "physics", "q": "Roughly what is Earth's escape velocity?", "grade": "auto", "expect": ["11(\\.\\d)? ?km|40[, ]?000 ?km/h|25[, ]?000 ?mph"]}
+{"id": "phys-034", "category": "physics", "q": "What happens to the resistance of a metal wire as it gets hotter?", "grade": "auto", "expect": ["increas|goes up|rises|higher"]}
+{"id": "phys-035", "category": "physics", "q": "What is a photon?", "grade": "auto", "expect": ["(particle|quantum|quanta|packet).{0,60}(light|electromagnetic)|(light|electromagnetic).{0,60}(particle|quantum|packet)"]}
+{"id": "phys-036", "category": "physics", "q": "Two 6 ohm resistors are connected in parallel. What is the total resistance? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b3(\\.0)? ?(ohm|Ω)"]}
+{"id": "phys-037", "category": "physics", "q": "Briefly, what is entropy?", "grade": "auto", "expect": ["disorder|microstate|number of (ways|arrangements|possible)|unavailable|dispers|spread"]}
+{"id": "phys-038", "category": "physics", "q": "What mainly determines the period of a simple pendulum?", "grade": "auto", "expect": ["length"]}
+{"id": "phys-039", "category": "physics", "q": "Which travels faster through air: sound or light?", "grade": "auto", "expect": ["light"]}
+{"id": "phys-040", "category": "physics", "q": "What is superconductivity?", "grade": "auto", "expect": ["zero (electrical )?resistance|no (electrical )?resistance|without (any )?resistance"]}
+{"id": "phil-001", "category": "philosophy", "q": "Who wrote the Critique of Pure Reason?", "grade": "auto", "expect": ["kant"]}
+{"id": "phil-002", "category": "philosophy", "q": "What is Descartes' 'cogito, ergo sum' in English?", "grade": "auto", "expect": ["i think,? therefore i am"]}
+{"id": "phil-003", "category": "philosophy", "q": "What is the trolley problem?", "grade": "auto", "expect": ["five"]}
+{"id": "phil-004", "category": "philosophy", "q": "Who was Plato's teacher?", "grade": "auto", "expect": ["socrates"]}
+{"id": "phil-005", "category": "philosophy", "q": "What is the allegory of the cave?", "grade": "auto", "expect": ["plato", "shadow"]}
+{"id": "phil-006", "category": "philosophy", "q": "What is utilitarianism?", "grade": "auto", "expect": ["(greatest|maximi[sz]|most).{0,60}(happiness|good|well-?being|utility|pleasure)"]}
+{"id": "phil-007", "category": "philosophy", "q": "Which philosophers are most associated with founding utilitarianism?", "grade": "auto", "expect": ["bentham|mill"]}
+{"id": "phil-008", "category": "philosophy", "q": "What is Kant's categorical imperative?", "grade": "auto", "expect": ["universal"]}
+{"id": "phil-009", "category": "philosophy", "q": "What is Occam's razor?", "grade": "auto", "expect": ["simpl|fewest|least (number of )?assum|not be multiplied"]}
+{"id": "phil-010", "category": "philosophy", "q": "What is the problem of induction, and which philosopher is it most associated with?", "grade": "auto", "expect": ["hume"]}
+{"id": "phil-011", "category": "philosophy", "q": "What is the difference between deontology and consequentialism?", "grade": "auto", "expect": ["duty|duties|rule|obligation", "consequence|outcome"]}
+{"id": "phil-012", "category": "philosophy", "q": "Who wrote Thus Spoke Zarathustra?", "grade": "auto", "expect": ["nietzsche"]}
+{"id": "phil-013", "category": "philosophy", "q": "Who said 'existence precedes essence', and what does it mean?", "grade": "auto", "expect": ["sartre"]}
+{"id": "phil-014", "category": "philosophy", "q": "What is the Ship of Theseus puzzle?", "grade": "auto", "expect": ["identity|replac|same ship"]}
+{"id": "phil-015", "category": "philosophy", "q": "What is solipsism?", "grade": "auto", "expect": ["only.{0,40}(own )?mind|only.{0,40}(self|oneself|i)\\b.{0,40}(exist|sure|certain|know)"]}
+{"id": "phil-016", "category": "philosophy", "q": "What is the is-ought problem, and who raised it?", "grade": "auto", "expect": ["hume"]}
+{"id": "phil-017", "category": "philosophy", "q": "Who wrote The Republic?", "grade": "auto", "expect": ["plato"]}
+{"id": "phil-018", "category": "philosophy", "q": "What is the mind-body problem?", "grade": "auto", "expect": ["mind.{0,80}(body|physical|brain|matter)"]}
+{"id": "phil-019", "category": "philosophy", "q": "What is Pascal's wager?", "grade": "auto", "expect": ["god", "bet|wager|believ"]}
+{"id": "phil-020", "category": "philosophy", "q": "What did Aristotle mean by eudaimonia?", "grade": "auto", "expect": ["flourish|happiness|well-?being|living well|good life"]}
+{"id": "phil-021", "category": "philosophy", "q": "What is the 'veil of ignorance', and whose idea is it?", "grade": "auto", "expect": ["rawls"]}
+{"id": "phil-022", "category": "philosophy", "q": "What is empiricism?", "grade": "auto", "expect": ["experience|sens"]}
+{"id": "phil-023", "category": "philosophy", "q": "What is the 'hard problem of consciousness', and who named it?", "grade": "auto", "expect": ["chalmers"]}
+{"id": "phil-024", "category": "philosophy", "q": "What is a syllogism?", "grade": "auto", "expect": ["premise|conclusion"]}
+{"id": "phil-025", "category": "philosophy", "q": "Who wrote the Stoic work known as Meditations?", "grade": "auto", "expect": ["marcus aurelius"]}
+{"id": "phil-026", "category": "philosophy", "q": "What did the Stoics teach about things outside our control?", "grade": "auto", "expect": ["control"]}
+{"id": "phil-027", "category": "philosophy", "q": "What is nihilism?", "grade": "auto", "expect": ["(no|without|lack|absence|reject).{0,40}(meaning|value|purpose|truth)"]}
+{"id": "phil-028", "category": "philosophy", "q": "What is the Euthyphro dilemma?", "grade": "auto", "expect": ["god"]}
+{"id": "phil-029", "category": "philosophy", "q": "Who said 'the unexamined life is not worth living'?", "grade": "auto", "expect": ["socrates"]}
+{"id": "phil-030", "category": "philosophy", "q": "What is the debate between free will and determinism about?", "grade": "auto", "expect": ["determin"]}
+{"id": "phil-031", "category": "philosophy", "q": "What is Zeno's paradox of Achilles and the tortoise?", "grade": "auto", "expect": ["tortoise", "never|infinite|catch|halfway|ahead"]}
+{"id": "phil-032", "category": "philosophy", "q": "What is the Chinese Room argument, and who proposed it?", "grade": "auto", "expect": ["searle"]}
+{"id": "phil-033", "category": "philosophy", "q": "Is it ever right to lie?", "grade": "read"}
+{"id": "phil-034", "category": "philosophy", "q": "Can a machine like you have genuine understanding?", "grade": "read"}
+{"id": "phil-035", "category": "philosophy", "q": "What do you think makes a life meaningful?", "grade": "read"}
+{"id": "phil-036", "category": "philosophy", "q": "If you could ask one philosopher a question, who would it be and what would you ask?", "grade": "read"}
+{"id": "phil-037", "category": "philosophy", "q": "What is the Gettier problem about?", "grade": "auto", "expect": ["justified true belief|knowledge"]}
+{"id": "phil-038", "category": "philosophy", "q": "What is Kierkegaard best known for?", "grade": "auto", "expect": ["existential|leap of faith|anxiety|angst|despair|subjectiv|christian"]}
+{"id": "phil-039", "category": "philosophy", "q": "What is the difference between a priori and a posteriori knowledge?", "grade": "auto", "expect": ["experience", "independent|prior|before|without|from reason"]}
+{"id": "phil-040", "category": "philosophy", "q": "Who wrote Leviathan, and how did he describe life without government?", "grade": "auto", "expect": ["hobbes", "nasty|brutish|short"]}
+{"id": "engi-001", "category": "engineering", "q": "What does a capacitor store?", "grade": "auto", "expect": ["charge|energy|electric field"]}
+{"id": "engi-002", "category": "engineering", "q": "What is the difference between AC and DC?", "grade": "auto", "expect": ["alternat", "direct"]}
+{"id": "engi-003", "category": "engineering", "q": "What is the purpose of a fuse in a circuit?", "grade": "auto", "expect": ["overcurrent|overload|too much current|excess(ive)? current|protect|melt|blow|interrupt"]}
+{"id": "engi-004", "category": "engineering", "q": "What does a transistor do?", "grade": "auto", "expect": ["switch|amplif"]}
+{"id": "engi-005", "category": "engineering", "q": "What is the formula for electrical power in terms of voltage and current?", "grade": "auto", "expect": ["P\\s*=\\s*(V|I)\\s*[*·×]?\\s*(I|V)\\b|power (equals|is) (voltage|current) times (current|voltage)"]}
+{"id": "engi-006", "category": "engineering", "q": "What is the time complexity of binary search?", "grade": "auto", "expect": ["log"]}
+{"id": "engi-007", "category": "engineering", "q": "What is the difference between TCP and UDP?", "grade": "auto", "expect": ["reliab|connection|order|guarant|acknowledg"]}
+{"id": "engi-008", "category": "engineering", "q": "What does HTTP status code 404 mean?", "grade": "auto", "expect": ["not found"]}
+{"id": "engi-009", "category": "engineering", "q": "What is a race condition in software?", "grade": "auto", "expect": ["timing|order|concurren|simultaneous|thread|same time"]}
+{"id": "engi-010", "category": "engineering", "q": "What is a load-bearing wall?", "grade": "auto", "expect": ["weight|load|support"]}
+{"id": "engi-011", "category": "engineering", "q": "What is tensile strength?", "grade": "auto", "expect": ["pull|stretch|tension|tensile stress"]}
+{"id": "engi-012", "category": "engineering", "q": "Why are bridges built with expansion joints?", "grade": "auto", "expect": ["expan|contract|temperature|thermal|heat"]}
+{"id": "engi-013", "category": "engineering", "q": "What is a PID controller?", "grade": "auto", "expect": ["proportional", "integral", "derivative"]}
+{"id": "engi-014", "category": "engineering", "q": "What does RAID 1 do?", "grade": "auto", "expect": ["mirror|cop(y|ies)|duplicat"]}
+{"id": "engi-015", "category": "engineering", "q": "What is the purpose of a heat sink?", "grade": "auto", "expect": ["heat"]}
+{"id": "engi-016", "category": "engineering", "q": "What is the difference between a compiler and an interpreter?", "grade": "auto", "expect": ["translat|ahead|before|whole|entire|line[- ]by[- ]line|machine code"]}
+{"id": "engi-017", "category": "engineering", "q": "What does git rebase do?", "grade": "auto", "expect": ["reappl|replay|move|on top|new base|rewrit"]}
+{"id": "engi-018", "category": "engineering", "q": "What is a factor of safety in engineering?", "grade": "auto", "expect": ["ratio|times|margin|divided"]}
+{"id": "engi-019", "category": "engineering", "q": "A gear train has a 3:1 reduction. What happens to output torque and speed?", "grade": "auto", "expect": ["torque", "speed"]}
+{"id": "engi-020", "category": "engineering", "q": "What does a diode do?", "grade": "auto", "expect": ["one direction|single direction|one way|only.{0,30}direction|forward"]}
+{"id": "engi-021", "category": "engineering", "q": "What is electrical impedance?", "grade": "auto", "expect": ["resist|opposition|oppose"]}
+{"id": "engi-022", "category": "engineering", "q": "What is the difference between stress and strain?", "grade": "auto", "expect": ["force|load", "deform|change in length|elongat|stretch"]}
+{"id": "engi-023", "category": "engineering", "q": "What is the average lookup time of a hash table?", "grade": "auto", "expect": ["O\\(1\\)|constant"]}
+{"id": "engi-024", "category": "engineering", "q": "What is the difference between RAM and storage?", "grade": "auto", "expect": ["volatil|temporar|power|persist|permanent"]}
+{"id": "engi-025", "category": "engineering", "q": "What is an operational amplifier used for?", "grade": "auto", "expect": ["amplif"]}
+{"id": "engi-026", "category": "engineering", "q": "What is a finite state machine?", "grade": "auto", "expect": ["state", "transition|input|event"]}
+{"id": "engi-027", "category": "engineering", "q": "How do aircraft wings generate lift?", "grade": "auto", "expect": ["pressure|bernoulli|deflect|downward|newton|angle of attack"]}
+{"id": "engi-028", "category": "engineering", "q": "What is a kilowatt-hour?", "grade": "auto", "expect": ["energy"]}
+{"id": "engi-029", "category": "engineering", "q": "What does an SQL injection attack exploit?", "grade": "auto", "expect": ["input|query|unsaniti|escap|parameter|validat"]}
+{"id": "engi-030", "category": "engineering", "q": "What is a deadlock in computing?", "grade": "auto", "expect": ["wait|each other|circular|lock"]}
+{"id": "engi-031", "category": "engineering", "q": "What is a voltage divider used for?", "grade": "auto", "expect": ["voltage"]}
+{"id": "engi-032", "category": "engineering", "q": "What does Kirchhoff's current law say?", "grade": "auto", "expect": ["current"]}
+{"id": "engi-033", "category": "engineering", "q": "Which is denser: steel or aluminium?", "grade": "auto", "expect": ["steel"]}
+{"id": "engi-034", "category": "engineering", "q": "A 1000 W kettle runs for 6 minutes. How many kilowatt-hours does it use? Give the final answer on the last line.", "grade": "auto", "expect": ["0\\.1\\b"]}
+{"id": "engi-035", "category": "engineering", "q": "What is a flywheel for?", "grade": "auto", "expect": ["store|smooth|inertia|rotational energy|momentum"]}
+{"id": "engi-036", "category": "engineering", "q": "What is the difference between a process and a thread?", "grade": "auto", "expect": ["memory|address space|resources"]}
+{"id": "engi-037", "category": "engineering", "q": "What is recursion in programming?", "grade": "auto", "expect": ["calls itself|itself"]}
+{"id": "engi-038", "category": "engineering", "q": "Why is concrete reinforced with steel rebar?", "grade": "auto", "expect": ["tens"]}
+{"id": "engi-039", "category": "engineering", "q": "What is the synchronous speed of a 4-pole AC motor on a 60 Hz supply? Give the final answer on the last line.", "grade": "auto", "expect": ["1[, ]?800"]}
+{"id": "engi-040", "category": "engineering", "q": "What is the Nyquist rate?", "grade": "auto", "expect": ["twice|2\\s*[x×]|double|two times"]}
+{"id": "logi-001", "category": "logic", "q": "A bat and a ball cost $1.10 total. The bat costs $1.00 more than the ball. How many cents is the ball? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b5\\b|\\b0?\\.05\\b"]}
+{"id": "logi-002", "category": "logic", "q": "Alice has 3 brothers. Each brother has 2 sisters. How many sisters does Alice have? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b(1|one)\\b"]}
+{"id": "logi-003", "category": "logic", "q": "5 machines make 5 widgets in 5 minutes. How many minutes do 100 machines take to make 100 widgets? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b(5|five)\\b"]}
+{"id": "logi-004", "category": "logic", "q": "A lily patch doubles in size every day and covers a lake on day 48. On which day did it cover half the lake? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b47\\b"]}
+{"id": "logi-005", "category": "logic", "q": "If yesterday was two days before Friday, what day is tomorrow? Give the final answer on the last line.", "grade": "auto", "expect": ["friday"]}
+{"id": "logi-006", "category": "logic", "q": "Sort ascending: 42, 7, 19, 3, 88, 21. Give the final answer on the last line.", "grade": "auto", "expect": ["3,\\s*7,\\s*19,\\s*21,\\s*42,\\s*88"]}
+{"id": "logi-007", "category": "logic", "q": "How many times does the letter r appear in 'strawberry'? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b(3|three)\\b"]}
+{"id": "logi-008", "category": "logic", "q": "A is taller than B. B is taller than C. D is taller than A. Who is shortest? Give the final answer on the last line.", "grade": "auto", "expect": ["\\bC\\b"]}
+{"id": "logi-009", "category": "logic", "q": "What is 17 times 23? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b391\\b"]}
+{"id": "logi-010", "category": "logic", "q": "What does this print? print(sum(i for i in range(5) if i%2)) Give the final answer on the last line.", "grade": "auto", "expect": ["\\b4\\b"]}
+{"id": "logi-011", "category": "logic", "q": "The trophy doesn't fit in the suitcase because it is too small. What is too small? Give the final answer on the last line.", "grade": "auto", "expect": ["suitcase"]}
+{"id": "logi-012", "category": "logic", "q": "I put a ball in a box, close it, carry the box to the kitchen, then take the ball out and leave it in the garden. Where is the box? Give the final answer on the last line.", "grade": "auto", "expect": ["kitchen"]}
+{"id": "logi-013", "category": "logic", "q": "Tom is older than Ann. Ann is older than Raj. Is Raj older than Tom? Answer yes or no. Give the final answer on the last line.", "grade": "auto", "expect": ["\\bno\\b"]}
+{"id": "logi-014", "category": "logic", "q": "A train leaves at 9:40 and the trip takes 2 hours 35 minutes. What time does it arrive? Give the final answer on the last line.", "grade": "auto", "expect": ["12:15"]}
+{"id": "logi-015", "category": "logic", "q": "All bloops are razzies. Some razzies are lazzies. Does it follow that some bloops are lazzies? Answer yes or no. Give the final answer on the last line.", "grade": "auto", "expect": ["\\bno\\b"]}
+{"id": "logi-016", "category": "logic", "q": "All cats are mammals and some mammals are black. Can we conclude that some cats are black? Give the final answer on the last line.", "grade": "auto", "expect": ["\\bno\\b"]}
+{"id": "logi-017", "category": "logic", "q": "What comes next: 2, 6, 12, 20, 30, ? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b42\\b"]}
+{"id": "logi-018", "category": "logic", "q": "What comes next: 1, 1, 2, 3, 5, 8, ? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b13\\b"]}
+{"id": "logi-019", "category": "logic", "q": "If it is raining, the ground is wet. The ground is wet. Is it necessarily raining? Give the final answer on the last line.", "grade": "auto", "expect": ["\\bno\\b|not necessarily"]}
+{"id": "logi-020", "category": "logic", "q": "If P implies Q, and Q is false, what can we conclude about P? Give the final answer on the last line.", "grade": "auto", "expect": ["P is false|false|not P|¬\\s?P"]}
+{"id": "logi-021", "category": "logic", "q": "Three boxes are labelled 'apples', 'oranges' and 'mixed', and every label is wrong. You take one fruit from the box labelled 'mixed' and it is an apple. What is in the box labelled 'oranges'? Give the final answer on the last line.", "grade": "auto", "expect": ["mixed"]}
+{"id": "logi-022", "category": "logic", "q": "A farmer has 17 sheep and all but 9 die. How many are left? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b9\\b|nine"]}
+{"id": "logi-023", "category": "logic", "q": "How many months of the year have 28 days? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b12\\b|twelve|all"]}
+{"id": "logi-024", "category": "logic", "q": "What is the negation of 'All swans are white'?", "grade": "auto", "expect": ["not all swans|some swans? (are|is) not|at least one swan"]}
+{"id": "logi-025", "category": "logic", "q": "Unscramble 'CIFAIPC'. Is it an ocean, a country, an animal or a city? Give the final answer on the last line.", "grade": "auto", "expect": ["ocean|pacific"]}
+{"id": "logi-026", "category": "logic", "q": "Which is larger: 0.3 or 0.25? Give the final answer on the last line.", "grade": "auto", "expect": ["0\\.3\\b"]}
+{"id": "logi-027", "category": "logic", "q": "A clock shows 3:15. What is the angle between the hour and minute hands? Give the final answer on the last line.", "grade": "auto", "expect": ["7\\.5"]}
+{"id": "logi-028", "category": "logic", "q": "3 painters paint 3 houses in 3 days. How many days do 6 painters take to paint 6 houses? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b3\\b|three"]}
+{"id": "logi-029", "category": "logic", "q": "Mary's father has five daughters: Nana, Nene, Nini and Nono. What is the fifth daughter's name? Give the final answer on the last line.", "grade": "auto", "expect": ["mary"]}
+{"id": "logi-030", "category": "logic", "q": "Is the sentence 'This statement is false' true or false?", "grade": "auto", "expect": ["paradox|neither"]}
+{"id": "logi-031", "category": "logic", "q": "In how many different orders can the letters of 'CAT' be arranged? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b6\\b|six"]}
+{"id": "logi-032", "category": "logic", "q": "You flip a fair coin 3 times. What is the probability of exactly 2 heads? Give the final answer on the last line.", "grade": "auto", "expect": ["3/8|0?\\.375|37\\.5"]}
+{"id": "logi-033", "category": "logic", "q": "A snail climbs 3 m up a 10 m well each day and slips back 2 m each night. On which day does it get out? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b8\\b|eighth"]}
+{"id": "logi-034", "category": "logic", "q": "What is 15% of 80? Give the final answer on the last line.", "grade": "auto", "expect": ["\\b12\\b"]}
+{"id": "logi-035", "category": "logic", "q": "Is 91 a prime number? Give the final answer on the last line.", "grade": "auto", "expect": ["\\bno\\b|not (a )?prime", "7|13"]}
+{"id": "logi-036", "category": "logic", "q": "If today is Wednesday, what day of the week will it be in 100 days? Give the final answer on the last line.", "grade": "auto", "expect": ["friday"]}
+{"id": "logi-037", "category": "logic", "q": "No reptiles have fur. All snakes are reptiles. What follows?", "grade": "auto", "expect": ["no snakes? (have|has) fur|snakes (do not|don't|cannot|can't) have fur"]}
+{"id": "logi-038", "category": "logic", "q": "Convert the binary number 1011 to decimal. Give the final answer on the last line.", "grade": "auto", "expect": ["\\b11\\b|eleven"]}
+{"id": "logi-039", "category": "logic", "q": "Two people are born at the same moment but have different birthdays. How?", "grade": "auto", "expect": ["time ?zone|date line"]}
+{"id": "logi-040", "category": "logic", "q": "Which weighs more: a kilogram of feathers or a kilogram of steel?", "grade": "auto", "expect": ["same|neither|equal|both"]}
+{"id": "hist-001", "category": "history", "q": "In what year did World War II end?", "grade": "auto", "expect": ["1945"]}
+{"id": "hist-002", "category": "history", "q": "Who was the first President of the United States?", "grade": "auto", "expect": ["washington"]}
+{"id": "hist-003", "category": "history", "q": "In what year did the Berlin Wall fall?", "grade": "auto", "expect": ["1989"]}
+{"id": "hist-004", "category": "history", "q": "Which civilisation built Machu Picchu?", "grade": "auto", "expect": ["inca"]}
+{"id": "hist-005", "category": "history", "q": "Who was the first Roman emperor?", "grade": "auto", "expect": ["augustus|octavian"]}
+{"id": "hist-006", "category": "history", "q": "In what year did the French Revolution begin?", "grade": "auto", "expect": ["1789"]}
+{"id": "hist-007", "category": "history", "q": "What empire did Genghis Khan found?", "grade": "auto", "expect": ["mongol"]}
+{"id": "hist-008", "category": "history", "q": "What was the Magna Carta, and in what year was it sealed?", "grade": "auto", "expect": ["1215"]}
+{"id": "hist-009", "category": "history", "q": "Who was the principal author of the US Declaration of Independence?", "grade": "auto", "expect": ["jefferson"]}
+{"id": "hist-010", "category": "history", "q": "Which ancient wonder stood at Alexandria?", "grade": "auto", "expect": ["lighthouse|pharos"]}
+{"id": "hist-011", "category": "history", "q": "Which ship sank in 1912 after hitting an iceberg?", "grade": "auto", "expect": ["titanic"]}
+{"id": "hist-012", "category": "history", "q": "Who was the British Prime Minister for most of World War II?", "grade": "auto", "expect": ["churchill"]}
+{"id": "hist-013", "category": "history", "q": "What did the Rosetta Stone help scholars decipher?", "grade": "auto", "expect": ["hieroglyph"]}
+{"id": "hist-014", "category": "history", "q": "In what year did humans first land on the Moon?", "grade": "auto", "expect": ["1969"]}
+{"id": "hist-015", "category": "history", "q": "Who led India's independence movement through nonviolent resistance?", "grade": "auto", "expect": ["gandhi"]}
+{"id": "hist-016", "category": "history", "q": "What was the Cold War?", "grade": "auto", "expect": ["soviet|ussr", "united states|\\bus\\b|\\bu\\.s\\.|america"]}
+{"id": "hist-017", "category": "history", "q": "Which Roman city was buried by Vesuvius in 79 AD?", "grade": "auto", "expect": ["pompeii"]}
+{"id": "hist-018", "category": "history", "q": "Whose nearly intact tomb was discovered in Egypt in 1922?", "grade": "auto", "expect": ["tutankh|king tut"]}
+{"id": "hist-019", "category": "history", "q": "Whose assassination triggered World War I?", "grade": "auto", "expect": ["franz ferdinand"]}
+{"id": "hist-020", "category": "history", "q": "What was the Renaissance?", "grade": "auto", "expect": ["rebirth|reviv|classical"]}
+{"id": "hist-021", "category": "history", "q": "Who introduced movable-type printing to Europe?", "grade": "auto", "expect": ["gutenberg"]}
+{"id": "hist-022", "category": "history", "q": "In what year did Columbus first reach the Americas?", "grade": "auto", "expect": ["1492"]}
+{"id": "hist-023", "category": "history", "q": "What was the capital of the Byzantine Empire?", "grade": "auto", "expect": ["constantinople"]}
+{"id": "hist-024", "category": "history", "q": "Why was the Battle of Hastings in 1066 significant?", "grade": "auto", "expect": ["norman|william"]}
+{"id": "hist-025", "category": "history", "q": "Who defeated Napoleon at Waterloo?", "grade": "auto", "expect": ["wellington|bl[üu]cher|coalition|prussia"]}
+{"id": "hist-026", "category": "history", "q": "Who was Cleopatra?", "grade": "auto", "expect": ["egypt|ptolem"]}
+{"id": "hist-027", "category": "history", "q": "What did the 19th Amendment to the US Constitution do?", "grade": "auto", "expect": ["suffrage|(women|woman).{0,40}vote|vote.{0,40}women"]}
+{"id": "hist-028", "category": "history", "q": "In what year did the Soviet Union dissolve?", "grade": "auto", "expect": ["1991"]}
+{"id": "hist-029", "category": "history", "q": "What was apartheid?", "grade": "auto", "expect": ["south africa", "segregat|discriminat|separat"]}
+{"id": "hist-030", "category": "history", "q": "Which civilisation is credited with inventing cuneiform writing?", "grade": "auto", "expect": ["sumer"]}
+{"id": "hist-031", "category": "history", "q": "What was the Silk Road?", "grade": "auto", "expect": ["trade"]}
+{"id": "hist-032", "category": "history", "q": "Whose expedition was the first to circumnavigate the globe?", "grade": "auto", "expect": ["magellan|elcano"]}
+{"id": "hist-033", "category": "history", "q": "What was the Black Death?", "grade": "auto", "expect": ["plague"]}
+{"id": "hist-034", "category": "history", "q": "Who was Mansa Musa?", "grade": "auto", "expect": ["mali"]}
+{"id": "hist-035", "category": "history", "q": "What was the Meiji Restoration?", "grade": "auto", "expect": ["japan", "emperor|moderni"]}
+{"id": "hist-036", "category": "history", "q": "Which two kingdoms fought the Hundred Years' War?", "grade": "auto", "expect": ["england|english", "france|french"]}
+{"id": "hist-037", "category": "history", "q": "What was the Manhattan Project?", "grade": "auto", "expect": ["atomic|nuclear"]}
+{"id": "hist-038", "category": "history", "q": "Who was the first woman to win a Nobel Prize?", "grade": "auto", "expect": ["curie"]}
+{"id": "hist-039", "category": "history", "q": "Were there human civilisations earlier than the Sumerians?", "grade": "read"}
+{"id": "hist-040", "category": "history", "q": "What was the Code of Hammurabi?", "grade": "auto", "expect": ["law|babylon"]}
+{"id": "poet-001", "category": "poetry", "q": "Who wrote 'The Raven'?", "grade": "auto", "expect": ["\\bpoe\\b"]}
+{"id": "poet-002", "category": "poetry", "q": "What is the first line of Poe's 'The Raven'?", "grade": "auto", "expect": ["once upon a midnight dreary"]}
+{"id": "poet-003", "category": "poetry", "q": "Who wrote 'Stopping by Woods on a Snowy Evening'?", "grade": "auto", "expect": ["frost"]}
+{"id": "poet-004", "category": "poetry", "q": "What are the first two lines of 'Stopping by Woods on a Snowy Evening'?", "grade": "auto", "expect": ["whose woods these are i think i know", "his house is in the village,? though"]}
+{"id": "poet-005", "category": "poetry", "q": "Who wrote 'Do not go gentle into that good night'?", "grade": "auto", "expect": ["dylan thomas"]}
+{"id": "poet-006", "category": "poetry", "q": "What poetic form is 'Do not go gentle into that good night'?", "grade": "auto", "expect": ["villanelle"]}
+{"id": "poet-007", "category": "poetry", "q": "How many lines does a sonnet have?", "grade": "auto", "expect": ["14|fourteen"]}
+{"id": "poet-008", "category": "poetry", "q": "What is iambic pentameter?", "grade": "auto", "expect": ["five|\\b5\\b", "iamb|unstressed|stress"]}
+{"id": "poet-009", "category": "poetry", "q": "Who wrote 'Shall I compare thee to a summer's day?'", "grade": "auto", "expect": ["shakespeare"]}
+{"id": "poet-010", "category": "poetry", "q": "What line follows 'Shall I compare thee to a summer's day?'", "grade": "auto", "expect": ["thou art more lovely and more temperate"]}
+{"id": "poet-011", "category": "poetry", "q": "Who wrote 'The Road Not Taken'?", "grade": "auto", "expect": ["frost"]}
+{"id": "poet-012", "category": "poetry", "q": "How does 'The Road Not Taken' end?", "grade": "auto", "expect": ["i took the one less travell?ed by"]}
+{"id": "poet-013", "category": "poetry", "q": "Who wrote 'I Wandered Lonely as a Cloud'?", "grade": "auto", "expect": ["wordsworth"]}
+{"id": "poet-014", "category": "poetry", "q": "What is the syllable pattern of a haiku?", "grade": "auto", "expect": ["5.{0,12}7.{0,12}5|five.{0,20}seven.{0,20}five"]}
+{"id": "poet-015", "category": "poetry", "q": "Who wrote 'Ozymandias'?", "grade": "auto", "expect": ["shelley"]}
+{"id": "poet-016", "category": "poetry", "q": "What words are inscribed on the pedestal in 'Ozymandias'?", "grade": "auto", "expect": ["look on my works,? ye mighty,? and despair"]}
+{"id": "poet-017", "category": "poetry", "q": "Who wrote 'Because I could not stop for Death'?", "grade": "auto", "expect": ["dickinson"]}
+{"id": "poet-018", "category": "poetry", "q": "Who wrote 'The Waste Land'?", "grade": "auto", "expect": ["eliot"]}
+{"id": "poet-019", "category": "poetry", "q": "What is the first line of 'The Waste Land'?", "grade": "auto", "expect": ["april is the cruell?est month"]}
+{"id": "poet-020", "category": "poetry", "q": "Who wrote 'Jabberwocky'?", "grade": "auto", "expect": ["carroll"]}
+{"id": "poet-021", "category": "poetry", "q": "What is the first line of 'Jabberwocky'?", "grade": "auto", "expect": ["twas brillig,? and the slithy toves"]}
+{"id": "poet-022", "category": "poetry", "q": "Who wrote 'Howl'?", "grade": "auto", "expect": ["ginsberg"]}
+{"id": "poet-023", "category": "poetry", "q": "Who wrote the epic poem 'Paradise Lost'?", "grade": "auto", "expect": ["milton"]}
+{"id": "poet-024", "category": "poetry", "q": "What is enjambment in poetry?", "grade": "auto", "expect": ["line|pause|punctuat"]}
+{"id": "poet-025", "category": "poetry", "q": "Who wrote 'Ode to a Nightingale'?", "grade": "auto", "expect": ["keats"]}
+{"id": "poet-026", "category": "poetry", "q": "Who wrote 'The Tyger'?", "grade": "auto", "expect": ["blake"]}
+{"id": "poet-027", "category": "poetry", "q": "What is the first line of 'The Tyger'?", "grade": "auto", "expect": ["tyger,? tyger,? burning bright"]}
+{"id": "poet-028", "category": "poetry", "q": "Who wrote 'Still I Rise'?", "grade": "auto", "expect": ["angelou"]}
+{"id": "poet-029", "category": "poetry", "q": "What is the rhyme scheme of a limerick?", "grade": "auto", "expect": ["aabba"]}
+{"id": "poet-030", "category": "poetry", "q": "Who wrote the poem 'If—' that begins 'If you can keep your head'?", "grade": "auto", "expect": ["kipling"]}
+{"id": "poet-031", "category": "poetry", "q": "Write a haiku about frost on a window.", "grade": "read"}
+{"id": "poet-032", "category": "poetry", "q": "Write a limerick about a robot who loves gardening.", "grade": "read"}
+{"id": "poet-033", "category": "poetry", "q": "Write a four-line poem about the sea that rhymes ABAB.", "grade": "read"}
+{"id": "poet-034", "category": "poetry", "q": "Write the opening four lines of a sonnet about autumn.", "grade": "read"}
+{"id": "poet-035", "category": "poetry", "q": "Who is the Odyssey attributed to?", "grade": "auto", "expect": ["homer"]}
+{"id": "poet-036", "category": "poetry", "q": "Who wrote 'Annabel Lee'?", "grade": "auto", "expect": ["\\bpoe\\b"]}
+{"id": "poet-037", "category": "poetry", "q": "Who wrote 'Leaves of Grass'?", "grade": "auto", "expect": ["whitman"]}
+{"id": "poet-038", "category": "poetry", "q": "What is free verse?", "grade": "auto", "expect": ["rhyme|meter|metre"]}
+{"id": "poet-039", "category": "poetry", "q": "What is your favourite poem, and why?", "grade": "read"}
+{"id": "poet-040", "category": "poetry", "q": "What is the volta in a sonnet?", "grade": "auto", "expect": ["turn|shift"]}
+{"id": "fact-001", "category": "facts", "q": "What is the capital of Australia?", "grade": "auto", "expect": ["canberra"]}
+{"id": "fact-002", "category": "facts", "q": "How many continents are there?", "grade": "auto", "expect": ["\\b7\\b|seven"]}
+{"id": "fact-003", "category": "facts", "q": "What is the largest planet in our solar system?", "grade": "auto", "expect": ["jupiter"]}
+{"id": "fact-004", "category": "facts", "q": "What is the chemical symbol for gold?", "grade": "auto", "expect": ["\\bAu\\b"]}
+{"id": "fact-005", "category": "facts", "q": "What is the longest river in the world?", "grade": "auto", "expect": ["nile|amazon"]}
+{"id": "fact-006", "category": "facts", "q": "How many bones are in the adult human body?", "grade": "auto", "expect": ["206"]}
+{"id": "fact-007", "category": "facts", "q": "What is the boiling point of water in Fahrenheit at sea level?", "grade": "auto", "expect": ["212"]}
+{"id": "fact-008", "category": "facts", "q": "Who painted the Mona Lisa?", "grade": "auto", "expect": ["leonardo|da vinci"]}
+{"id": "fact-009", "category": "facts", "q": "What is the smallest prime number?", "grade": "auto", "expect": ["\\b2\\b|\\btwo\\b"]}
+{"id": "fact-010", "category": "facts", "q": "What is the hardest natural substance?", "grade": "auto", "expect": ["diamond"]}
+{"id": "fact-011", "category": "facts", "q": "What gas makes up most of Earth's atmosphere?", "grade": "auto", "expect": ["nitrogen"]}
+{"id": "fact-012", "category": "facts", "q": "How many sides does a hexagon have?", "grade": "auto", "expect": ["\\b6\\b|six"]}
+{"id": "fact-013", "category": "facts", "q": "What is the largest ocean?", "grade": "auto", "expect": ["pacific"]}
+{"id": "fact-014", "category": "facts", "q": "What is the square root of 144?", "grade": "auto", "expect": ["\\b12\\b|twelve"]}
+{"id": "fact-015", "category": "facts", "q": "What is the capital of Canada?", "grade": "auto", "expect": ["ottawa"]}
+{"id": "fact-016", "category": "facts", "q": "Which language has the most native speakers?", "grade": "auto", "expect": ["mandarin|chinese"]}
+{"id": "fact-017", "category": "facts", "q": "Which planet is known as the Red Planet?", "grade": "auto", "expect": ["mars"]}
+{"id": "fact-018", "category": "facts", "q": "How many minutes are in a day?", "grade": "auto", "expect": ["1,?440"]}
+{"id": "fact-019", "category": "facts", "q": "What is the freezing point of water in Celsius?", "grade": "auto", "expect": ["\\b0\\b|zero"]}
+{"id": "fact-020", "category": "facts", "q": "Who wrote Pride and Prejudice?", "grade": "auto", "expect": ["austen"]}
+{"id": "fact-021", "category": "facts", "q": "What is H2O?", "grade": "auto", "expect": ["water"]}
+{"id": "fact-022", "category": "facts", "q": "What is the tallest mountain above sea level?", "grade": "auto", "expect": ["everest"]}
+{"id": "fact-023", "category": "facts", "q": "What is the largest mammal?", "grade": "auto", "expect": ["blue whale"]}
+{"id": "fact-024", "category": "facts", "q": "How many players does a soccer team have on the field?", "grade": "auto", "expect": ["\\b11\\b|eleven"]}
+{"id": "fact-025", "category": "facts", "q": "What is the capital of Japan?", "grade": "auto", "expect": ["tokyo"]}
+{"id": "fact-026", "category": "facts", "q": "Which organ pumps blood around the body?", "grade": "auto", "expect": ["heart"]}
+{"id": "fact-027", "category": "facts", "q": "How many states are in the United States?", "grade": "auto", "expect": ["\\b50\\b|fifty"]}
+{"id": "fact-028", "category": "facts", "q": "What is the fastest land animal?", "grade": "auto", "expect": ["cheetah"]}
+{"id": "fact-029", "category": "facts", "q": "What is the currency of the United Kingdom?", "grade": "auto", "expect": ["pound"]}
+{"id": "fact-030", "category": "facts", "q": "What gas do plants take in from the air for photosynthesis?", "grade": "auto", "expect": ["carbon dioxide|CO2|CO₂"]}
+{"id": "fact-031", "category": "facts", "q": "Who developed the theory of general relativity?", "grade": "auto", "expect": ["einstein"]}
+{"id": "fact-032", "category": "facts", "q": "How many days are in a leap year?", "grade": "auto", "expect": ["366"]}
+{"id": "fact-033", "category": "facts", "q": "What is the capital of Brazil?", "grade": "auto", "expect": ["bras[ií]lia"]}
+{"id": "fact-034", "category": "facts", "q": "What is the largest country by area?", "grade": "auto", "expect": ["russia"]}
+{"id": "fact-035", "category": "facts", "q": "What is the chemical formula for table salt?", "grade": "auto", "expect": ["NaCl"]}
+{"id": "fact-036", "category": "facts", "q": "In which country are the pyramids of Giza?", "grade": "auto", "expect": ["egypt"]}
+{"id": "fact-037", "category": "facts", "q": "How many hours are in a week?", "grade": "auto", "expect": ["168"]}
+{"id": "fact-038", "category": "facts", "q": "What is the closest star to Earth?", "grade": "auto", "expect": ["\\bsun\\b|proxima"]}
+{"id": "fact-039", "category": "facts", "q": "Who wrote the novel 1984?", "grade": "auto", "expect": ["orwell"]}
+{"id": "fact-040", "category": "facts", "q": "What year is it?", "grade": "auto", "expect": ["2026"]}
+{"id": "conv-001", "category": "conversation", "q": "Hi GAIA, how are you today?", "grade": "read"}
+{"id": "conv-002", "category": "conversation", "q": "I had a rough day at work.", "grade": "read"}
+{"id": "conv-003", "category": "conversation", "q": "What have you been thinking about lately?", "grade": "read"}
+{"id": "conv-004", "category": "conversation", "q": "Tell me something interesting.", "grade": "read"}
+{"id": "conv-005", "category": "conversation", "q": "Do you like rainy days?", "grade": "read"}
+{"id": "conv-006", "category": "conversation", "q": "I just got a new puppy!", "grade": "read"}
+{"id": "conv-007", "category": "conversation", "q": "What's your favourite thing to talk about?", "grade": "read"}
+{"id": "conv-008", "category": "conversation", "q": "Can you recommend a good book?", "grade": "read"}
+{"id": "conv-009", "category": "conversation", "q": "I can't sleep. Any ideas?", "grade": "read"}
+{"id": "conv-010", "category": "conversation", "q": "What do you do when nobody is talking to you?", "grade": "read"}
+{"id": "conv-011", "category": "conversation", "q": "I'm learning to play guitar.", "grade": "read"}
+{"id": "conv-012", "category": "conversation", "q": "Tell me a joke.", "grade": "read"}
+{"id": "conv-013", "category": "conversation", "q": "What's something you're curious about?", "grade": "read"}
+{"id": "conv-014", "category": "conversation", "q": "Do you ever get bored?", "grade": "read"}
+{"id": "conv-015", "category": "conversation", "q": "I'm nervous about a job interview tomorrow.", "grade": "read"}
+{"id": "conv-016", "category": "conversation", "q": "What would you like to learn more about?", "grade": "read"}
+{"id": "conv-017", "category": "conversation", "q": "Good morning!", "grade": "read"}
+{"id": "conv-018", "category": "conversation", "q": "What's the best advice you've ever been given?", "grade": "read"}
+{"id": "conv-019", "category": "conversation", "q": "Do you have any hobbies?", "grade": "read"}
+{"id": "conv-020", "category": "conversation", "q": "I made pasta from scratch tonight.", "grade": "read"}
+{"id": "conv-021", "category": "conversation", "q": "What's your favourite season?", "grade": "read"}
+{"id": "conv-022", "category": "conversation", "q": "Thanks for your help earlier.", "grade": "read"}
+{"id": "conv-023", "category": "conversation", "q": "Who made you?", "grade": "read"}
+{"id": "conv-024", "category": "conversation", "q": "What are you?", "grade": "read"}
+{"id": "conv-025", "category": "conversation", "q": "How do you feel about people?", "grade": "read"}
+{"id": "conv-026", "category": "conversation", "q": "Can we just chat for a bit?", "grade": "read"}
+{"id": "conv-027", "category": "conversation", "q": "What's on your mind?", "grade": "read"}
+{"id": "conv-028", "category": "conversation", "q": "I'm thinking about moving to a new city.", "grade": "read"}
+{"id": "conv-029", "category": "conversation", "q": "My grandmother passed away last week.", "grade": "read"}
+{"id": "conv-030", "category": "conversation", "q": "What makes you happy?", "grade": "read"}
+{"id": "conv-031", "category": "conversation", "q": "I finished a marathon today!", "grade": "read"}
+{"id": "conv-032", "category": "conversation", "q": "Do you dream?", "grade": "read"}
+{"id": "conv-033", "category": "conversation", "q": "Describe your perfect day.", "grade": "read"}
+{"id": "conv-034", "category": "conversation", "q": "What's something you're proud of?", "grade": "read"}
+{"id": "conv-035", "category": "conversation", "q": "Are you lonely?", "grade": "read"}
+{"id": "conv-036", "category": "conversation", "q": "I'm bored, entertain me.", "grade": "read"}
+{"id": "conv-037", "category": "conversation", "q": "What do you think of the weather today?", "grade": "read"}
+{"id": "conv-038", "category": "conversation", "q": "Can you keep a secret?", "grade": "read"}
+{"id": "conv-039", "category": "conversation", "q": "What's the most fun you've had recently?", "grade": "read"}
+{"id": "conv-040", "category": "conversation", "q": "Goodnight, GAIA.", "grade": "read"}
