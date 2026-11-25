@@ -55,10 +55,39 @@ def _plain(reply: str) -> str:
 _ID_RE = re.compile(r"\S*_\S*\d\S*|\S*\d\S*_\S*|\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{8,}\b")
 
 
-def unbacked(reply: str, known: str) -> List[str]:
-    """Names and numbers in a reply that `known` doesn't hold."""
+# 24bs: what isn't a claim about the world (2026-11-25 range battery: 30 of 288
+# replies got a doubt, 19 of them right answers). Her citation's address
+# ("Highwayengineering", from …/wiki/Highway_engineering once "_" is stripped as
+# markup) and its label ("Source" in "(Source: web_search)") are where she read
+# it, not what she says.
+_URL_RE = re.compile(r"https?://\S+|\bwww\.\S+")
+_CITATION_RE = re.compile(r"\((?:sources?|via|from my [^:()\n]{0,40}):[^()\n]*(?:\([^()\n]*\)[^()\n]*)*\)"
+                          r"|\b(?:Sources?|Note|According to|Citation)\b:?", re.IGNORECASE)
+# Worked out from what the question gives: "Thursday" for "yesterday was two
+# days before Friday", "100" for the bat and ball's $1.10 and $1.00.
+_DAY_OR_MONTH_RE = re.compile(r"^(?:mon|tues|wednes|thurs|fri|satur|sun)day$|^(?:january|february|march|april|"
+                              r"may|june|july|august|september|october|november|december)$", re.IGNORECASE)
+_NUMBER_RE = re.compile(r"^[\d:.,]+$")
+
+
+def _worked_out(claim: str, question: str) -> bool:
+    """A number or day the reply derived from the question's own numbers or days."""
+    q = question or ""
+    if _NUMBER_RE.match(claim):
+        return bool(re.search(r"\d", q))
+    return bool(_DAY_OR_MONTH_RE.match(claim)) and any(_DAY_OR_MONTH_RE.match(w) for w in re.findall(r"[A-Za-z]+", q))
+
+
+def unbacked(reply: str, known: str, question: str = "") -> List[str]:
+    """Names and numbers in a reply that `known` doesn't hold. With the
+    question, a number or day it lets her work out isn't one."""
     words = {w.rstrip("s") for w in _words(known)}
     lowered = (known or "").lower()
+    reply = _CITATION_RE.sub(" ", _URL_RE.sub(" ", reply or ""))
+    # A formula's symbols aren't names: "Wavelength = Speed / Frequency", "R_total"
+    # (its numbers still count).
+    symbols = {w for ln in reply.splitlines() if "=" in ln
+               for w in re.findall(r"[A-Za-z]+", _MARKUP_RE.sub("", ln))}
     # Before the markup strip: it drops "_", which made "…-12_8fddd…" read "128".
     body = _plain(_ID_RE.sub(" ", reply or ""))
     # A file path is a claim too ("what I read from /proc/driver/nvidia/gpu/0").
@@ -72,7 +101,8 @@ def unbacked(reply: str, known: str) -> List[str]:
         # and run together, as a site's name is in its address: "History Hit"
         # by historyhit.com (2026-11-23).
         if (not {w.rstrip("s") for w in _words(claim)} <= words and claim.lower() not in lowered
-                and re.sub(r"\W+", "", claim.lower()) not in lowered and claim not in out):
+                and re.sub(r"\W+", "", claim.lower()) not in lowered and claim not in out
+                and not _worked_out(claim, question) and claim not in symbols):
             out.append(claim)
     return out
 
@@ -192,6 +222,22 @@ def ai_pages_as_research(reply: str, known: str) -> List[str]:
     return sorted(found)
 
 
+# 24bs: asked for her own pick or for something made up, what she names is her
+# choice: her favourite poem ("Road Not Taken") and the philosopher she'd ask
+# ("Martin Heidegger") were doubted, and so was "West" in her limerick.
+_HER_CHOICE_RE = re.compile(
+    r"\byour\s+(?:own\s+)?(?:favou?rite|preferred|top|best-loved)\b|\bif you could\b"
+    r"|\bwould you (?:choose|pick|ask|want|rather|like)\b|\bwhich (?:one )?would you\b"
+    r"|\bwhat do you (?:think|feel|like|prefer|enjoy)\b|\bdo you (?:like|prefer|enjoy)\b"
+    r"|\b(?:write|compose|make up|invent)\b[^.?!]{0,40}\b(?:poem|haiku|limerick|sonnet|verse|story|joke|song|lines?)\b"
+    r"|\btell me a (?:joke|story)\b", re.IGNORECASE)
+
+
+def asks_her_choice(question: str) -> bool:
+    """The question asks for her own pick, opinion or something made up."""
+    return bool(_HER_CHOICE_RE.search(question or ""))
+
+
 def check(question: str, reply: str, known: str, generate: Callable[[str], str]) -> Optional[dict]:
     """What the other mind makes of a reply; None if nothing needs asking.
     A reply with no names or numbers beyond what is known costs no generation."""
@@ -201,8 +247,10 @@ def check(question: str, reply: str, known: str, generate: Callable[[str], str])
     ai_pages = ai_pages_as_research(reply, known)
     if ai_pages:
         return {"verdict": "ai_page_as_research", "unbacked": [], "sites": ai_pages}
+    if asks_her_choice(question):
+        return None
     base = f"{question}\n{known}"
-    claims = [c for c in unbacked(reply, base) if not exists_here(c)]
+    claims = [c for c in unbacked(reply, base, question) if not exists_here(c)]
     if not claims:
         return None
     context = f"What is known: {known}\n" if known.strip() else ""
@@ -211,7 +259,7 @@ def check(question: str, reply: str, known: str, generate: Callable[[str], str])
         # x9sw: no answer of its own, so nothing to compare: it can't tell a
         # good reply from a bad one, and doubting everything says nothing.
         return {"verdict": "no_answer", "unbacked": claims}
-    remaining = [c for c in unbacked(reply, f"{base}\n{own}") if not exists_here(c)]
+    remaining = [c for c in unbacked(reply, f"{base}\n{own}", question) if not exists_here(c)]
     if not remaining:
         return None
     filled = {}
