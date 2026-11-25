@@ -1223,6 +1223,19 @@ class CandidateTestRequest(BaseModel):
         return v
 
 
+_PYTEST_SUMMARY_RE = re.compile(r"^=*\s*(?:\d+ (?:passed|failed|errors?|skipped|deselected|xfailed|xpassed)"
+                                r"(?:, )?)+.*\bin [\d.]+s|^=*\s*no tests ran\b|^ERROR\b|^Interrupted:")
+
+
+def pytest_summary(text: str) -> str:
+    """pytest's own summary line ("1 failed, 53 passed in 5.85s"), not any line
+    that happens to say "error"."""
+    for ln in reversed([x.strip() for x in (text or "").splitlines() if x.strip()]):
+        if _PYTEST_SUMMARY_RE.search(ln):
+            return ln.strip("= ")
+    return ""
+
+
 @app.post("/candidate/test")
 async def candidate_test(request: CandidateTestRequest):
     """Run the given test files in the candidate container (a0aw.2).
@@ -1241,10 +1254,11 @@ async def candidate_test(request: CandidateTestRequest):
             cmd, capture_output=True, text=True, timeout=timeout, check=False))
     except subprocess.TimeoutExpired:
         return {"ok": False, "returncode": None, "summary": f"timed out after {timeout}s", "output": ""}
-    output = (result.stdout or "") + (result.stderr or "")
-    lines = [ln for ln in output.strip().splitlines() if ln.strip()]
-    summary = next((ln.strip("= ") for ln in reversed(lines)
-                    if " passed" in ln or " failed" in ln or " error" in ln or "no tests ran" in ln), "")
+    # pytest's report last: logging noise on stderr at interpreter exit
+    # ("--- Logging error ---") came after it and was taken for the summary,
+    # so five of her CodeMind attempts were logged with no reason (c2kz trial).
+    output = (result.stderr or "") + (result.stdout or "")
+    summary = pytest_summary(result.stdout or "") or pytest_summary(output) or f"pytest exited {result.returncode}"
     logger.info("Candidate tests (%s, %d file(s)): rc=%s %s",
                 request.service, len(request.paths), result.returncode, summary)
     return {"ok": result.returncode == 0, "returncode": result.returncode,
