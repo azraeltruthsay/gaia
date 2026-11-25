@@ -1958,9 +1958,11 @@ class SleepTaskScheduler:
 
                     # ── a0aw.8: write a regression test while the original is
                     # still on disk — it's only trustworthy proof if it fails
-                    # against the unfixed code. Soft/advisory: a declined,
-                    # unparsable, or non-reproducing test never blocks the fix.
-                    if (extra_test_path is None and not attempt
+                    # against the unfixed code. For a seed or queue detection it is
+                    # advisory; for her issue's fix it is the proof the bug is gone
+                    # (with a replay the other way to show it, n0by). Tried again on
+                    # a later attempt if the first gave none.
+                    if (extra_test_path is None
                             and bool(codemind_cfg.get("write_regression_test", True))):
                         extra_test_path = self._codemind_write_regression_test(
                             engine, file_path, issue + feedback, prompt_content,
@@ -2058,6 +2060,31 @@ class SleepTaskScheduler:
                                                             "replay": _replay_result}
                             else:
                                 _replay_result = None  # inconclusive — trusted neither way
+
+                    # n0by: an issue's fix is kept only with proof the bug is
+                    # gone. The module's own tests only say nothing broke: her
+                    # 24bs patch (strip "____" from the reply) passed 85 of
+                    # them while touching nothing in the issue, its regression
+                    # test lost to a markdown fence and no replay to run, and
+                    # was proposed for promotion.
+                    _replayed = bool(_replay_result and _replay_result.get("ok")
+                                     and not _replay_result.get("symptom_seen"))
+                    if _from_issue and not ((extra_test_path and run_tests) or _replayed):
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write(original_content)
+                        change.error = ("Not kept: nothing showed the bug is gone (no regression test that "
+                                        "failed before the fix, and no replay of the turn)")
+                        logger.warning("CodeMind: no proof the bug is gone for %s; file restored%s", file_path,
+                                       ", proposing again" if attempt + 1 < attempts else "")
+                        engine.record_change(change)
+                        feedback = (
+                            "\n\nYour previous fix passed the module's tests, but nothing showed the bug is "
+                            "gone: no regression test reproduced it. Fix the cause the issue describes, so a "
+                            "test built from the issue's quoted case fails before and passes after, or answer "
+                            "CANNOT_FIX.")
+                        if attempt + 1 >= attempts:
+                            engine.transition(CodeMindState.IDLE)
+                        continue
 
                     change.applied = True
                     _cycle_applied_files.append(file_path)
@@ -2233,6 +2260,7 @@ class SleepTaskScheduler:
         ))
         if not response or response.strip().startswith("NO_TEST"):
             return None
+        response = codemind_regression.extract_test_code(response)   # bqzt: a fence lost the test
 
         ok, why = codemind_regression.validate_test_code(response, module)
         if not ok:

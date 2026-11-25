@@ -26,6 +26,29 @@ from gaia_common.utils.skill_creator import slugify_pattern
 _TEST_DEF = re.compile(r"^\s*(?:async\s+)?def\s+test_\w+", re.M)
 
 
+_FENCED = re.compile(r"```[\w+-]*[ \t]*\n(.*?)\n[ \t]*```", re.S)   # paired left to right
+_OPEN_FENCE = re.compile(r"```[\w+-]*[ \t]*\n(.*)\Z", re.S)
+
+
+def extract_test_code(text: str) -> str:
+    """The test module out of a reply that wraps it in a markdown fence or
+    talks around it (bqzt: Prime added a fence though asked not to, and the
+    whole test was discarded as a syntax error at the ``` line). The fenced
+    block holding a `def test_` (the longest, if several); an unclosed fence
+    runs to the end; with no fence, the text itself."""
+    text = text or ""
+    if "```" not in text:
+        return text.strip()
+    blocks = [b.strip() for b in _FENCED.findall(text) if b.strip()]
+    if not blocks:
+        tail = _OPEN_FENCE.search(text)   # an opening fence never closed
+        blocks = [tail.group(1).strip()] if tail and _TEST_DEF.search(tail.group(1)) else []
+    tests = [b for b in blocks if _TEST_DEF.search(b)]
+    if tests:
+        return max(tests, key=len)
+    return "\n".join(ln for ln in text.splitlines() if not ln.strip().startswith("```")).strip()
+
+
 def validate_test_code(content: str, module: str) -> Tuple[bool, str]:
     """Is `content` plausible as a regression test for `module`?
 

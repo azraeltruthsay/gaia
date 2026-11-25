@@ -43,12 +43,15 @@ def _setup(tmp_path, monkeypatch, filename):
     s = SleepTaskScheduler.__new__(SleepTaskScheduler)
     s.config = SimpleNamespace(constants={"CODEMIND": {
         "enabled": True, "dry_run": False, "patch_mode": True, "self_deploy": True,
-        # a0aw.8/a0aw.3 are exercised by their own dedicated tests; this
-        # fixture's mock returns the same patch for every _codemind_propose
-        # call regardless of prompt, so leave the newer steps off here.
-        "write_regression_test": False, "replay_check": False,
+        # a0aw.3 has its own tests; the regression test (a0aw.8) is stubbed
+        # below: n0by keeps an issue's fix only with proof the bug is gone.
+        "write_regression_test": True, "replay_check": False,
         "validation": {"py_compile": True, "ruff": False, "ast_parse": True, "pytest": True}}})
     s.check_interrupted = lambda: None
+    reg = repo / "candidates" / "gaia-core" / "tests" / "test_codemind_reg.py"   # where CodeMind writes it
+    reg.parent.mkdir(parents=True, exist_ok=True)
+    reg.write_text("def test_x():\n    pass\n")
+    s._codemind_write_regression_test = MagicMock(return_value=reg)
     prompts = []
     s._codemind_propose = MagicMock(side_effect=lambda p: prompts.append(p) or PATCH)
     return s, target, iid, shared, prompts
@@ -70,7 +73,8 @@ def test_issue_to_fix_on_a_large_vital_file(tmp_path, monkeypatch):
     [queued] = list((shared / "doctor" / "architect_queue").glob("*.json"))
     m = json.loads(queued.read_text())
     assert m["status"] == "awaiting_architect" and m["vital_organs"] == ["agent_core.py"]
-    assert m["promote_files"] == ["candidates/gaia-core/gaia_core/cognition/agent_core.py"]
+    assert m["promote_files"] == ["candidates/gaia-core/gaia_core/cognition/agent_core.py",
+                                  "candidates/gaia-core/tests/test_codemind_reg.py"]   # its proof goes with it
 
 
 def test_issue_fix_waits_for_review_even_when_not_vital(tmp_path, monkeypatch):
@@ -89,3 +93,20 @@ def test_issue_fix_waits_for_review_even_when_not_vital(tmp_path, monkeypatch):
     [queued] = list((shared / "doctor" / "architect_queue").glob("*.json"))
     m = json.loads(queued.read_text())
     assert m["vital_organs"] == [] and m["from_issues"][0].endswith("routing_rules.py")
+
+
+def test_no_proof_the_bug_is_gone_nothing_kept(tmp_path, monkeypatch):
+    """n0by: tests that pass only say nothing broke."""
+    s, target, iid, shared, prompts = _setup(tmp_path, monkeypatch, "agent_core.py")
+    before = target.read_text()
+    s._codemind_write_regression_test = MagicMock(return_value=None)   # declined / discarded
+    s._run_codemind_cycle()
+    assert target.read_text() == before                                # restored
+    assert s._codemind_write_regression_test.call_count == 2           # asked again on the retry
+    issue = L.get_issue(iid)["issue"]
+    assert issue["status"] != "proposed"
+    assert "nothing showed the bug is gone" in issue["notes"][-1]["text"]
+    assert not list((shared / "doctor" / "architect_queue").glob("*.json"))
+    assert not list((shared / "doctor" / "restart_requests").glob("*.json"))
+    assert "nothing showed the bug is gone" in prompts[-1]             # told why on the retry
+
