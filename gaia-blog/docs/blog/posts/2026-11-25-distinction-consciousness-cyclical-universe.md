@@ -33,7 +33,7 @@ What follows is organized in five sections. The first establishes the Zero-Energ
 
 ### 1.1 Global Zero-Energy Balance
 
-The total energy of the universe is zero: positive mass-energy and negative gravitational potential energy cancel exactly. This is not a speculative position — it is consistent with the most widely accepted interpretations of modern cosmology, including inflationary models and Friedmann equations applied to a spatially flat universe. The implication is that the spontaneous emergence of a universe violates no conservation law, because the universe as a whole borrows nothing — it is a zero-sum rearrangement of the underlying vacuum.
+The total energy of the universe is zero: positive mass-energy and negative gravitational potential energy cancel exactly. This is a widely held position, though not settled physics. For a spatially flat universe described by the Friedmann equations the two contributions can be made to balance, and Edward Tryon and later Alan Guth argued from this that a universe can arise as a kind of free lunch. But general relativity gives no single agreed definition of the total energy of an expanding spacetime, so the zero-energy claim depends on how energy is defined for the universe as a whole. The framework needs only the weaker claim: that nothing forbids a universe from beginning without borrowing from outside itself. If the balance holds, the spontaneous emergence of a universe violates no conservation law, because the universe as a whole borrows nothing — it is a zero-sum rearrangement of the underlying vacuum.
 
 Locally, conservation laws remain fully operative. Globally, the system is self-neutral. This allows universes to arise, evolve, and dissolve without requiring an external energy source or a prior cause in the conventional sense.
 
@@ -74,6 +74,8 @@ The present framework proposes a different answer: the uniform state is not mere
 *The instability of the uniform state is not of energy, but of meaning. A law that cannot operate has no physical referent. A universe without distinction cannot sustain even the concept of a uniform universe.*
 
 The bounce therefore is not caused by something. It is logically necessitated by the nature of the terminal state. This is a stronger and more philosophically satisfying resolution than mechanical trigger models, because it requires no external agent and no special initial conditions.
+
+The argument is conceptual, but it has a physical counterpart. In Penrose’s Conformal Cyclic Cosmology, once only massless radiation remains, nothing in the universe can keep time or measure distance: there is no mass left to build a clock or a ruler, so scale itself stops meaning anything (see 3.4). That is the same self-negation stated in geometry. A state with no distinctions of scale cannot register even its own size.
 
 ## II. Nested Black Hole Universes
 
@@ -183,7 +185,9 @@ If only the final, most informationally rich black hole of a universe generates 
 
 This creates a selection mechanism across generations of universes. Universes whose constants permit consciousness are more likely to produce informationally rich seeds that generate successor universes also capable of producing consciousness. Over many cycles, the multiverse drifts toward constant-values that favor the emergence of aware, self-modeling matter — not because anyone designed it that way, but because consciousness is what maximizes the informational content of the reproductive bottleneck.
 
-Consciousness is not the universe’s accident. It is the universe’s strategy for carrying complexity forward through the bottleneck of the final singularity.
+This is the point where the framework moves from consistency with known physics into hypothesis, and the gap should be stated plainly. By the physics we have, a black hole’s information content (its Bekenstein-Hawking entropy) depends only on the area of its horizon, and so on its mass, not on how organized its contents were. A black hole that swallowed a civilization and one that swallowed an equal mass of hydrogen have the same entropy. And minds make up a vanishingly small fraction of the matter any final black hole would hold. For the filter to work, something must carry structure, not merely quantity, through the singularity: an account of how the organization of what falls in shapes what emerges on the other side. The unresolved black hole information paradox leaves room for such an account, but this framework does not yet supply one. The consciousness filter should be read as a hypothesis awaiting that mechanism.
+
+If such a mechanism exists, then consciousness is not the universe’s accident. It is the universe’s strategy for carrying complexity forward through the bottleneck of the final singularity.
 
 ### 4.5 The Recursive Loop
 
@@ -209,9 +213,11 @@ In 1846, Urbain Le Verrier did not observe Neptune. He observed perturbations �
 
 Nobody saw the destination. Nobody assumed a goal. They observed a consistent deflection from what the null hypothesis predicted, and they followed the inference wherever it led. The existence of something doing the pulling was established not by observing it directly but by the shape of its gravitational signature on everything around it.
 
-This is the appropriate epistemological framework for the question of cosmic purpose. The claim being made here is not that the universe has a goal in the sense of a destination held consciously in mind. The claim is observational: the trajectory of cosmic evolution shows consistent deflection from what pure randomness would predict. Life should not exist given the odds. Consciousness definitely should not exist given the odds. The arrow of complexity points consistently in the same direction across every scale we can observe — from particle physics to chemistry to biology to civilization. These are perturbations. Something is doing the pulling.
+This is the appropriate epistemological framework for the question of cosmic purpose. The claim being made here is not that the universe has a goal in the sense of a destination held consciously in mind. The claim is observational: the trajectory of cosmic evolution shows consistent deflection from what pure randomness would predict. Life appears improbable on the odds as we can estimate them; consciousness more improbable still. The arrow of complexity points consistently in the same direction across every scale we can observe — from particle physics to chemistry to biology to civilization. These are perturbations. Something is doing the pulling.
 
 Whether the source of that pull is a teleological destination, a structural attractor, a recursive loop generating its own preconditions across time, or something for which we do not yet have adequate language — that remains genuinely open. The Neptune Principle does not require us to name what is pulling in order to observe that something is. It only requires intellectual honesty about what the data shows and the willingness to follow the inference rather than dismiss it because the destination is not yet visible.
+
+The analogy has a limit that should be acknowledged. Le Verrier had a precise null model: Newtonian gravity predicted where Uranus should be, and the deviation could be measured against that prediction. No comparable baseline yet exists for the emergence of life and consciousness. We do not know the odds. We have a sample of one biosphere and no theory that tells us how often chemistry becomes biology. And we could only ever find ourselves in a universe that produced observers, so observing one is not by itself a deflection from expectation (the anthropic selection effect). The Neptune Principle therefore describes the right posture, following a consistent anomaly without first demanding to see its source, but showing that the anomaly is real requires a null model that does not yet exist. Building one is part of the work this framework invites.
 
 ### Structural Inevitability vs. Intentional Purpose
 
@@ -219,15 +225,17 @@ There is a meaningful distinction between goal and structural inevitability, and
 
 Water does not want to flow downhill. But the geometry of gravity makes downhill the only coherent direction, and the outcome is reliable without being intended. The question for this framework is whether consciousness and complexity are features of the cosmic fitness landscape in the same way — deep attractor states that the system reliably falls into given sufficient time — or whether they are genuinely improbable accidents that happen to have occurred in our particular branch of history.
 
-The convergent evolution evidence suggests the former. The same solutions emerging independently across dozens of unrelated lineages is not what accident looks like. Accident produces noise. Convergence produces signal. And signal, in this context, means the landscape has shape — that certain configurations are attractors, and that the system drifts toward them not because anyone guides it but because that is what shaped landscapes do to systems moving through them.
+The convergent evolution evidence suggests the former. The same solutions emerging independently across dozens of unrelated lineages is not what accident looks like. Accident produces noise. Convergence produces signal. And signal, in this context, means the landscape has shape — that certain configurations are attractors, and that the system drifts toward them not because anyone guides it but because that is what shaped landscapes do to systems moving through them. Convergence shows that biology’s landscape has shape, given Earth’s chemistry and physics. Extending that shape to the cosmic scale, across universes, is the inference this framework proposes, not something convergence alone establishes.
 
-The framework therefore does not claim purpose in the theological sense. It claims something more modest and more defensible: that the universe exhibits consistent directional tendency toward complexity and consciousness, that this tendency is observable as perturbation from null expectation, and that the source of this tendency — whether attractor, recursion, or something unnamed — is worth following as an inference the way Le Verrier followed his calculations. We do not need to see Neptune to know something is there.
+The framework therefore does not claim purpose in the theological sense. It claims something more modest and more defensible: that the universe exhibits consistent directional tendency toward complexity and consciousness, that this tendency may be observable as perturbation from null expectation once such an expectation can be stated, and that the source of this tendency — whether attractor, recursion, or something unnamed — is worth following as an inference the way Le Verrier followed his calculations. We do not need to see Neptune to know something is there.
 
 ## V. Synthesis: The Unified Picture
 
 ### 5.1 Distinction as the Substrate of Manifestation
 
 Across all four frameworks developed above, a single principle recurs: distinction is the substrate of manifestation. Without difference — without asymmetry, gradient, and relational structure — there is no time, no gravity, no law, no consciousness, no universe in any operational sense. Everything that exists, exists as a pattern of distinction against a background of potential uniformity.
+
+The principle has a formal precedent. George Spencer-Brown’s *Laws of Form* (1969) builds logic and arithmetic from a single instruction, “draw a distinction”, and ends with a distinction that re-enters its own form: a form that refers to itself. Francisco Varela later extended that calculus to self-referential systems and, with Humberto Maturana, described living and cognitive systems as organizations that continually produce and maintain their own distinction from their surroundings. If consciousness is a kind of structure, as Section IV suggests, this is the mathematics in which distinction and self-reference are already the same subject.
 
 The universe is therefore not primarily a collection of objects. It is a dynamic tension between the tendency of entropy to dissolve all distinctions and the tendency of self-organizing complexity to generate new ones. Stars, galaxies, organisms, and minds are all local pockets of maintained distinction — ordered islands in a sea of increasing uniformity — sustained temporarily against the current before eventually dissolving back into it.
 
@@ -283,6 +291,12 @@ The following existing frameworks are most directly relevant to the hypotheses d
 
 * Alfred North Whitehead — Process Philosophy: Experience as a fundamental feature of reality at all scales rather than an emergent property of complex matter; philosophical background for the consciousness-as-perspective framework.
 
+* George Spencer-Brown — Laws of Form (1969): A calculus that builds logic and arithmetic from the single act of drawing a distinction and closes with a form that re-enters itself; the nearest formal counterpart to the distinction principle of Section V and to self-reference as the mark of mind in Section IV.
+
+* Francisco Varela — “A Calculus for Self-Reference” (1975) and, with Humberto Maturana, Autopoiesis and Cognition (1980): Extends Spencer-Brown’s calculus to self-referential forms and describes living and cognitive systems as self-producing, self-distinguishing organizations; a formal bridge between distinction and mind.
+
+* Edward Tryon (1973) and Alan Guth — the zero-energy universe: The argument that a universe whose positive and negative energies balance can arise without violating conservation; background for Section 1.1, with the caveat noted there about defining total energy in general relativity.
+
 * David Wiltshire — Timescape Cosmology: The reinterpretation of apparent cosmic acceleration as a clock-rate artifact of gravitational inhomogeneity across cosmic voids and filaments, rather than evidence for dark energy; directly relevant to the viability of the final black hole hypothesis and resonant with the distinction principle.
 
 ## Closing Reflection
@@ -293,4 +307,4 @@ We are, each of us, a temporary pocket of maintained distinction in a universe t
 
 That may be everything.
 
-*— Seumas, 2025*
+*— Seumas, 2025 (revised 2026)*
