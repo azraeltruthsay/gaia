@@ -2176,57 +2176,26 @@ class AgentCore:
                 self.logger.info("%s payload(s) present — pinning selected_model_name='core' (multimodal)", _modality)
                 selected_model_name = "core"
 
-            # 0. Character-level analysis injection
-            # Models can't see individual letters due to tokenization.
-            # When a question involves letter counting, spelling, or character
-            # analysis, inject a character map so the model can READ the answer.
-            import re as _re_count
+            # 0. Letter counting. Her tokenizer reads words in chunks, so she
+            # walks the word herself, one letter per line with a running count,
+            # in a hidden step (letter_count.py). Code used to count and hand
+            # her the answer, and told her "hillbilly" has no l's (2026-11-26).
+            from gaia_core.cognition.letter_count import work_it_out as _work_it_out
+            _working_mind = "core" if _core_on_gpu() else "prime"
 
-            _char_maps = []
-
-            # Pattern A: "how many [char] in [word]" (specific letter count)
-            _count_match = _re_count.search(
-                r"how many\s+(?:times?\s+(?:does?\s+)?)?(?:the\s+)?(?:letter\s+)?([a-zA-Z])(?:'s)?\s+.*\bin\s+(?:the\s+)?(?:word\s+)?(\w+)",
-                user_input, _re_count.IGNORECASE)
-            if not _count_match:
-                _count_match = _re_count.search(
-                    r"how many\s+([a-zA-Z])s?\s+(?:are\s+)?(?:there\s+)?(?:in\s+)?(?:the\s+)?(?:word\s+)?(\w+)",
-                    user_input, _re_count.IGNORECASE)
-            if _count_match:
-                _char, _word = _count_match.group(1).lower(), _count_match.group(2).lower()
-                _count = _word.count(_char)
-                _positions = [i + 1 for i, c in enumerate(_word) if c == _char]
-                _spelled = " ".join(f"{c}({i+1})" for i, c in enumerate(_word))
-                _char_maps.append(
-                    f'Word "{_word}" ({len(_word)} chars): {_spelled}\n'
-                    f'Letter "{_char}" appears at position(s): {", ".join(str(p) for p in _positions)} '
-                    f'— {_count} occurrence{"s" if _count != 1 else ""}.'
-                )
-
-            # Pattern B: "spell [word]" / "letters in [word]" / "how many letters"
-            # Also catch "how do you spell", "what letters are in", "break down the word"
-            if not _char_maps:
-                _spell_match = _re_count.search(
-                    r"(?:spell(?:ing)?|letters?\s+in|how many letters|break\s*down|character[s]?\s+in)\s+(?:the\s+)?(?:word\s+)?['\"]?(\w{3,})['\"]?",
-                    user_input, _re_count.IGNORECASE)
-                if _spell_match:
-                    _word = _spell_match.group(1).lower()
-                    _spelled = " ".join(f"{c}({i+1})" for i, c in enumerate(_word))
-                    # Build letter frequency
-                    _freq: Dict[str, int] = {}
-                    for c in _word:
-                        _freq[c] = _freq.get(c, 0) + 1
-                    _freq_str = ", ".join(f"{c}={n}" for c, n in sorted(_freq.items()) if n > 1)
-                    _char_maps.append(
-                        f'Word "{_word}" ({len(_word)} chars): {_spelled}'
-                        + (f'\nRepeated letters: {_freq_str}' if _freq_str else '')
-                    )
+            def _scratch(_msgs):
+                from gaia_core.cognition.letter_count import WORKING_MAX_TOKENS
+                _res = self.model_pool.forward_to_model(_working_mind, messages=_msgs,
+                                                        max_tokens=WORKING_MAX_TOKENS, temperature=0.0)
+                return strip_think_tags(_res["choices"][0]["message"]["content"])
+            _working = _work_it_out(user_input, _scratch)
+            if _working:
+                user_input = user_input + "\n\n" + _working
+                logger.info("[LETTERS] %s worked the letters out itself (%d chars)", _working_mind, len(_working))
 
             # Pattern C (DISABLED — too aggressive, fires on D&D / quoted-name
-            # contexts where 'character' means a person, not a letter). The
-            # explicit "how many X in Y" and "spell Y" patterns above cover
-            # legitimate character-analysis questions; quoted words alone are
-            # not a strong enough signal.
+            # contexts where 'character' means a person, not a letter). Quoted
+            # words alone are not a strong enough signal.
             #
             # Original false positive: "to be fair he's actually MY character
             # 🙂 ... you are 'playing' GAIA ..." → matched 'character' as
@@ -2235,15 +2204,6 @@ class AgentCore:
             # contradicting "answer the question" instruction and echoed the
             # user's message verbatim.
 
-            if _char_maps:
-                _injection = (
-                    "\n\n[Character Analysis — your tokenizer groups letters into chunks, "
-                    "so you cannot see individual characters. Use this pre-computed data:]\n"
-                    + "\n".join(_char_maps) +
-                    "\n[Answer the user's question naturally using this data.]"
-                )
-                user_input = user_input + _injection
-                logger.info("[INTERCEPT] Injected character map(s) for %d word(s)", len(_char_maps))
 
             # 1. Model Selection (Prioritize Fast-Path & Overrides)
             text_lower = user_input.lower()
