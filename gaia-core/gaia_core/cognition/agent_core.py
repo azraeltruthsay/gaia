@@ -2177,21 +2177,27 @@ class AgentCore:
                 selected_model_name = "core"
 
             # 0. Letter counting. Her tokenizer reads words in chunks, so she
-            # walks the word herself, one letter per line with a running count,
+            # walks the word herself, letter by letter with a running count,
             # in a hidden step (letter_count.py). Code used to count and hand
             # her the answer, and told her "hillbilly" has no l's (2026-11-26).
+            # Core does the walk in every gear, twice, and a disagreement is
+            # shown to her: Prime can't spell double letters ("strawbery",
+            # "misipi"; 2 of 12 right), and two agreeing walks were right 95/95.
             from gaia_core.cognition.letter_count import work_it_out as _work_it_out
-            _working_mind = "core" if _core_on_gpu() else "prime"
+            _working_mind = "core"
 
             def _scratch(_msgs):
                 from gaia_core.cognition.letter_count import WORKING_MAX_TOKENS
                 _res = self.model_pool.forward_to_model(_working_mind, messages=_msgs,
                                                         max_tokens=WORKING_MAX_TOKENS, temperature=0.0)
                 return strip_think_tags(_res["choices"][0]["message"]["content"])
-            _working = _work_it_out(user_input, _scratch)
-            if _working:
-                user_input = user_input + "\n\n" + _working
-                logger.info("[LETTERS] %s worked the letters out itself (%d chars)", _working_mind, len(_working))
+            # Kept off user_input: appended there, it was saved as the person's
+            # words, made the turn look like a world question (web search), and
+            # set off the engineering shift to Prime (2026-11-26). It reaches
+            # her prompt only, as a data field the prompt builder adds.
+            _letter_working = _work_it_out(user_input, _scratch, on_gpu=_core_on_gpu())
+            if _letter_working:
+                logger.info("[LETTERS] %s worked the letters out itself (%d chars)", _working_mind, len(_letter_working))
 
             # Pattern C (DISABLED — too aggressive, fires on D&D / quoted-name
             # contexts where 'character' means a person, not a letter). Quoted
@@ -2751,6 +2757,10 @@ class AgentCore:
                 except Exception:
                     logger.debug("regard signal failed", exc_info=True)
     
+            if _letter_working:
+                packet.content.data_fields.append(DataField(
+                    key='letter_working', value=_letter_working, type='string', source='letter_count'))
+
             # Inject semantic probe result into packet (if probe found hits)
             if probe_result and probe_result.has_hits:
                 packet.content.data_fields.append(DataField(

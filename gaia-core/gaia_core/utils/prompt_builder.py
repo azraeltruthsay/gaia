@@ -385,9 +385,23 @@ def post_line(asked: str) -> str:
             f"{TOOL_CALL_CLOSE}. A note in your memory palace reaches no one.")
 
 
+def _with_letter_working(packet: CognitionPacket, messages: List[Dict]) -> List[Dict]:
+    """Her own letter-by-letter working for a letter-counting question
+    (letter_count.py), right after the question it answers: the position it
+    was measured in. Only in the prompt; her history keeps the person's words."""
+    working = next((getattr(df, "value", "") for df in getattr(packet.content, "data_fields", []) or []
+                    if getattr(df, "key", "") == "letter_working"), "")
+    if working:
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user" and isinstance(messages[i].get("content"), str):
+                messages[i] = {**messages[i], "content": f"{messages[i]['content']}\n\n{working}"}
+                break
+    return messages
+
+
 def build_from_packet(packet: CognitionPacket, *args, **kwargs) -> List[Dict]:
     """The prompt for a packet, told who she is speaking with (751u)."""
-    messages = _assemble_from_packet(packet, *args, **kwargs)
+    messages = _with_letter_working(packet, _assemble_from_packet(packet, *args, **kwargs))
     try:
         from gaia_common.utils.people import (channel_speaker_line, creator_line, is_channel,
                                               mentioned_line, speaker_line)
@@ -573,7 +587,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
     logger.debug("%s", packet)  # full packet: history, world state, conversation text
     config = Config() # Assumes a singleton or default config is acceptable
     
-    processed_data_field_keys = set() # Track keys already explicitly added to the prompt
+    processed_data_field_keys = {"letter_working"} # Track keys already explicitly added to the prompt (letter_working: appended to the question at the end)
     
     identity_description_content = ""
 
