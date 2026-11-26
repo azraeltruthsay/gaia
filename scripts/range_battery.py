@@ -106,6 +106,8 @@ def ask(q: str, session_id: str, timeout: int = 300) -> dict:
             kind = ev.get("type")
             if kind == "token":
                 tokens.append(ev.get("value", ""))
+            elif kind == "flush":
+                tokens.append("\n\n")   # a message ends; her next one is separate (6f1x: Tyger)
             elif kind == "tool_status":
                 tools.append(f"{ev.get('tool')}({ev.get('action') or ''}):{ev.get('state')}")
             elif kind == "retract":

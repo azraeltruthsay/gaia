@@ -83,7 +83,7 @@ from gaia_core.cognition.told_facts import (
     told_fact,
     told_facts_in,
 )
-from gaia_common.utils.work_memory import asks_for_the_words, best_agreement, excerpt, requested_part, work_name
+from gaia_common.utils.work_memory import asks_for_the_words, best_agreement, excerpt, one_line_asked, requested_part, work_name
 # o9dh/saq3: aliased -- this is a DIFFERENT enum from cognition_packet's
 # TargetEngine (different members: NANO/CORE/PRIME here vs PRIME/CORE/LITE/
 # CODEMIND/COUNCIL there, and even different string values, "prime" vs
@@ -3438,6 +3438,13 @@ class AgentCore:
                 except Exception:
                     self.logger.warning("Recitation pipeline failed", exc_info=True)
                     _recitation_doc = None
+                if not _recitation_doc and one_line_asked(_recite_q):
+                    # 6f1x: one famous line is a fact she can look up and check
+                    # like any other; "couldn't find two sources" for the first
+                    # line of The Raven was worse than answering it.
+                    self.logger.info("Recitation: no agreed text for a one-line question; answering it as a question")
+                    plan.intent = "comprehension"
+            if plan.intent == "recitation":
                 _reply = self._recitation_reply(_recite_q, _recitation_doc)
                 _hers = (self._after_reading(user_input, _reply, _recitation_doc, session_id)
                          if _recitation_doc else "")
@@ -8196,7 +8203,8 @@ RESULT: COMPLEX (reason: <brief reason>)
                     self.logger.exception("Web-retrieved document recitation failed, falling back")
                     # Fall through to confidence-based approach
 
-            if _has_named_work_signal(user_input) and asks_for_the_words(user_input):
+            if _has_named_work_signal(user_input) and asks_for_the_words(user_input) \
+                    and not one_line_asked(user_input):   # 6f1x: one line is answered, not refused
                 return self._recitation_reply(user_input, None)
 
             # No document found (local or web) - use confidence-based approach

@@ -35,6 +35,13 @@ _SHINGLE_WORDS = 5
 _MAX_GAP_WORDS = 8
 # Enough for the shortest poems; shared page furniture rarely runs this long.
 MIN_AGREED_WORDS = 12
+# The agreed text must be most of what one of the two pages holds, or it is a
+# passage they both quote: Wikipedia and the Poetry Foundation agreed on 298
+# characters of The Waste Land's part II, kept as the whole poem, and "the
+# first line" came out as "What is that noise?" (6f1x). Of the 15 works she
+# kept, every real one covers at least 20% of a page (The Red Wheelbarrow,
+# 91 characters on a 452-character page); the passage covered 1.5%.
+MIN_PAGE_SHARE = 0.10
 _CAPTION_CHARS = 500
 
 _WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)*")
@@ -196,6 +203,8 @@ def best_agreement(pages: List[dict], name: str) -> Optional[Dict[str, object]]:
                 agreed = strip_trailer(strip_heading(agreed, name), name)
                 if len(_tokens(agreed)) < MIN_AGREED_WORDS or _reads_as_about(agreed, name):
                     continue
+                if len(agreed) < MIN_PAGE_SHARE * min(len(x["content"]), len(y["content"])):
+                    continue
                 # Nearly equal lengths are one text in two editions, so length
                 # only counts in coarse steps; then layout decides.
                 key = (round(len(agreed) / 300) or 1, int("\n\n" in agreed), -agreed.count("\n"))
@@ -233,7 +242,8 @@ def work_name(request: str) -> str:
 
 
 def name_terms(name: str) -> set:
-    return {t[0] for t in _tokens(name)} - _TERM_NOISE
+    # "Poe's 'The Raven'" names Poe: as "poes" it missed The Raven she had kept (6f1x)
+    return {t[0] for t in _tokens(re.sub(r"(?<=\w)['’]s\b", "", name or ""))} - _TERM_NOISE
 
 
 def title_terms(name: str) -> set:
@@ -260,9 +270,15 @@ def asks_for_the_words(request: str) -> bool:
     return bool(requested_part(request)) and not _ABOUT_RE.search(request or "")
 
 
+# "Give the final answer on the last line" says where her answer goes, not a
+# part of a work: it sent a counting question to the recital (6f1x).
+_WHERE_TO_ANSWER_RE = re.compile(r"(?i)\b(?:on|at|in)\s+(?:the|a|its\s+own)\s+$")
+
+
 def requested_part(request: str) -> Optional[Dict[str, object]]:
     """Which part a request asks for, or None for the whole work."""
-    m = _PART_RE.search(request or "")
+    m = next((m for m in _PART_RE.finditer(request or "")
+              if not _WHERE_TO_ANSWER_RE.search((request or "")[:m.start()])), None)
     if not m:
         return None
     if m.group("ordinal"):
@@ -272,6 +288,14 @@ def requested_part(request: str) -> Optional[Dict[str, object]]:
     count = int(raw) if raw.isdigit() else _NUMBER_WORDS[raw]
     return {"from": "end" if m.group("end").lower() in ("last", "closing", "final") else "start",
             "count": count, "unit": m.group("unit").lower()}
+
+
+def one_line_asked(request: str) -> bool:
+    """A request for a single line ('the first line of The Raven') without
+    asking for the text itself ('quote', 'recite'): a fact she can look up."""
+    part = requested_part(request)
+    return bool(part and part["unit"] == "line" and int(part["count"]) == 1
+                and not _WANTS_WORDS_RE.search(request or ""))
 
 
 def excerpt(text: str, part: Optional[Dict[str, object]]) -> Optional[str]:
