@@ -577,6 +577,19 @@ def _on_topic(results: List[GroundingResult], question: str) -> List[GroundingRe
     return kept
 
 
+def reading_order(results: List[GroundingResult]) -> List[GroundingResult]:
+    """Which pages to try reading, best first (wsjn). A remembered lookup
+    goes ahead of this search's results only if it was looked up for (nearly)
+    this question; one that merely shares words with it goes after them.
+    Memory came first regardless, and "What is the closest star to Earth?"
+    read Mount Everest (its page says "Earth" and "closest") ahead of the two
+    results about stars, then answered "not sure" (2026-11-25)."""
+    asked = [r for r in results if r.source == "memory" and r.question_match >= STRONG_QUESTION_MATCH]
+    web = [r for r in results if r.source == "web"]
+    rest = [r for r in results if r.source == "memory" and r.question_match < STRONG_QUESTION_MATCH]
+    return asked + web + rest
+
+
 def _read_top_result(question: str, web_results: List[GroundingResult]) -> Optional[GroundingResult]:
     """The section of the top web result that answers `question`, for a
     question about the world by name (e8hf). None otherwise or on failure."""
@@ -813,7 +826,12 @@ def ground_query(
     # question about the world, the part of that page that answers it goes
     # first (a remembered lead skipped the search, and with it the reading).
     if not skip_web:
-        read = _read_top_result(query, [r for r in ctx.results if r.source in ("web", "memory")])
+        # Only the first few results reach her: a lookup that merely shares
+        # words ("galaxy" -> Star Trek) mustn't crowd out this search's own.
+        if any(r.source == "web" for r in ctx.results):
+            loose = [r for r in ctx.results if r.source == "memory" and r.question_match < STRONG_QUESTION_MATCH]
+            ctx.results = [r for r in ctx.results if r not in loose] + loose
+        read = _read_top_result(query, reading_order(ctx.results))
         if read:
             ctx.results.insert(0, read)
 
