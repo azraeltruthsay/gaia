@@ -21,7 +21,12 @@ used only when both minds read "do".
 Probes live in /shared/intent_probes/<tier>_<gpu|cpu>.npz, fitted for one
 model file (stamped in the probe); a mind on a model or device without a
 matching probe doesn't vote. After a bake: re-extract and fit (minutes).
-Reads: Core 12B on GPU ~32 ms a layer, Prime 8B on CPU ~150 ms.
+Reads go through the engine's reader context (its own small KV on the same
+weights), so they don't wait for a generation: Core 12B on GPU ~40 ms during
+one, Prime 8B on CPU ~0.5 s during one (~170 ms idle). Agreement figures
+above are from the first fit; on the reader's true last token (Core's
+earlier reads were one token early, through the MTP path): act 91% of
+messages agree, 91% right; source 86%: 85%; depth 97%: 97%.
 """
 import json
 import logging
@@ -43,7 +48,7 @@ MINDS = {
 }
 AXES = ("act", "source", "depth")
 _HEALTH_TTL = 30.0
-_MAX_CHARS = 2000
+_MAX_CHARS = 1600   # the engine's reader context holds 512 tokens
 
 _lock = threading.Lock()
 _probes: Dict[str, Optional[dict]] = {}

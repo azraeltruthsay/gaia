@@ -265,8 +265,11 @@ managed_http_api:
       response: "{layers: {layer: [float x n_embd]}, prompt_tokens: int, n_embd: int}"
       description: "gaia_cpp (d3px): the last-token hidden state of chosen layers for the
         chat-formatted prompt (generation prompt included, thinking off), generating
-        nothing. Read-only: capture layers are restored after. 400 on a bad layer or
-        media parts. Core 12B on GPU: 32 ms one layer, 285 ms for its 12 capture layers."
+        nothing. Runs in a reader context (second llama context on the same weights,
+        own 512-token KV + lock; no LoRA, no MTP), so it never waits for a generation;
+        made on first use (Core 12B GPU: +244 MB VRAM). Prompts over 512 tokens: 500.
+        400 on a bad layer or media parts. Core 12B GPU ~40 ms during a generation;
+        Prime 8B CPU ~0.5 s during one, ~170 ms idle. Response carries reader: true."
 
     - endpoint: /kv/stats
       method: GET
