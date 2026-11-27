@@ -1202,7 +1202,7 @@ def audit_code():
                 log.info("Tests PASSED for %s. Triggering auto-restart.", name)
                 remediation = SERVICES[name][1]
                 if remediation == "restart":
-                    docker_restart(name)
+                    docker_restart(name, planned=True)
                 elif remediation == "ha":
                     restart_candidate(name)
             else:
@@ -2411,7 +2411,10 @@ def restart_candidate(name: str) -> bool:
              "-f", f"{COMPOSE_DIR}/docker-compose.candidate.yml",
              "-f", f"{COMPOSE_DIR}/docker-compose.ha.yml",
              "--profile", "ha",
-             "up", "-d", name],
+             # Recreate, not start: a container left pointing at a network
+             # that no longer exists can only come back recreated (9jr8:
+             # gaia-study-candidate, "network ... not found", 5 weeks).
+             "up", "-d", "--force-recreate", name],
             capture_output=True, text=True, timeout=120,
             env=env
         )
@@ -2621,8 +2624,13 @@ def _verify_recovery(name: str, url: str, delay: int = 5):
         log.warning("POST-REMEDIATION: %s still unhealthy after %ds — next poll will retry", name, delay)
 
 
-def docker_restart(name: str) -> bool:
-    """Restart a production service via `docker restart`. Enforces structural audit, reload guard, and circuit breaker."""
+def docker_restart(name: str, planned: bool = False) -> bool:
+    """Restart a production service via `docker restart`. Enforces structural audit, reload guard, and circuit breaker.
+
+    planned=True is the restart that loads new code whose tests passed: not a
+    crash, so the reload guard, circuit breaker and cooldown don't apply and it
+    isn't counted (9jr8: the third deploy in 30 min tripped the guard, sent
+    GAIA an "URGENT SYSTEM REPAIR" and left the new code unloaded)."""
     if DRY_RUN:
         log.info("[DRY_RUN] Would restart %s — skipping (candidate mode)", name)
         return False
@@ -2634,11 +2642,13 @@ def docker_restart(name: str) -> bool:
 
     # 1. Reload Guard: Detect high-frequency restart loops
     _restart_history[name] = [t for t in _restart_history[name] if now - t < PROD_RESTART_WINDOW]
-    if len(_restart_history[name]) >= PROD_RESTART_MAX and not _is_meditation_active():
+    if planned:
+        pass
+    elif len(_restart_history[name]) >= PROD_RESTART_MAX and not _is_meditation_active():
         log.critical("🚨 RELOAD LOOP DETECTED for %s. Quarantine active.", name)
     elif len(_restart_history[name]) >= PROD_RESTART_MAX and _is_meditation_active():
         log.info("🧘 Defensive Meditation active — restart limit bypassed for %s", name)
-    if len(_restart_history[name]) >= PROD_RESTART_MAX and not _is_meditation_active():
+    if not planned and len(_restart_history[name]) >= PROD_RESTART_MAX and not _is_meditation_active():
         if name not in _alarmed_services:
             raise_alarm(
                 name,
@@ -2677,7 +2687,7 @@ def docker_restart(name: str) -> bool:
     # Trim restart history to the rolling window
     _restart_history[name] = [t for t in _restart_history[name] if now - t < PROD_RESTART_WINDOW]
 
-    if len(_restart_history[name]) >= PROD_RESTART_MAX and not _is_meditation_active():
+    if not planned and len(_restart_history[name]) >= PROD_RESTART_MAX and not _is_meditation_active():
         if name not in _alarmed_services:
             raise_alarm(
                 name,
@@ -2688,13 +2698,16 @@ def docker_restart(name: str) -> bool:
 
     # Cooldown between individual restarts (reuse RESTART_COOLDOWN)
     last = _last_restart.get(name, 0)
-    if now - last < RESTART_COOLDOWN:
+    if not planned and now - last < RESTART_COOLDOWN:
         remaining = int(RESTART_COOLDOWN - (now - last))
         log.info("Cooldown active for %s (%ds remaining), skipping restart", name, remaining)
         return False
 
-    log.warning("REMEDIATION: docker compose recreate %s (attempt %d/%d in window)",
-                name, len(_restart_history[name]) + 1, PROD_RESTART_MAX)
+    if planned:
+        log.info("DEPLOY: docker compose recreate %s to load code whose tests passed", name)
+    else:
+        log.warning("REMEDIATION: docker compose recreate %s (attempt %d/%d in window)",
+                    name, len(_restart_history[name]) + 1, PROD_RESTART_MAX)
     try:
         # Use compose up --force-recreate to ensure correct container naming.
         # Plain `docker restart` preserves mangled names (e.g. "2a85f751fcd3_gaia-web").
@@ -2710,8 +2723,9 @@ def docker_restart(name: str) -> bool:
         )
 
         ts = time.monotonic()
-        _last_restart[name] = ts
-        _restart_history[name].append(ts)
+        if not planned:   # a deploy isn't a crash: crash remediation keeps its own count
+            _last_restart[name] = ts
+            _restart_history[name].append(ts)
 
         entry = {
             "service": name,
