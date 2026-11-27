@@ -259,6 +259,15 @@ managed_http_api:
     # GB). CUDA is never masked in the manager's own process (it initialises
     # once, so masking blinded later GPU loads); a GPU load that sees no GPU
     # fails. In the house format a reply also ends at a new <|turn>.
+    - endpoint: /hidden/read
+      method: POST
+      request: { messages: list, "layers?": "list[int] (default: the capture layers set at load)" }
+      response: "{layers: {layer: [float x n_embd]}, prompt_tokens: int, n_embd: int}"
+      description: "gaia_cpp (d3px): the last-token hidden state of chosen layers for the
+        chat-formatted prompt (generation prompt included, thinking off), generating
+        nothing. Read-only: capture layers are restored after. 400 on a bad layer or
+        media parts. Core 12B on GPU: 32 ms one layer, 285 ms for its 12 capture layers."
+
     - endpoint: /kv/stats
       method: GET
       description: "gaia_cpp: cached tokens, snapshots, reuse counters (also in /health → kv)"
