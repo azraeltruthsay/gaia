@@ -9,6 +9,8 @@ Run inside gaia-core (the files live in its /shared):
     docker exec gaia-core python /tmp/intent_probe_d3px.py extract http://localhost:8092/hidden/read core_gpu
     docker exec gaia-core python /tmp/intent_probe_d3px.py extract http://gaia-prime:7777/hidden/read prime_cpu
     docker exec gaia-core python /tmp/intent_probe_d3px.py cross
+    docker exec gaia-core python /tmp/intent_probe_d3px.py fit core_gpu /models/core-gpu.gguf
+    docker exec gaia-core python /tmp/intent_probe_d3px.py fit prime_cpu /models/prime.gguf
 
 2026-11-27, 847 messages, five folds holding out whole sessions, logistic
 probes on a mid + last layer (Core L20+L47, Prime L20+L35):
@@ -86,9 +88,41 @@ def cross():
              for ax, t in out.items() for k, v in zip(("core", "prime", "qcore", "qprime"), t)})
 
 
+LAYERS = {"core_gpu": (20, 47), "prime_cpu": (20, 35)}
+PROBE_DIR = "/shared/intent_probes"
+
+
+def fit(tag, model):
+    """Fit the probes on every labeled message and save them for the reading
+    organ (gaia_core/cognition/nlu/reading.py): numbers only, numpy to apply.
+    `model` is the engine's model file; the probe is stamped with what it
+    resolves to, and the organ won't use it on another model (a new bake)."""
+    import os
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+    rows = json.load(open('/shared/evals/intent_d3px/labeled_v3.json'))
+    H = np.load(f'/shared/evals/intent_d3px/hidden_{tag}.npz')
+    layers = LAYERS[tag]
+    X = np.hstack([H[f"L{n}"] for n in layers])
+    out = {"layers": np.array(layers), "model": np.array(os.path.realpath(model))}
+    for ax in ("act", "source", "depth"):
+        y = np.array([r[ax] for r in rows])
+        m = make_pipeline(StandardScaler(), LogisticRegression(C=0.5, max_iter=3000, class_weight="balanced")).fit(X, y)
+        sc, lr = m[0], m[1]
+        out.update({f"{ax}_mean": sc.mean_.astype(np.float32), f"{ax}_scale": sc.scale_.astype(np.float32),
+                    f"{ax}_coef": lr.coef_.astype(np.float32), f"{ax}_bias": lr.intercept_.astype(np.float32),
+                    f"{ax}_classes": lr.classes_.astype(str)})
+    os.makedirs(PROBE_DIR, exist_ok=True)
+    np.savez(f"{PROBE_DIR}/{tag}.npz", **out)
+    print("saved", f"{PROBE_DIR}/{tag}.npz", {k: v.shape for k, v in out.items() if k.endswith("coef")})
+
+
 if __name__ == "__main__":
     if sys.argv[1:2] == ["extract"]:
         extract(sys.argv[2], sys.argv[3])
+    elif sys.argv[1:2] == ["fit"]:
+        fit(sys.argv[2], sys.argv[3])
     elif sys.argv[1:2] == ["cross"]:
         cross()
     else:

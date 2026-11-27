@@ -35,6 +35,7 @@ def _setup(tmp_path, monkeypatch, examples=EXAMPLES):
     monkeypatch.setattr(sh, "LOG_PATH", str(tmp_path / "shadow.jsonl"))
     monkeypatch.setattr(sh, "_examples", None)
     monkeypatch.setattr(sh, "_matrix", None)
+    monkeypatch.setenv("READING_ENABLED", "0")   # no live minds' read in a unit test
 
 
 def test_nearest_examples_decide_when_no_rule_fires(tmp_path, monkeypatch):

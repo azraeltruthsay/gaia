@@ -190,15 +190,30 @@ def observe(text: str, history: List[dict], session_id: str, source: str, model_
             if embed is None:
                 return
             got = read(text, prev, embed)
+            # The web gate waits on this reading: publish it before the
+            # minds read (their read isn't on the turn's path yet).
+            out._set(got)
+            # d3px.4 shadow: both minds' reading beside the embedding's.
+            minds = None
+            try:
+                from gaia_core.cognition.nlu.intent_service import read_message
+                r = read_message(text)
+                if r:
+                    minds = {k: r[k] for k in ("act", "sources", "depth", "agreed", "minds", "ms")}
+                    minds["each"] = {x["mind"]: {ax: [x[ax][0], round(x[ax][1], 3)] for ax in ("act", "source", "depth")}
+                                     for x in r["readings"]}
+            except Exception:
+                logger.debug("Reading (shadow) failed", exc_info=True)
             if got:
                 _write({"ts": ts, "session_id": session_id, "source": source, "text": text[:400],
                         "prev_user": next((h.get("content", "")[:200] for h in reversed(prev) if h.get("role") == "user"), ""),
-                        **got, "ms": round((time.time() - ts) * 1000)})
+                        **got, "ms": round((time.time() - ts) * 1000), "minds": minds})
         except Exception:
             got = None
             logger.debug("Intent shadow failed (non-fatal)", exc_info=True)
         finally:
-            out._set(got)
+            if not out._done.is_set():
+                out._set(got)
 
     threading.Thread(target=_run, name="intent-shadow", daemon=True).start()
     return out

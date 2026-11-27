@@ -11,6 +11,9 @@ touch this file.
 """
 
 from .intent_detection import detect_intent  # main entrypoint
+# d3px: both minds' reading of a message (act / source / depth), from their
+# own hidden states. Shadow-logged for now; the gates move onto it next.
+from .reading import read_message  # noqa: F401
 
 # Optional shorthand alias if you prefer detect(...)
 detect = detect_intent
