@@ -1579,12 +1579,15 @@ class AgentCore:
         except Exception:
             logger.debug("Pending-write approval check failed, continuing", exc_info=True)
 
-        # d3px shadow: what the person wants, read by meaning, logged beside
-        # what routing does (ledger, same session and time). Routes nothing.
+        # d3px: what the person wants, read by meaning, logged beside what
+        # routing does (ledger, same session and time). It decides one thing,
+        # later: whether this turn searches the web.
+        _intent_reading = None
         try:
             from gaia_core.cognition import intent_shadow
-            intent_shadow.observe(user_input or "", self.session_manager.get_history(session_id),
-                                  session_id, source, self.model_pool)
+            _intent_reading = intent_shadow.observe(
+                user_input or "", self.session_manager.get_history(session_id),
+                session_id, source, self.model_pool)
         except Exception:
             logger.debug("Intent shadow hook failed (non-fatal)", exc_info=True)
 
@@ -3907,6 +3910,16 @@ class AgentCore:
                         # by name; ungrounded, both minds made the facts up.
                         _is_personal = False
                         logger.info("KnowledgeRouter: chat by intent, but a question about the world: grounding")
+                if _is_personal and _intent_reading is not None and intent_shadow.routes_web():
+                    # d3px: read by meaning as a question about the world.
+                    try:
+                        _reading = _intent_reading.wait(timeout=1.0)
+                        if intent_shadow.about_the_world(_reading):
+                            _is_personal = False
+                            logger.info("KnowledgeRouter: chat by intent, but read as %s (sim=%s): grounding",
+                                        _reading["label"], _reading.get("embed_sim"))
+                    except Exception:
+                        logger.debug("intent world check failed", exc_info=True)
                 if _is_personal and len((user_input or "").split()) >= 4:
                     # oeql: classed as chat, but it's about something she
                     # studied ("Is it misconduct to modify another engineer's
@@ -4027,12 +4040,31 @@ class AgentCore:
                             logger.info("KnowledgeRouter: no web — their own world (kb=%s)", knowledge_base_name)
                     except Exception:
                         logger.debug("own-world check failed", exc_info=True)
+                    # d3px: read by meaning, not about the world ("Exactly!
+                    # Well said! :)", "What's in your Operational wing?"):
+                    # her memory and documents are searched, the web isn't.
+                    # A letter count is answered by her own working.
+                    _not_the_webs = False
+                    try:
+                        from gaia_core.cognition import intent_shadow
+                        from gaia_core.cognition.letter_count import letter_question
+                        if letter_question(user_input or ""):
+                            _not_the_webs = True
+                            logger.info("KnowledgeRouter: no web — a letter count, worked out by her")
+                        elif _intent_reading is not None and intent_shadow.routes_web():
+                            _reading = _intent_reading.wait(timeout=1.0)
+                            if intent_shadow.web_not_needed(_reading, user_input or ""):
+                                _not_the_webs = True
+                                logger.info("KnowledgeRouter: no web — read as %s (rule=%s, sim=%s)",
+                                            _reading["label"], _reading.get("rule"), _reading.get("embed_sim"))
+                    except Exception:
+                        logger.debug("intent web check failed", exc_info=True)
                     logger.info("KnowledgeRouter: calling ground_query for '%s' (intent=%s)", user_input[:50], plan.intent if plan else "?")
                     _grounding_ctx = ground_query(
                         query=user_input,
                         intent=plan.intent if plan else "other",
                         # gwrg: a third search of the same question added nothing
-                        skip_web=_web_pre_executed or _theirs_not_the_webs,
+                        skip_web=_web_pre_executed or _theirs_not_the_webs or _not_the_webs,
                     )
                 outcome_ledger.record_lookup(
                     session_id, packet.header.packet_id,

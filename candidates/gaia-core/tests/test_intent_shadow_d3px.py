@@ -68,3 +68,39 @@ def test_a_turn_is_logged_off_thread_and_background_turns_are_not(tmp_path, monk
     rows = [json.loads(l) for l in log.read_text().splitlines()]
     assert len(rows) == 1 and rows[0]["session_id"] == "s1" and rows[0]["label"] == "chat"
     assert rows[0]["prev_user"] == "hi"
+
+
+# Routing the web by the reading (d3px, 2026-11-27).
+
+def test_a_confident_no_web_reading_skips_the_web():
+    assert sh.web_not_needed({"label": "chat", "rule": None, "embed_sim": 0.9}, "Exactly! Well said! :)")
+    assert sh.web_not_needed({"label": "self", "rule": "self", "embed_sim": 0.2}, "What do you think of your constitution?")
+
+
+def test_a_weak_reading_or_a_question_about_the_world_keeps_the_web():
+    assert sh.web_not_needed({"label": "chat", "rule": None, "embed_sim": 0.47}, "Haha, you nailed that one")
+    assert not sh.web_not_needed({"label": "chat", "rule": None, "embed_sim": 0.38}, "hmm ok")
+    assert not sh.web_not_needed({"label": "self", "rule": None, "embed_sim": 0.5}, "How does it work?")
+    assert not sh.web_not_needed({"label": "fact", "rule": None, "embed_sim": 0.99}, "Capital of France?")
+    assert not sh.web_not_needed(None, "Hello")
+    # read as chat, but it names something in the world
+    assert not sh.web_not_needed({"label": "chat", "rule": None, "embed_sim": 0.9},
+                                 "Who was the first president of the United States?")
+
+
+def test_the_reading_reaches_the_caller(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    pool = type("Pool", (), {"get_embed_model": lambda self, **k: Embed()})()
+    got = sh.observe("Good evening", [], "s1", "web", pool).wait(timeout=5)
+    assert got and got["label"] == "chat"
+    assert sh.observe("a seed", [], "s2", "heartbeat", pool).wait(timeout=0.1) is None
+    none_pool = type("Pool", (), {"get_embed_model": lambda self, **k: None})()
+    assert sh.observe("Good evening", [], "s3", "web", none_pool).wait(timeout=5) is None
+
+
+def test_a_world_question_read_as_chat_by_intent_is_grounded():
+    assert sh.about_the_world({"label": "fact", "rule": None, "embed_sim": 0.42})
+    assert sh.about_the_world({"label": "lookup", "rule": None, "embed_sim": 0.8})
+    assert not sh.about_the_world({"label": "fact", "rule": None, "embed_sim": 0.3})
+    assert not sh.about_the_world({"label": "chat", "rule": None, "embed_sim": 0.9})
+    assert not sh.about_the_world(None)

@@ -1,4 +1,4 @@
-"""What the person wants, read by meaning — logged, not acted on (d3px).
+"""What the person wants, read by meaning (d3px).
 
 Keywords sent "how many containers run your architecture?" to a four-phase
 planning pipeline and every general-knowledge question to small talk. On 166
@@ -7,9 +7,17 @@ label a message, answered it instead (25%); the embedding model's nearest
 labeled examples 63%; a rule when one fires (33/35 right), the embedding
 otherwise, 73%.
 
-Shadow mode: on every turn the combined reading is written beside what
-routing did, so disagreements can be read and labeled before anything
-routes by it. Runs off the turn's thread; a failure costs nothing.
+On every turn the combined reading is written beside what routing did
+(shadow log), off the turn's thread; a failure costs nothing.
+
+It routes one thing: whether a turn searches the web (web_not_needed).
+On 847 labeled real messages (2026-11-27; group chat included, so the
+12-way reading is 57%), with a rule's reading or an embedding reading at
+similarity >= 0.6 (chat 0.45): of the turns where the web had run, it
+would have stopped 23 of 46 searches made for chat, her self, her state,
+a told fact, something to compose, a recall or a tool, and 1 of 29 made
+for a question about the world ("can you explain haikus to me?"). Her own
+memory and documents are still searched either way.
 
 The labeled examples are private conversations and live outside git, in
 /shared/evals/intent_d3px/labeled.json. Without them, nothing is logged.
@@ -33,6 +41,16 @@ _KEYWORD_LABELS = {"recitation": "recite", "read_file": "tool", "write_file": "t
                    "list_files": "tool", "list_tree": "tool", "list_tools": "tool", "shell": "tool",
                    "correction": "dispute"}
 _SKIP_SOURCES = {"heartbeat", "initiative", "sleep", "system"}
+
+# Readings that never need the web, and how close the nearest labeled
+# example must be for the embedding's reading to count (a rule's always does).
+# Chat lower: short social lines sit far from every example ("Haha, you
+# nailed that one" 0.47) and chat readings stay precise there (847 labels:
+# above 0.45, 4 of ~115 needed the web, each a request to explain settled
+# science; below 0.4 came "What's a good way to cook rice?").
+NO_WEB = frozenset({"chat", "self", "state", "tell", "create", "recall", "tool"})
+WEB_FLOOR = float(os.environ.get("INTENT_WEB_FLOOR", "0.6"))
+WEB_FLOOR_BY_LABEL = {"chat": float(os.environ.get("INTENT_WEB_FLOOR_CHAT", "0.45"))}
 
 _lock = threading.Lock()
 _examples: Optional[list] = None
@@ -107,14 +125,66 @@ def read(text: str, history: list, embed_model) -> Optional[dict]:
     return {"rule": rule, "embed": emb, "embed_sim": sim, "label": rule or emb}
 
 
-def observe(text: str, history: List[dict], session_id: str, source: str, model_pool) -> None:
-    """Log the reading of this turn in the background."""
+class Reading:
+    """This turn's reading, filled in by a background thread."""
+
+    def __init__(self):
+        self._done = threading.Event()
+        self.value: Optional[dict] = None
+
+    def _set(self, value: Optional[dict]) -> None:
+        self.value = value
+        self._done.set()
+
+    def wait(self, timeout: float) -> Optional[dict]:
+        self._done.wait(timeout)
+        return self.value
+
+
+def routes_web() -> bool:
+    return os.environ.get("INTENT_ROUTES_WEB", "1").lower() in ("1", "true", "yes", "on")
+
+
+def web_not_needed(reading: Optional[dict], text: str) -> bool:
+    """True when the reading says, confidently, that this turn is not a
+    question about the world, and no rule says it names one. No reading (no
+    examples, no embedding model, too slow): False, routing as before."""
+    if not reading or reading.get("label") not in NO_WEB:
+        return False
+    floor = WEB_FLOOR_BY_LABEL.get(reading["label"], WEB_FLOOR)
+    if not (reading.get("rule") or float(reading.get("embed_sim") or 0) >= floor):
+        return False
+    from gaia_core.cognition.nlu.intent_detection import is_world_question, is_worked_problem
+    return not (is_world_question(text or "") or is_worked_problem(text or ""))
+
+
+# The other direction: a question about the world that the chitchat gate
+# would leave ungrounded ("What is the boiling point of water at sea
+# level?" read as chat by intent, as fact here at 0.42). Fact/lookup
+# readings at >= 0.4 were about the world 103 of 118 times (847 labels);
+# a wrong one costs a search, a missed one an answer from memory alone.
+ABOUT_THE_WORLD = frozenset({"fact", "lookup"})
+WORLD_FLOOR = float(os.environ.get("INTENT_WORLD_FLOOR", "0.4"))
+
+
+def about_the_world(reading: Optional[dict]) -> bool:
+    """True when the embedding reads this turn as a question about the world."""
+    return bool(reading) and not reading.get("rule") and reading.get("label") in ABOUT_THE_WORLD \
+        and float(reading.get("embed_sim") or 0) >= WORLD_FLOOR
+
+
+def observe(text: str, history: List[dict], session_id: str, source: str, model_pool) -> Reading:
+    """Read this turn in the background and log it. The returned Reading
+    is filled in when done (value stays None if it can't be read)."""
+    out = Reading()
     if not enabled() or not (text or "").strip() or (source or "") in _SKIP_SOURCES:
-        return
+        out._set(None)
+        return out
     prev = [h for h in history or [] if isinstance(h, dict) and h.get("role") in ("user", "assistant")][-2:]
     ts = time.time()
 
     def _run():
+        got = None
         try:
             embed = model_pool.get_embed_model(timeout=0, lazy_load=True)
             if embed is None:
@@ -125,9 +195,13 @@ def observe(text: str, history: List[dict], session_id: str, source: str, model_
                         "prev_user": next((h.get("content", "")[:200] for h in reversed(prev) if h.get("role") == "user"), ""),
                         **got, "ms": round((time.time() - ts) * 1000)})
         except Exception:
+            got = None
             logger.debug("Intent shadow failed (non-fatal)", exc_info=True)
+        finally:
+            out._set(got)
 
     threading.Thread(target=_run, name="intent-shadow", daemon=True).start()
+    return out
 
 
 def _write(entry: dict) -> None:

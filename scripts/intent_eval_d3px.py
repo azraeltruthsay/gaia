@@ -87,7 +87,7 @@ def by_rules(rows):
     return [one(x) for x in rows]
 
 
-def by_embedding(rows, model="/models/all-MiniLM-L6-v2", k=3):
+def by_embedding(rows, model="/models/all-MiniLM-L6-v2", k=3, with_sim=False):
     """Nearest labeled neighbours, holding out the message's whole session:
     the same request asked twice in one chat would otherwise vouch for itself."""
     import numpy as np
@@ -104,8 +104,39 @@ def by_embedding(rows, model="/models/all-MiniLM-L6-v2", k=3):
         votes = collections.Counter()
         for j in np.argsort(-s)[:k]:
             votes[rows[j]["label"]] += float(s[j])
-        got.append(votes.most_common(1)[0][0])
+        label = votes.most_common(1)[0][0]
+        got.append((label, float(s.max())) if with_sim else label)
     return got
+
+
+# The web is for questions about the world; these never need it (her own
+# memory and documents are still searched).
+NO_WEB = {"chat", "self", "state", "tell", "create", "recall", "tool"}
+
+
+def by_route(rows):
+    """Would skipping the web on the hybrid's no-web readings leave a
+    question about the world ungrounded? Sweeps the embedding's similarity
+    floor; a rule's reading is taken as it is."""
+    from gaia_core.cognition.nlu.intent_detection import is_world_question, is_worked_problem
+    r = by_rules(rows)
+    e = by_embedding(rows, with_sim=True)
+    world = [is_world_question(x["text"]) or is_worked_problem(x["text"]) for x in rows]
+    for floor in (0.0, 0.3, 0.4, 0.5, 0.6, 0.7):
+        skip = []
+        for g, (h, sim), w in zip(r, e, world):
+            fired = g != "chat"
+            label = g if fired else h
+            skip.append(label in NO_WEB and (fired or sim >= floor) and not w)
+        need = [x["label"] not in NO_WEB for x in rows]
+        wrong = [x for x, s, n in zip(rows, skip, need) if s and n]
+        saved = sum(s and not n for s, n in zip(skip, need))
+        print(f"  floor {floor:.1f}: web skipped on {saved}/{sum(not n for n in need)} that don't need it; "
+              f"wrongly on {len(wrong)}/{sum(need)} that do")
+        if floor == 0.5:
+            for x in wrong:
+                print(f"      [{x['label']}] {' '.join(x['text'].split())[:110]}")
+    return [g if g != "chat" else h for g, (h, _) in zip(r, e)]
 
 
 def by_core(rows, url, plain=False):
@@ -130,7 +161,7 @@ def by_core(rows, url, plain=False):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("ways", nargs="+", choices=["rules", "embed", "core", "hybrid"])
+    ap.add_argument("ways", nargs="+", choices=["rules", "embed", "core", "hybrid", "route"])
     ap.add_argument("--data", default=DATA)
     ap.add_argument("--url", default="http://gaia-core:8092/v1/chat/completions")
     ap.add_argument("--plain", action="store_true", help="send no chat_template_kwargs")
@@ -147,7 +178,7 @@ if __name__ == "__main__":
             print(f"  rules fired on {sum(fired)}, right on {right}")
             got = [g if f else h for g, h, f in zip(r, e, fired)]
         else:
-            got = {"rules": lambda: by_rules(rows), "embed": lambda: by_embedding(rows),
+            got = {"rules": lambda: by_rules(rows), "embed": lambda: by_embedding(rows), "route": lambda: by_route(rows),
                    "core": lambda: by_core(rows, a.url, a.plain)}[way]()
         done[way] = got
         report(way, rows, got)
