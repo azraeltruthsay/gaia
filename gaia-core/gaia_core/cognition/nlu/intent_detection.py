@@ -708,11 +708,18 @@ def _keyword_intent_classify(text: str, probe_context: str = "") -> str:
         "how would you implement", "what files need to change",
         "plan for adding", "what changes are needed",
         "step by step implementation", "design a feature",
-        "plan to add", "plan for implementing", "blueprint for",
+        "plan to add", "plan for implementing",
     ]
     # "architect" the verb, not "architecture": a question about her
-    # architecture isn't a request for a plan (2026-11-05).
-    if any(p in lowered for p in planning_patterns) or re.search(r"\barchitect\b", lowered):
+    # architecture isn't a request for a plan (2026-11-05). Nor the noun:
+    # "I'm Azrael, your architect" was planning, and so was "open your
+    # blueprint for the doctor" (2026-11-27, d3px: on 847 real messages the
+    # planning intent fired 6 times, all wrong; it brings thinking, 4096
+    # tokens and "aim for 500+ words" with it).
+    if (any(p in lowered for p in planning_patterns)
+            or re.search(r"\barchitect(?:ing)?\s+(?:a|an|the|this|that|it|my|our|your|me)\b", lowered)
+            and not re.search(r"\b(?:your|my|the|our|his|her|their|an?)\s+(?:\w+\s+){0,3}architect\b", lowered)
+            or re.search(r"\b(?:write|draft|create|make|sketch|design|give me)\s+(?:me\s+)?(?:a\s+)?blueprint for\b", lowered)):
         return "planning"
     # Also catch "plan" as first verb with architecture-scale nouns
     if first_word == "plan" or (first_word in {"create", "design", "build"} and "plan" in lowered):
