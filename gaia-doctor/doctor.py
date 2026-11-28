@@ -1158,20 +1158,33 @@ def _execute_self_deploy(path: Path, manifest: dict) -> None:
         _self_deploy_running = False
 
 
+# Shared code a service mounts live (docker-compose*.yml): a change there is
+# a change to the service. A gaia-common edit went unloaded until a manual
+# restart (2026-11-27). gaia-orchestrator bakes its copy in, so it isn't here.
+SERVICE_SHARED_DIRS = {
+    **{svc: [GAIA_PROJECT_ROOT / "gaia-common"]
+       for svc in ("gaia-core", "gaia-web", "gaia-mcp", "gaia-study", "gaia-study-candidate")},
+    **{svc: [GAIA_PROJECT_ROOT / "candidates" / "gaia-common"]
+       for svc in ("gaia-core-candidate", "gaia-web-candidate", "gaia-mcp-candidate")},
+}
+
+
 def _get_service_mtime(name: str) -> float:
-    """Get the maximum mtime of all .py files in a service directory."""
+    """Get the maximum mtime of all .py files in a service directory and the
+    shared code it mounts."""
     code_dir = SERVICE_CODE_DIRS.get(name)
     if not code_dir or not code_dir.exists():
         return 0.0
-    
+
     max_mtime = 0.0
-    try:
-        for p in code_dir.rglob("*.py"):
-            mtime = p.stat().st_mtime
-            if mtime > max_mtime:
-                max_mtime = mtime
-    except Exception:
-        pass
+    for d in [code_dir, *SERVICE_SHARED_DIRS.get(name, [])]:
+        try:
+            for p in d.rglob("*.py"):
+                mtime = p.stat().st_mtime
+                if mtime > max_mtime:
+                    max_mtime = mtime
+        except Exception:
+            pass
     return max_mtime
 
 
