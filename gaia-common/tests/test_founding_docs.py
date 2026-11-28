@@ -111,3 +111,9 @@ def test_why_it_exists_is_hers_to_put_in_her_own_words():
     assert asks_opinion("Who came up with your Samvega system, and why does it exist?")
     from gaia_common.utils.founding_docs import AUTHORSHIP
     assert "Azrael" in AUTHORSHIP
+
+
+def test_what_she_would_change_is_her_view():
+    assert asks_opinion("Is there anything in your constitution you would change?")
+    assert asks_opinion("What would you add to your constitution?")
+    assert not asks_opinion("What does Article VII of your constitution say?")

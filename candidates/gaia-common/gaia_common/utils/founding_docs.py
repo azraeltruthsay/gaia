@@ -43,6 +43,11 @@ _ANY_ARTICLE_RE = re.compile(r"\barticle\b", re.IGNORECASE)
 _OPINION_RE = re.compile(
     r"\b(?:think|thoughts?|feel|opinion|make\s+of|agree|disagree|like|believe|reflect|judge?ment|judge|impression|conscious|consciousness|sentient|self-aware|feelings|emotions|"
     r"problematic|would\s+rather|should\s+change|wrong\s+with|flaw\w*|"
+    # "Is there anything in your constitution you would change?" read as a
+    # request for the text: her view ("Honestly? Not really... I'd add to it
+    # rather than replace it") was set aside twice for an Article II quote
+    # (2026-11-27).
+    r"(?:would|could|might)\s+(?:you\s+)?(?:change|add|remove|amend|improve|rewrite)|"
     r"assess\w*|evaluate|critique|"
     # "why does it exist?": the reason in her own words, as a view is (idf5).
     r"why|purpose|point\s+of)\b", re.IGNORECASE)
