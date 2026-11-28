@@ -213,9 +213,6 @@ knowledge/system_reference/AS_BUILT_LATEST.md
 knowledge/creative_writing/
 knowledge/knowledge/creative_writing/
 
-# --- Logic that handles instance-specific emotional state logs ---
-candidates/gaia-core/gaia_core/cognition/samvega.py
-gaia-core/gaia_core/cognition/samvega.py
 # --- Dev Journal (instance-specific reflections) ---
 knowledge/Dev_Notebook/
 # --- Other potentially personal files ---

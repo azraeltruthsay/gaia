@@ -72,8 +72,9 @@ def prepare() -> None:
                  and (f.rsplit("/", 1)[-1].startswith("test_") or "/tests/" in f)]
         sources = [f for f in files if f.startswith(("candidates/gaia-core/gaia_core/", "candidates/gaia-common/gaia_common/"))
                    and f.endswith(".py") and f not in tests]
-        # Source modules git keeps out (samvega.py, "instance-specific") aren't in
-        # a worktree; without them gaia_core.cognition doesn't import. Today's copy.
+        # Source modules git kept out aren't in a worktree, and without them
+        # gaia_core.cognition doesn't import: samvega.py was ignored until
+        # 2026-11-27 (dvcv), so commits before that still need today's copy.
         ignored = [f for f in sh("git", "-C", str(REPO), "ls-files", "--others", "--ignored", "--exclude-standard",
                                  "candidates/gaia-core/gaia_core", "candidates/gaia-common/gaia_common").stdout.split()
                    if f.endswith(".py") and "__pycache__" not in f]
