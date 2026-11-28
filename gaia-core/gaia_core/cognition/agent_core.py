@@ -2764,6 +2764,24 @@ class AgentCore:
                 packet.content.data_fields.append(DataField(
                     key='letter_working', value=_letter_working, type='string', source='letter_count'))
 
+            # d3px: a question about herself is answered from her founding
+            # documents, her constitution first (Azrael, 2026-11-27). Both
+            # minds read it as answered from her memory; the read began at
+            # the start of the turn and is usually done by now (~0.3 s).
+            try:
+                from gaia_core.cognition import self_grounding
+                if _intent_reading is not None and self_grounding.enabled():
+                    _minds = _intent_reading.wait_minds(timeout=1.5)
+                    if self_grounding.wanted(_minds):
+                        _embed = self.model_pool.get_embed_model(timeout=0, lazy_load=True)
+                        _self_note = self_grounding.note_for(user_input or "", _embed) if _embed is not None else ""
+                        if _self_note:
+                            packet.content.data_fields.append(DataField(
+                                key='self_grounding', value=_self_note, type='string', source='founding_docs'))
+                            logger.info("[SELF] answered from her founding documents (%d chars)", len(_self_note))
+            except Exception:
+                logger.debug("self-grounding failed (non-fatal)", exc_info=True)
+
             # Inject semantic probe result into packet (if probe found hits)
             if probe_result and probe_result.has_hits:
                 packet.content.data_fields.append(DataField(

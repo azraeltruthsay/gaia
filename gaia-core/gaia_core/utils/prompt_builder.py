@@ -385,16 +385,21 @@ def post_line(asked: str) -> str:
             f"{TOOL_CALL_CLOSE}. A note in your memory palace reaches no one.")
 
 
+# Notes that go right after the question they belong to, in this order:
+# her founding documents for a question about herself (self_grounding.py),
+# her own letter-by-letter working (letter_count.py, the position it was
+# measured in). Only in the prompt; her history keeps the person's words.
+_TURN_NOTE_KEYS = ("self_grounding", "letter_working")
+
+
 def _with_letter_working(packet: CognitionPacket, messages: List[Dict]) -> List[Dict]:
-    """Her own letter-by-letter working for a letter-counting question
-    (letter_count.py), right after the question it answers: the position it
-    was measured in. Only in the prompt; her history keeps the person's words."""
-    working = next((getattr(df, "value", "") for df in getattr(packet.content, "data_fields", []) or []
-                    if getattr(df, "key", "") == "letter_working"), "")
-    if working:
+    fields = {getattr(df, "key", ""): getattr(df, "value", "")
+              for df in getattr(packet.content, "data_fields", []) or []}
+    notes = [fields[k] for k in _TURN_NOTE_KEYS if fields.get(k)]
+    if notes:
         for i in range(len(messages) - 1, -1, -1):
             if messages[i].get("role") == "user" and isinstance(messages[i].get("content"), str):
-                messages[i] = {**messages[i], "content": f"{messages[i]['content']}\n\n{working}"}
+                messages[i] = {**messages[i], "content": "\n\n".join([messages[i]["content"], *notes])}
                 break
     return messages
 
@@ -587,7 +592,7 @@ def _assemble_from_packet(packet: CognitionPacket, task_instruction_key: str = N
     logger.debug("%s", packet)  # full packet: history, world state, conversation text
     config = Config() # Assumes a singleton or default config is acceptable
     
-    processed_data_field_keys = {"letter_working"} # Track keys already explicitly added to the prompt (letter_working: appended to the question at the end)
+    processed_data_field_keys = {"letter_working", "self_grounding"} # Track keys already explicitly added to the prompt (letter_working: appended to the question at the end)
     
     identity_description_content = ""
 

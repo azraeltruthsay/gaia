@@ -131,6 +131,19 @@ class Reading:
     def __init__(self):
         self._done = threading.Event()
         self.value: Optional[dict] = None
+        # Both minds' reading (nlu/reading.py), set after the embedding's.
+        self._minds_done = threading.Event()
+        self.minds: Optional[dict] = None
+
+    def _set_minds(self, value: Optional[dict]) -> None:
+        self.minds = value
+        self._minds_done.set()
+
+    def wait_minds(self, timeout: float) -> Optional[dict]:
+        """Both minds' combined reading (act, sources, depth, agreed, minds),
+        or None if it isn't there within `timeout`."""
+        self._minds_done.wait(timeout)
+        return self.minds
 
     def _set(self, value: Optional[dict]) -> None:
         self.value = value
@@ -179,6 +192,7 @@ def observe(text: str, history: List[dict], session_id: str, source: str, model_
     out = Reading()
     if not enabled() or not (text or "").strip() or (source or "") in _SKIP_SOURCES:
         out._set(None)
+        out._set_minds(None)
         return out
     prev = [h for h in history or [] if isinstance(h, dict) and h.get("role") in ("user", "assistant")][-2:]
     ts = time.time()
@@ -187,9 +201,7 @@ def observe(text: str, history: List[dict], session_id: str, source: str, model_
         got = None
         try:
             embed = model_pool.get_embed_model(timeout=0, lazy_load=True)
-            if embed is None:
-                return
-            got = read(text, prev, embed)
+            got = read(text, prev, embed) if embed is not None else None
             # The web gate waits on this reading: publish it before the
             # minds read (their read isn't on the turn's path yet).
             out._set(got)
@@ -198,6 +210,7 @@ def observe(text: str, history: List[dict], session_id: str, source: str, model_
             try:
                 from gaia_core.cognition.nlu.intent_service import read_message
                 r = read_message(text)
+                out._set_minds(r)
                 if r:
                     minds = {k: r[k] for k in ("act", "sources", "depth", "agreed", "minds", "ms")}
                     minds["each"] = {x["mind"]: {ax: [x[ax][0], round(x[ax][1], 3)] for ax in ("act", "source", "depth")}
@@ -214,6 +227,8 @@ def observe(text: str, history: List[dict], session_id: str, source: str, model_
         finally:
             if not out._done.is_set():
                 out._set(got)
+            if not out._minds_done.is_set():
+                out._set_minds(None)
 
     threading.Thread(target=_run, name="intent-shadow", daemon=True).start()
     return out
